@@ -25,6 +25,11 @@ if [ -z "${TURN_USERNAME:-}" ] || [ -z "${TURN_PASSWORD:-}" ]; then
   exit 1
 fi
 
+if [ -z "${TURN_URLS:-}" ]; then
+  echo "TURN_ENABLED=true requires TURN_EXTERNAL_IP or TURN_URLS so clients receive a public TURN relay address." >&2
+  exit 1
+fi
+
 if [ -n "${TURN_EXTERNAL_IP:-}" ]; then
   EXTERNAL_IP_ARG="--external-ip=$TURN_EXTERNAL_IP"
 else

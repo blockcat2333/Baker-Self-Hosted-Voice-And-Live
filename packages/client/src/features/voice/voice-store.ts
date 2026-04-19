@@ -85,9 +85,14 @@ let networkStatsInFlight = false;
 const lastInboundTotals = new Map<string, { packetsLost: number; packetsReceived: number }>();
 const lastIceRestartRequestAt = new Map<string, number>();
 const pendingIceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingVoiceConnectionIssueTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const peersWithRemoteAudio = new Set<string>();
 let lastLocalMediaReportAtMs = 0;
 let lastLocalOutboundTotals: { packetsLost: number; packetsSent: number } | null = null;
 const SELF_REPORT_INTERVAL_MS = 2_000;
+const VOICE_CONNECTING_ISSUE_DELAY_MS = 10_000;
+const VOICE_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
+const VOICE_FAILED_ISSUE_DELAY_MS = 2_000;
 
 export type VoiceStatus = 'idle' | 'requesting_mic' | 'joining' | 'reconnecting' | 'active' | 'leaving' | 'error';
 
@@ -107,6 +112,7 @@ export interface VoiceState {
   speakingUserIds: Set<string>;
   isMuted: boolean;
   error: string | null;
+  connectionIssue: string | null;
   inputVolume: number;
   playbackVolume: number;
   participantPlaybackVolume: Record<string, number>;
@@ -199,6 +205,85 @@ function syncRemoteAudioElementVolumes() {
   }
 }
 
+function clearVoiceConnectionIssueTimer(userId: string) {
+  const timer = pendingVoiceConnectionIssueTimers.get(userId);
+  if (!timer) {
+    return;
+  }
+
+  clearTimeout(timer);
+  pendingVoiceConnectionIssueTimers.delete(userId);
+}
+
+function clearAllVoiceConnectionIssueTimers() {
+  for (const timer of pendingVoiceConnectionIssueTimers.values()) {
+    clearTimeout(timer);
+  }
+  pendingVoiceConnectionIssueTimers.clear();
+}
+
+function hasOutstandingVoiceConnectionIssue() {
+  const { participants, peerNetwork } = useVoiceStore.getState();
+  const myUserId = savedMyUserId ?? useAuthStore.getState().user?.id ?? null;
+
+  return participants.some((participant) => {
+    if (participant.userId === myUserId) {
+      return false;
+    }
+
+    const connectionState = peerNetwork[participant.userId]?.connectionState;
+    if (connectionState === 'failed' || connectionState === 'disconnected') {
+      return true;
+    }
+
+    return (
+      (connectionState === 'connecting' || connectionState === 'new') &&
+      !peersWithRemoteAudio.has(participant.userId)
+    );
+  });
+}
+
+function clearVoiceConnectionIssueIfResolved() {
+  if (!hasOutstandingVoiceConnectionIssue()) {
+    useVoiceStore.setState({ connectionIssue: null });
+  }
+}
+
+function scheduleVoiceConnectionIssue(
+  userId: string,
+  delayMs: number,
+  expectedStates: RTCPeerConnectionState[],
+) {
+  clearVoiceConnectionIssueTimer(userId);
+
+  const timer = setTimeout(() => {
+    const { participants, peerNetwork, status } = useVoiceStore.getState();
+    if (status !== 'active') {
+      return;
+    }
+
+    if (!participants.some((participant) => participant.userId === userId)) {
+      return;
+    }
+
+    const connectionState = peerNetwork[userId]?.connectionState;
+    if (!connectionState || !expectedStates.includes(connectionState)) {
+      return;
+    }
+
+    if (
+      (connectionState === 'connecting' || connectionState === 'new') &&
+      peersWithRemoteAudio.has(userId)
+    ) {
+      return;
+    }
+
+    useVoiceStore.setState({ connectionIssue: 'connection_error' });
+  }, delayMs);
+
+  pendingVoiceConnectionIssueTimers.set(userId, timer);
+}
+
 function createLocalSendStream(captureStream: MediaStream, inputVolume: number): MediaStream {
   const clampedInputVolume = clampVoiceInputVolume(inputVolume);
   try {
@@ -237,6 +322,9 @@ function createManager(): WebRtcManager {
     },
     onRemoteTrack(fromUserId, track, streams) {
       if (track.kind !== 'audio') return;
+      peersWithRemoteAudio.add(fromUserId);
+      clearVoiceConnectionIssueTimer(fromUserId);
+      clearVoiceConnectionIssueIfResolved();
       let audio = remoteAudioElements.get(fromUserId);
       if (!audio) {
         audio = new Audio();
@@ -272,15 +360,28 @@ function createManager(): WebRtcManager {
       const store = useVoiceStore.getState();
       if (store.status !== 'active') return;
 
-      if (state !== 'disconnected' && state !== 'failed') {
-        if (state === 'connected') {
-          lastIceRestartRequestAt.delete(userId);
-          const timer = pendingIceRestartTimers.get(userId);
-          if (timer) {
-            clearTimeout(timer);
-            pendingIceRestartTimers.delete(userId);
-          }
+      clearVoiceConnectionIssueTimer(userId);
+
+      if (state === 'connected') {
+        lastIceRestartRequestAt.delete(userId);
+        const timer = pendingIceRestartTimers.get(userId);
+        if (timer) {
+          clearTimeout(timer);
+          pendingIceRestartTimers.delete(userId);
         }
+        clearVoiceConnectionIssueIfResolved();
+        return;
+      }
+
+      if (state === 'connecting' || state === 'new') {
+        if (!peersWithRemoteAudio.has(userId)) {
+          scheduleVoiceConnectionIssue(userId, VOICE_CONNECTING_ISSUE_DELAY_MS, ['connecting', 'new']);
+        }
+        return;
+      }
+
+      if (state !== 'disconnected' && state !== 'failed') {
+        clearVoiceConnectionIssueIfResolved();
         return;
       }
 
@@ -299,6 +400,12 @@ function createManager(): WebRtcManager {
       }, delayMs);
 
       pendingIceRestartTimers.set(userId, timer);
+
+      scheduleVoiceConnectionIssue(
+        userId,
+        state === 'failed' ? VOICE_FAILED_ISSUE_DELAY_MS : VOICE_DISCONNECTED_ISSUE_DELAY_MS,
+        [state],
+      );
     },
   });
 }
@@ -408,6 +515,8 @@ function teardown() {
   savedIceServers = [];
   savedSendRawCommand = null;
   savedSendCommandAwaitAck = null;
+  peersWithRemoteAudio.clear();
+  clearAllVoiceConnectionIssueTimers();
 }
 
 function teardownPeersForReconnect() {
@@ -428,6 +537,8 @@ function teardownPeersForReconnect() {
   savedMySessionId = null;
   savedMyUserId = null;
   savedIceServers = [];
+  peersWithRemoteAudio.clear();
+  clearAllVoiceConnectionIssueTimers();
 }
 
 function stopSpeakingDetection() {
@@ -460,6 +571,7 @@ function stopNetworkStatsPolling() {
   lastInboundTotals.clear();
   lastLocalOutboundTotals = null;
   lastLocalMediaReportAtMs = 0;
+  clearAllVoiceConnectionIssueTimers();
   for (const [, timer] of pendingIceRestartTimers) {
     clearTimeout(timer);
   }
@@ -578,6 +690,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   speakingUserIds: new Set(),
   isMuted: false,
   error: null,
+  connectionIssue: null,
   inputVolume: DEFAULT_VOICE_INPUT_VOLUME,
   playbackVolume: DEFAULT_VOICE_PLAYBACK_VOLUME,
   participantPlaybackVolume: {},
@@ -615,6 +728,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         participants: [],
         speakingUserIds: new Set(),
         error: null,
+        connectionIssue: null,
         localMediaSelfLossPct: null,
         localMediaSelfUpdatedAt: null,
         peerNetwork: {},
@@ -629,7 +743,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       }
     }
 
-    set({ status: 'requesting_mic', channelId, error: null });
+    set({ status: 'requesting_mic', channelId, connectionIssue: null, error: null });
 
     // Guard: navigator.mediaDevices is undefined in non-secure (HTTP) contexts on mobile.
     const unavailableReason = getMicUnavailableReason();
@@ -637,6 +751,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set({
         status: 'error',
         error: unavailableReason,
+        connectionIssue: null,
         channelId: null,
       });
       return;
@@ -652,6 +767,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set({
         status: 'error',
         error: isPermissionDenied ? 'mic_denied' : 'mic_denied',
+        connectionIssue: null,
         channelId: null,
       });
       return;
@@ -659,7 +775,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     localCaptureStream = stream;
     localSendStream = createLocalSendStream(stream, get().inputVolume);
 
-    set({ status: 'joining' });
+    set({ status: 'joining', connectionIssue: null });
 
     let ackData: ReturnType<typeof VoiceJoinAckDataSchema.parse>;
     try {
@@ -673,6 +789,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set({
         status: 'error',
         error: isNotConnected ? 'not_connected' : msg,
+        connectionIssue: null,
         channelId: null,
       });
       return;
@@ -718,6 +835,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       status: 'active',
       channelId,
       isMuted: false,
+      connectionIssue: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,
       participants: ackData.participants,
@@ -751,6 +869,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       channelId: null,
       error: null,
       isMuted: false,
+      connectionIssue: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,
       participants: [],
@@ -844,6 +963,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         participants: [],
         speakingUserIds: new Set(),
         error: null,
+        connectionIssue: null,
         localMediaSelfLossPct: null,
         localMediaSelfUpdatedAt: null,
         peerNetwork: {},
@@ -862,6 +982,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
             playVoiceSfx('peer_leave');
           }
           webrtcManager?.closePeer(p.userId);
+          clearVoiceConnectionIssueTimer(p.userId);
+          peersWithRemoteAudio.delete(p.userId);
           const remoteAudio = remoteAudioElements.get(p.userId);
           if (remoteAudio) {
             detachRemoteAudio(remoteAudio);
@@ -902,6 +1024,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         participantPlaybackVolume: nextParticipantPlaybackVolume,
       };
     });
+
+    clearVoiceConnectionIssueIfResolved();
   },
 
   handleVoiceMemberUpdated(data) {
@@ -998,11 +1122,14 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         }
         case 'end': {
           webrtcManager!.closePeer(fromUserId);
+          clearVoiceConnectionIssueTimer(fromUserId);
+          peersWithRemoteAudio.delete(fromUserId);
           const remoteAudio = remoteAudioElements.get(fromUserId);
           if (remoteAudio) {
             detachRemoteAudio(remoteAudio);
             remoteAudioElements.delete(fromUserId);
           }
+          clearVoiceConnectionIssueIfResolved();
           break;
         }
       }
@@ -1022,6 +1149,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         participants: [],
         speakingUserIds: new Set(),
         error: null,
+        connectionIssue: null,
         localMediaSelfLossPct: null,
         localMediaSelfUpdatedAt: null,
         peerNetwork: {},
@@ -1034,6 +1162,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set({
       status: 'reconnecting',
       error: null,
+      connectionIssue: null,
       speakingUserIds: new Set(),
       peerNetwork: {},
     });
@@ -1044,7 +1173,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     if (status !== 'reconnecting' || !channelId) return;
     if (!savedSendCommandAwaitAck || !savedSendRawCommand) return;
     if (!localSendStream) {
-      set({ status: 'error', error: 'mic_denied', channelId: null });
+      set({ status: 'error', error: 'mic_denied', connectionIssue: null, channelId: null });
       return;
     }
 
@@ -1058,6 +1187,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       set({
         status: 'error',
         error: err instanceof Error ? err.message : 'not_connected',
+        connectionIssue: null,
         channelId: null,
       });
       return;
@@ -1099,6 +1229,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       status: 'active',
       channelId,
       isMuted,
+      connectionIssue: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,
       participants: ackData.participants,
@@ -1122,6 +1253,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       channelId: null,
       error: null,
       isMuted: false,
+      connectionIssue: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,
       participants: [],
@@ -1136,6 +1268,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set({
       status: 'idle',
       error: null,
+      connectionIssue: null,
       channelId: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,

@@ -9,6 +9,7 @@ const restartIce = vi.fn();
 const closePeer = vi.fn();
 const closeAll = vi.fn();
 const getPeerIds = vi.fn((): string[] => []);
+let latestCallbacks: WebRtcManagerCallbacks | null = null;
 const { playVoiceSfx } = vi.hoisted(() => ({
   playVoiceSfx: vi.fn(),
 }));
@@ -88,7 +89,9 @@ class MockAudioContext {
 
 vi.mock('@baker/sdk', () => {
   class MockWebRtcManager {
-    constructor(_callbacks: WebRtcManagerCallbacks) {}
+    constructor(callbacks: WebRtcManagerCallbacks) {
+      latestCallbacks = callbacks;
+    }
 
     createOffer = createOffer;
     handleOffer = handleOffer;
@@ -138,6 +141,7 @@ beforeEach(() => {
   getPeerIds.mockReset();
   getPeerIds.mockReturnValue([]);
   playVoiceSfx.mockReset();
+  latestCallbacks = null;
 
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
   globalThis.AudioContext = MockAudioContext as unknown as typeof AudioContext;
@@ -166,12 +170,16 @@ beforeEach(() => {
 
   useVoiceStore.setState({
     channelId: null,
+    connectionIssue: null,
     error: null,
     inputVolume: 1,
     isMuted: false,
+    localMediaSelfLossPct: null,
+    localMediaSelfUpdatedAt: null,
     participantPlaybackVolume: {},
     participants: [],
     playbackVolume: 1,
+    peerNetwork: {},
     speakingUserIds: new Set(),
     status: 'idle',
   });
@@ -393,5 +401,37 @@ describe('voice join cues', () => {
 
     expect(playVoiceSfx).toHaveBeenCalledWith('peer_join');
     expect(createOffer).not.toHaveBeenCalled();
+  });
+});
+
+describe('voice connection issues', () => {
+  it('surfaces and clears a connection error when a peer stays failed', async () => {
+    const sendRawCommand = vi.fn();
+    const peerId = '77777777-7777-4777-8777-777777777777';
+
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [
+          { isMuted: false, sessionId, userId },
+          { isMuted: false, sessionId: peerSessionId, userId: peerId },
+        ],
+        sessionId,
+      }),
+      sendRawCommand,
+    );
+
+    expect(latestCallbacks).not.toBeNull();
+
+    latestCallbacks!.onPeerConnectionStateChange(peerId, 'failed');
+    vi.advanceTimersByTime(2_000);
+
+    expect(useVoiceStore.getState().connectionIssue).toBe('connection_error');
+
+    latestCallbacks!.onPeerConnectionStateChange(peerId, 'connected');
+
+    expect(useVoiceStore.getState().connectionIssue).toBeNull();
   });
 });

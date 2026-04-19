@@ -14,6 +14,7 @@ export function VoicePanel() {
   const { t } = useTranslation();
   const status = useVoiceStore((s) => s.status);
   const voiceError = useVoiceStore((s) => s.error);
+  const connectionIssue = useVoiceStore((s) => s.connectionIssue);
   const channelId = useVoiceStore((s) => s.channelId);
   const participants = useVoiceStore((s) => s.participants);
   const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
@@ -103,6 +104,12 @@ export function VoicePanel() {
           {isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
         </span>
       </div>
+
+      {connectionIssue ? (
+        <p className="voice-panel-warning" role="alert">
+          {t('voice.error_connection_issue')}
+        </p>
+      ) : null}
 
       <div className="voice-audio-controls">
         <label className="voice-audio-control">

@@ -422,16 +422,18 @@ export function StreamPanel() {
                       <h3 className={'stream-card-title'}>
                         {userLabel(stream.hostUserId)} | {sourceLabel(t, stream.sourceType)}
                       </h3>
-                      <p className={'stream-card-subtitle'}>
-                        {stream.status === 'starting'
-                          ? t('stream.watching_status_starting')
-                          : stream.status === 'reconnecting'
+                      <p className={stream.connectionError ? 'stream-card-subtitle stream-card-subtitle--error' : 'stream-card-subtitle'}>
+                        {stream.connectionError
+                          ? t('stream.connection_error')
+                          : stream.status === 'starting'
                             ? t('stream.watching_status_starting')
-                          : stream.status === 'stopping'
-                            ? t('stream.watching_status_stopping')
-                            : stream.status === 'ended'
-                              ? t('stream.watching_status_ended')
-                              : t('stream.watching_status_watching')}
+                            : stream.status === 'reconnecting'
+                              ? t('stream.watching_status_starting')
+                              : stream.status === 'stopping'
+                                ? t('stream.watching_status_stopping')
+                                : stream.status === 'ended'
+                                  ? t('stream.watching_status_ended')
+                                  : t('stream.watching_status_watching')}
                       </p>
                     </div>
                     <span className={'stream-pill'}>

@@ -44,7 +44,7 @@ jobs:
           images: ${{ env.DOCKERHUB_USERNAME }}/baker
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=tag
+            type=match,pattern=v(.*),group=1
             type=sha
 
       - name: Build and push

@@ -82,6 +82,7 @@ export const en = {
     error_insecure_context: 'Microphone requires a secure connection (HTTPS). Voice is not available over HTTP on mobile.',
     error_mic_denied: 'Microphone access was denied. Check your browser permissions and try again.',
     error_not_connected: 'Not connected to server. Reconnect and try again.',
+    error_connection_issue: 'Voice connection error. The peer connected, but audio could not be established. Check TURN/public relay settings and try reconnecting.',
   },
   stream: {
     streams_label: 'Streams',
@@ -159,6 +160,7 @@ export const en = {
     watching_status_watching: 'Watching in popup window.',
     watching_status_stopping: 'Closing popup viewer and ending this watch session.',
     watching_status_ended: 'The livestream ended. You can focus the popup or close this watcher.',
+    connection_error: 'Livestream connection error. Media could not be established. Check TURN/public relay settings and reconnect.',
     pill_live: 'live',
     pill_starting: 'starting',
     pill_stopping: 'stopping',
@@ -167,6 +169,8 @@ export const en = {
     viewer_meta: 'Viewer {{id}}',
     popup_title: '{{user}} — {{source}} stream',
     popup_kicker: 'Watching in popup',
+    popup_enter_fullscreen: 'Enter Fullscreen',
+    popup_exit_fullscreen: 'Exit Fullscreen',
     popup_close_viewer: 'Close Viewer',
     popup_ended_title: 'This livestream ended.',
     popup_ended_copy:

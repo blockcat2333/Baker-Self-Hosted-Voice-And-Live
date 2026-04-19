@@ -43,6 +43,8 @@ export interface OwnedPublishState {
 
 export interface WatchedStreamState {
   channelId: string;
+  connectionError: string | null;
+  connectionState: RTCPeerConnectionState | null;
   hostSessionId: string;
   hostUserId: string;
   playbackVolume: number;
@@ -135,6 +137,7 @@ interface OwnedPublishRuntime {
 
 interface WatchedStreamRuntime {
   channelId: string;
+  hasRemoteMedia: boolean;
   hostSessionId: string;
   hostUserId: string;
   iceServers: IceServer[];
@@ -156,11 +159,15 @@ const pendingWatchedIceCandidates = new Map<string, RTCIceCandidateInit[]>();
 const WATCHED_RECEIVER_SYNC_INTERVAL_MS = 500;
 const lastWatchedIceRestartRequestAt = new Map<string, number>();
 const pendingWatchedIceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingWatchedConnectionIssueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastWatchedVideoStatsSamples = new Map<string, {
   bytesReceived: number | null;
   framesDecoded: number | null;
   timestampMs: number | null;
 }>();
+const WATCHED_CONNECTING_ISSUE_DELAY_MS = 10_000;
+const WATCHED_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
+const WATCHED_FAILED_ISSUE_DELAY_MS = 2_000;
 const lastOwnedVideoStatsSample: {
   bytesSent: number | null;
   framesEncoded: number | null;
@@ -290,6 +297,82 @@ function updateWatchedStreamState(streamId: string, updater: (state: WatchedStre
       },
     };
   });
+}
+
+function clearWatchedConnectionIssueTimer(streamId: string) {
+  const timer = pendingWatchedConnectionIssueTimers.get(streamId);
+  if (!timer) {
+    return;
+  }
+
+  clearTimeout(timer);
+  pendingWatchedConnectionIssueTimers.delete(streamId);
+}
+
+function clearAllWatchedConnectionIssueTimers() {
+  for (const timer of pendingWatchedConnectionIssueTimers.values()) {
+    clearTimeout(timer);
+  }
+
+  pendingWatchedConnectionIssueTimers.clear();
+}
+
+function hasOutstandingWatchedConnectionIssue(streamId: string) {
+  const watched = useStreamStore.getState().watchedStreamsById[streamId];
+  if (!watched || watched.status === 'ended' || watched.status === 'stopping') {
+    return false;
+  }
+
+  if (watched.connectionState === 'failed' || watched.connectionState === 'disconnected') {
+    return true;
+  }
+
+  return (
+    (watched.connectionState === 'connecting' || watched.connectionState === 'new') &&
+    !watchedRuntimes.get(streamId)?.hasRemoteMedia
+  );
+}
+
+function clearWatchedConnectionIssueIfResolved(streamId: string) {
+  if (!hasOutstandingWatchedConnectionIssue(streamId)) {
+    updateWatchedStreamState(streamId, (watched) => ({
+      ...watched,
+      connectionError: null,
+    }));
+  }
+}
+
+function scheduleWatchedConnectionIssue(
+  streamId: string,
+  delayMs: number,
+  expectedStates: RTCPeerConnectionState[],
+) {
+  clearWatchedConnectionIssueTimer(streamId);
+
+  const timer = setTimeout(() => {
+    const watched = useStreamStore.getState().watchedStreamsById[streamId];
+    if (!watched || watched.status === 'ended' || watched.status === 'stopping') {
+      return;
+    }
+
+    if (!watched.connectionState || !expectedStates.includes(watched.connectionState)) {
+      return;
+    }
+
+    if (
+      (watched.connectionState === 'connecting' || watched.connectionState === 'new') &&
+      watchedRuntimes.get(streamId)?.hasRemoteMedia
+    ) {
+      return;
+    }
+
+    updateWatchedStreamState(streamId, (current) => ({
+      ...current,
+      connectionError: 'connection_error',
+    }));
+  }, delayMs);
+
+  pendingWatchedConnectionIssueTimers.set(streamId, timer);
 }
 
 function sendSignal(
@@ -425,6 +508,7 @@ function teardownWatchedRuntime(streamId: string) {
     clearTimeout(restartTimer);
     pendingWatchedIceRestartTimers.delete(streamId);
   }
+  clearWatchedConnectionIssueTimer(streamId);
   lastWatchedIceRestartRequestAt.delete(streamId);
   lastWatchedVideoStatsSamples.delete(streamId);
   pendingWatchedSignals.delete(streamId);
@@ -463,6 +547,7 @@ function teardownAllRuntimes() {
   pendingWatchedIceCandidates.clear();
   cancelledWatchRequests.clear();
   pendingWatchedSignals.clear();
+  clearAllWatchedConnectionIssueTimers();
 }
 
 function queuePendingWatchedSignal(streamId: string, data: MediaSignalRelayEventData) {
@@ -549,6 +634,7 @@ function syncWatchedRuntimeRemoteTracks(streamId: string) {
     return;
   }
 
+  runtime.hasRemoteMedia = true;
   runtime.remoteStream ??= new MediaStream();
   for (const track of receiverTracks) {
     if (!runtime.remoteStream.getTracks().some((existing) => existing.id === track.id)) {
@@ -558,8 +644,11 @@ function syncWatchedRuntimeRemoteTracks(streamId: string) {
 
   updateWatchedStreamState(streamId, (watched) => ({
     ...watched,
+    connectionError: null,
     remoteStream: runtime.remoteStream,
   }));
+  clearWatchedConnectionIssueTimer(streamId);
+  clearWatchedConnectionIssueIfResolved(streamId);
 }
 
 function createWatchedManager(streamId: string): WebRtcManager {
@@ -580,6 +669,7 @@ function createWatchedManager(streamId: string): WebRtcManager {
         return;
       }
 
+      runtime.hasRemoteMedia = true;
       runtime.remoteStream ??= new MediaStream();
       for (const incomingStream of streams) {
         for (const incomingTrack of incomingStream.getTracks()) {
@@ -595,14 +685,23 @@ function createWatchedManager(streamId: string): WebRtcManager {
 
       updateWatchedStreamState(streamId, (watched) => ({
         ...watched,
+        connectionError: null,
         remoteStream: runtime.remoteStream,
       }));
+      clearWatchedConnectionIssueTimer(streamId);
+      clearWatchedConnectionIssueIfResolved(streamId);
     },
     onPeerConnectionStateChange(fromUserId, state) {
       const runtime = watchedRuntimes.get(streamId);
       if (!runtime || runtime.hostUserId !== fromUserId) {
         return;
       }
+
+      updateWatchedStreamState(streamId, (watched) => ({
+        ...watched,
+        connectionState: state,
+      }));
+      clearWatchedConnectionIssueTimer(streamId);
 
       if (state === 'connected' || state === 'connecting') {
         syncWatchedRuntimeRemoteTracks(streamId);
@@ -612,6 +711,23 @@ function createWatchedManager(streamId: string): WebRtcManager {
           clearTimeout(timer);
           pendingWatchedIceRestartTimers.delete(streamId);
         }
+
+        if (state === 'connected') {
+          clearWatchedConnectionIssueIfResolved(streamId);
+        } else if (!runtime.hasRemoteMedia) {
+          scheduleWatchedConnectionIssue(
+            streamId,
+            WATCHED_CONNECTING_ISSUE_DELAY_MS,
+            ['connecting', 'new'],
+          );
+        }
+      }
+
+      if (state === 'new') {
+        if (!runtime.hasRemoteMedia) {
+          scheduleWatchedConnectionIssue(streamId, WATCHED_CONNECTING_ISSUE_DELAY_MS, ['connecting', 'new']);
+        }
+        return;
       }
 
       if (state === 'disconnected' || state === 'failed') {
@@ -628,15 +744,25 @@ function createWatchedManager(streamId: string): WebRtcManager {
           }, delayMs);
           pendingWatchedIceRestartTimers.set(streamId, timer);
         }
+
+        scheduleWatchedConnectionIssue(
+          streamId,
+          state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS,
+          [state],
+        );
       }
 
       if (state === 'closed' || state === 'failed') {
+        runtime.hasRemoteMedia = false;
         runtime.remoteStream = null;
         updateWatchedStreamState(streamId, (watched) => ({
           ...watched,
+          connectionError: state === 'failed' ? watched.connectionError : null,
           remoteStream: null,
         }));
       }
+
+      clearWatchedConnectionIssueIfResolved(streamId);
     },
   });
 }
@@ -752,6 +878,8 @@ function reconcileWatchedPublications(channelId: string, streamsById: Record<str
       teardownWatchedRuntime(runtime.streamId);
       updateWatchedStreamState(runtime.streamId, (watched) => ({
         ...watched,
+        connectionError: null,
+        connectionState: null,
         remoteStream: null,
         status: 'ended',
         viewers: [],
@@ -879,9 +1007,13 @@ async function processWatchedSignal(data: MediaSignalRelayEventData) {
     }
     case 'end': {
       runtime.manager.closePeer(fromUserId);
+      runtime.hasRemoteMedia = false;
+      clearWatchedConnectionIssueTimer(runtime.streamId);
       runtime.remoteStream = null;
       updateWatchedStreamState(runtime.streamId, (watched) => ({
         ...watched,
+        connectionError: null,
+        connectionState: 'closed',
         remoteStream: null,
       }));
       return;
@@ -1187,6 +1319,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         ...state.watchedStreamsById,
         [streamId]: {
           channelId,
+          connectionError: null,
+          connectionState: null,
           hostSessionId: '',
           hostUserId: '',
           playbackVolume: DEFAULT_STREAM_PLAYBACK_VOLUME,
@@ -1245,6 +1379,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     const manager = createWatchedManager(resolvedStreamId);
     watchedRuntimes.set(resolvedStreamId, {
       channelId,
+      hasRemoteMedia: false,
       hostSessionId: ackData.hostSessionId,
       hostUserId: ackData.hostUserId,
       iceServers: ackData.iceServers,
@@ -1273,6 +1408,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
       nextWatched[resolvedStreamId] = {
         channelId,
+        connectionError: null,
+        connectionState: null,
         hostSessionId: ackData.hostSessionId,
         hostUserId: ackData.hostUserId,
         playbackVolume: state.watchedStreamsById[resolvedStreamId]?.playbackVolume ?? DEFAULT_STREAM_PLAYBACK_VOLUME,
@@ -1306,6 +1443,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (watchedState) {
       updateWatchedStreamState(streamId, (watched) => ({
         ...watched,
+        connectionError: null,
         status: 'stopping',
       }));
     }
@@ -1464,6 +1602,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         }
         nextWatched[streamId] = {
           ...watched,
+          connectionError: null,
+          connectionState: null,
           remoteStream: null,
           status: 'reconnecting',
           viewers: [],

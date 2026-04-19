@@ -27,11 +27,22 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
+- Release line: `1.0.0`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
 - `blockcat233/baker` is now the only supported public deployment image
 - Standard validation loop is `pnpm typecheck`, `pnpm lint`, and `pnpm test`
+
+## Start Here If You Are New
+
+If your real goal is "I want my own small Discord-like server without learning the whole codebase first," follow this order:
+
+1. Read the [Beginner Deployment Guide](docs/beginner-deployment.md).
+2. Run the single-container command from this README.
+3. Confirm chat works.
+4. Test voice and livestream with a second browser or second user.
+5. Add HTTPS and TURN only when you move to real internet users.
 
 ## Quick Start: One Container
 
@@ -45,7 +56,7 @@ docker run -d \
   -p 3000:80 \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:latest
+  blockcat233/baker:1.0.0
 
 docker logs baker
 ```
@@ -57,11 +68,13 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
+If you want to follow the newest rolling image instead of pinning this release, replace `1.0.0` with `latest`.
+
 ### Docker Desktop Walkthrough
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:latest`
+- Image: `blockcat233/baker:1.0.0`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -115,16 +128,25 @@ docker run -d \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:latest
+  blockcat233/baker:1.0.0
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
+
+For public internet deployments, treat these as mandatory requirements, not optional tuning:
+
+- Publish `3478` and `49160-49200` for both TCP and UDP.
+- Set `TURN_EXTERNAL_IP` to the server's public IP, or explicitly set `TURN_URLS` to public TURN addresses that browsers can reach.
+- Keep `TURN_USERNAME` and `TURN_PASSWORD` configured together with the relay address.
+
+When `TURN_ENABLED=true`, Baker now fails fast at startup if it cannot determine a public TURN relay address for clients. After restarting the container, confirm the media session logs show `turnConfigured:true` before testing cross-region voice or livestream playback.
 
 ## Deployment Notes
 
 - Public deployment is intentionally documented as a single-image path only: `blockcat233/baker`
 - For browser voice, microphone, camera, and screen sharing, serve Baker over HTTPS
 - TURN is optional for small/local setups but strongly recommended for public internet, mobile, VPN, or cross-region usage
+- When TURN is enabled for public deployment, you must expose the relay ports and provide either `TURN_EXTERNAL_IP` or explicit `TURN_URLS`
 - `docker-compose.yml` remains in the repo for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment product
 
 ## Current Limits
@@ -171,6 +193,8 @@ docs/        Architecture, history, status, and decisions
 
 ## Documentation
 
+- [Beginner Deployment Guide](docs/beginner-deployment.md)
+- [Beginner Deployment Guide (Chinese)](docs/beginner-deployment.zh-CN.md)
 - [Chinese Guide / 中文说明](./README.zh-CN.md)
 - [Project Overview](docs/project-overview.md)
 - [Current Status](docs/current-status.md)

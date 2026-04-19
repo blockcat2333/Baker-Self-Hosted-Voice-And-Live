@@ -32,6 +32,11 @@ validate_turn_settings() {
     echo "TURN_ENABLED=true requires TURN_USERNAME and TURN_PASSWORD." >&2
     exit 1
   fi
+
+  if [ -z "${TURN_URLS:-}" ]; then
+    echo "TURN_ENABLED=true requires TURN_EXTERNAL_IP or TURN_URLS so clients receive a public TURN relay address." >&2
+    exit 1
+  fi
 }
 
 start_temp_postgres() {

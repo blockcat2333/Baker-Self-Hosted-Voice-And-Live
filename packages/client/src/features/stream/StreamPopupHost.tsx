@@ -28,6 +28,11 @@ import {
   subscribeToStreamPopupRegistry,
   type StreamPopupSnapshotEntry,
 } from './stream-popup-controller';
+import {
+  isPopupFullscreenActive,
+  isPopupFullscreenSupported,
+  togglePopupFullscreen,
+} from './stream-popup-fullscreen';
 
 function sourceLabel(sourceType: 'camera' | 'screen' | null) {
   if (sourceType === 'camera') {
@@ -374,6 +379,9 @@ function StreamPopupWindow({
 }) {
   const { t } = useTranslation();
   const setPlaybackVolume = useStreamStore((s) => s.setPlaybackVolume);
+  const stageRef = useRef<HTMLElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const title = `${userLabel(watchedStream.hostUserId)} • ${sourceLabel(watchedStream.sourceType)} stream`;
 
   const localizedTitle = t('stream.popup_title', {
@@ -386,6 +394,28 @@ function StreamPopupWindow({
     entry.document.title = localizedTitle;
     entry.document.body.className = 'stream-popup-body';
   }, [entry.document, localizedTitle]);
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setIsFullscreen(isPopupFullscreenActive(stageRef.current, entry.document));
+      setFullscreenSupported(isPopupFullscreenSupported(stageRef.current, entry.document));
+    };
+
+    syncFullscreenState();
+    entry.document.addEventListener('fullscreenchange', syncFullscreenState);
+
+    return () => {
+      entry.document.removeEventListener('fullscreenchange', syncFullscreenState);
+    };
+  }, [entry.document, watchedStream.status]);
+
+  async function handleToggleFullscreen() {
+    if (!stageRef.current) {
+      return;
+    }
+
+    await togglePopupFullscreen(stageRef.current, entry.document);
+  }
 
   return (
     <div className={'stream-popup-shell'}>
@@ -405,11 +435,25 @@ function StreamPopupWindow({
                 ? t('stream.pill_starting')
                 : t('stream.pill_live')}
           </span>
+          <button
+            type={'button'}
+            className={'btn-ghost stream-action-btn'}
+            onClick={() => void handleToggleFullscreen()}
+            disabled={!fullscreenSupported || watchedStream.status === 'ended'}
+          >
+            {isFullscreen ? t('stream.popup_exit_fullscreen') : t('stream.popup_enter_fullscreen')}
+          </button>
           <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={onClose}>
             {t('stream.popup_close_viewer')}
           </button>
         </div>
       </header>
+
+      {watchedStream.connectionError ? (
+        <div className={'stream-popup-warning'} role={'alert'}>
+          {t('stream.connection_error')}
+        </div>
+      ) : null}
 
       {watchedStream.status === 'ended' ? (
         <section className={'stream-popup-ended'}>
@@ -419,7 +463,7 @@ function StreamPopupWindow({
           </p>
         </section>
       ) : (
-        <section className={'stream-popup-stage'}>
+        <section ref={stageRef} className={'stream-popup-stage'}>
           <StreamPopupVideo playbackVolume={watchedStream.playbackVolume} stream={watchedStream.remoteStream} />
         </section>
       )}

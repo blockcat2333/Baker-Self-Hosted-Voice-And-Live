@@ -8,7 +8,7 @@ export default defineWorkspace([
         reportsDirectory: './coverage',
       },
       environment: 'node',
-      include: ['apps/**/*.test.ts', 'packages/**/*.test.ts'],
+      include: ['apps/**/*.test.ts', 'packages/**/*.test.ts', 'docker/**/*.test.ts'],
       name: 'workspace',
     },
   },

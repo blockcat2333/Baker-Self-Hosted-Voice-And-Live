@@ -2,7 +2,38 @@
 set -eu
 
 . /opt/baker-runtime/lib.sh
+
+preserve_env_override() {
+  var="$1"
+  eval "if [ \"\${$var+x}\" = x ]; then export BAKER_ENTRYPOINT_HAS_${var}=1; export BAKER_ENTRYPOINT_${var}=\"\${$var}\"; fi"
+}
+
+restore_env_override() {
+  var="$1"
+  eval "if [ \"\${BAKER_ENTRYPOINT_HAS_${var}:-}\" = 1 ]; then export ${var}=\"\${BAKER_ENTRYPOINT_${var}}\"; fi"
+}
+
+preserve_env_override STUN_URLS
+preserve_env_override TURN_URLS
+preserve_env_override TURN_USERNAME
+preserve_env_override TURN_PASSWORD
+preserve_env_override TURN_REALM
+preserve_env_override TURN_PORT
+preserve_env_override TURN_MIN_PORT
+preserve_env_override TURN_MAX_PORT
+preserve_env_override TURN_EXTERNAL_IP
+
 load_runtime_env
+
+restore_env_override STUN_URLS
+restore_env_override TURN_URLS
+restore_env_override TURN_USERNAME
+restore_env_override TURN_PASSWORD
+restore_env_override TURN_REALM
+restore_env_override TURN_PORT
+restore_env_override TURN_MIN_PORT
+restore_env_override TURN_MAX_PORT
+restore_env_override TURN_EXTERNAL_IP
 
 : "${NODE_ENV:=production}"
 : "${WEB_PORT:=3000}"

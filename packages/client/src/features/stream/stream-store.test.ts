@@ -498,6 +498,61 @@ describe('stream store watch startup', () => {
     expect(addIceCandidate).toHaveBeenCalledWith(hostUserId, queuedCandidate);
   });
 
+  it('surfaces and clears a watcher connection error when the host peer stays failed', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+        channelId,
+        hostSessionId,
+        hostUserId,
+        iceServers: [],
+        sessionId: viewerSessionId,
+        streamId,
+      });
+      const sendRawCommand = vi.fn();
+
+      useStreamStore.getState().handleStreamStateUpdated({
+        channelId,
+        session: {
+          hostUserId,
+          sessionId: hostSessionId,
+          sourceType: 'screen',
+          status: 'live',
+          streamId,
+        },
+        streams: [
+          {
+            channelId,
+            hostUserId,
+            sessionId: hostSessionId,
+            sourceType: 'screen',
+            status: 'live',
+            streamId,
+            viewers: [{ sessionId: viewerSessionId, userId: viewerUserId }],
+          },
+        ],
+        viewers: [{ sessionId: viewerSessionId, userId: viewerUserId }],
+      });
+
+      await useStreamStore.getState().watchStream(channelId, streamId, sendCommandAwaitAck, sendRawCommand);
+
+      expect(latestCallbacks).not.toBeNull();
+
+      latestCallbacks!.onPeerConnectionStateChange(hostUserId, 'failed');
+      vi.advanceTimersByTime(2_000);
+
+      expect(useStreamStore.getState().watchedStreamsById[streamId]?.connectionError).toBe('connection_error');
+
+      latestCallbacks!.onPeerConnectionStateChange(hostUserId, 'connected');
+
+      expect(useStreamStore.getState().watchedStreamsById[streamId]?.connectionError).toBeNull();
+    } finally {
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('summarizes owned-stream sender stats for broadcaster diagnostics', async () => {
     const sendCommandAwaitAck = vi.fn().mockResolvedValue({
       channelId,

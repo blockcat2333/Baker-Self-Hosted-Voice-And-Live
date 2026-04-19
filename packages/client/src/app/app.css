@@ -1442,6 +1442,17 @@ body {
   margin: 0;
 }
 
+.voice-panel-warning {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  border-radius: var(--radius-xs);
+  color: #fecaca;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 10px;
+}
+
 .voice-panel-dismiss-btn {
   font-size: 12px;
   padding: 5px 10px;
@@ -1573,6 +1584,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.stream-card-subtitle--error {
+  color: #fca5a5;
 }
 
 .stream-section-count {
@@ -1875,6 +1890,16 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 14px;
   padding: 16px;
+}
+
+.stream-popup-warning {
+  background: rgba(127, 29, 29, 0.4);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 12px;
+  color: #fecaca;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px 14px;
 }
 
 .stream-popup-video-frame {

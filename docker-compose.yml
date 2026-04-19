@@ -1,13 +1,44 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: baker-postgres
+  bootstrap:
+    image: '${BAKER_BOOTSTRAP_IMAGE:-ghcr.io/blockcat2333/baker-bootstrap:latest}'
+    command: ['sh', '/opt/baker-runtime/bootstrap.sh']
     environment:
-      POSTGRES_DB: '${POSTGRES_DB:-baker}'
-      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-baker}'
-      POSTGRES_USER: '${POSTGRES_USER:-baker}'
+      NODE_ENV: '${NODE_ENV:-production}'
+      WEB_PORT: '${WEB_PORT:-3000}'
+      ADMIN_HTTP_PORT: '${ADMIN_HTTP_PORT:-3001}'
+      POSTGRES_DB: '${POSTGRES_DB:-}'
+      POSTGRES_USER: '${POSTGRES_USER:-}'
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-}'
+      JWT_ACCESS_SECRET: '${JWT_ACCESS_SECRET:-}'
+      JWT_REFRESH_SECRET: '${JWT_REFRESH_SECRET:-}'
+      MEDIA_INTERNAL_SECRET: '${MEDIA_INTERNAL_SECRET:-}'
+      ADMIN_PANEL_PASSWORD: '${ADMIN_PANEL_PASSWORD:-}'
+      DESKTOP_DEV_SERVER_URL: '${DESKTOP_DEV_SERVER_URL:-http://localhost:5174}'
+      VITE_ALLOWED_HOSTS: '${VITE_ALLOWED_HOSTS:-}'
+      ALLOWED_HOSTS: '${ALLOWED_HOSTS:-}'
+      STUN_URLS: '${STUN_URLS:-stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302}'
+      TURN_URLS: '${TURN_URLS:-}'
+      TURN_USERNAME: '${TURN_USERNAME:-}'
+      TURN_PASSWORD: '${TURN_PASSWORD:-}'
+      TURN_REALM: '${TURN_REALM:-baker}'
+      TURN_PORT: '${TURN_PORT:-3478}'
+      TURN_MIN_PORT: '${TURN_MIN_PORT:-49160}'
+      TURN_MAX_PORT: '${TURN_MAX_PORT:-49200}'
+      TURN_EXTERNAL_IP: '${TURN_EXTERNAL_IP:-}'
+    restart: 'no'
+    volumes:
+      - runtime-config:/run/baker
+
+  postgres:
+    image: '${BAKER_POSTGRES_IMAGE:-ghcr.io/blockcat2333/baker-postgres:latest}'
+    container_name: baker-postgres
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    entrypoint: ['sh', '/opt/baker-runtime/postgres-entrypoint.sh']
+    command: ['postgres']
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-baker} -d ${POSTGRES_DB:-baker}']
+      test: ['CMD-SHELL', 'sh /opt/baker-runtime/postgres-healthcheck.sh']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -16,9 +47,10 @@ services:
     restart: unless-stopped
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - runtime-config:/run/baker:ro
 
   redis:
-    image: redis:7-alpine
+    image: '${BAKER_REDIS_IMAGE:-redis:7-alpine}'
     container_name: baker-redis
     command: ['redis-server', '--appendonly', 'yes']
     healthcheck:
@@ -33,95 +65,63 @@ services:
       - redis-data:/data
 
   migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: services-runtime
-    image: baker-migrate:local
+    image: '${BAKER_MIGRATE_IMAGE:-ghcr.io/blockcat2333/baker-migrate:latest}'
+    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['pnpm', '--filter', '@baker/db', 'db:push']
     depends_on:
+      bootstrap:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: 'postgres://${POSTGRES_USER:-baker}:${POSTGRES_PASSWORD:-baker}@postgres:5432/${POSTGRES_DB:-baker}'
     restart: 'no'
+    volumes:
+      - runtime-config:/run/baker:ro
 
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: services-runtime
-    image: baker-api:local
+    image: '${BAKER_API_IMAGE:-ghcr.io/blockcat2333/baker-api:latest}'
+    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/api/dist/index.js']
     depends_on:
+      bootstrap:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    environment:
-      NODE_ENV: production
-      WEB_PORT: '${WEB_PORT:-80}'
-      API_HOST: 0.0.0.0
-      API_PORT: 3001
-      GATEWAY_HOST: 0.0.0.0
-      GATEWAY_PORT: 3002
-      MEDIA_HOST: 0.0.0.0
-      MEDIA_PORT: 3003
-      DATABASE_URL: 'postgres://${POSTGRES_USER:-baker}:${POSTGRES_PASSWORD:-baker}@postgres:5432/${POSTGRES_DB:-baker}'
-      REDIS_URL: 'redis://redis:6379'
-      JWT_ACCESS_SECRET: '${JWT_ACCESS_SECRET:-replace-me-for-local-access}'
-      JWT_REFRESH_SECRET: '${JWT_REFRESH_SECRET:-replace-me-for-local-refresh}'
-      ADMIN_PANEL_PASSWORD: '${ADMIN_PANEL_PASSWORD:-admin}'
-      MEDIA_INTERNAL_SECRET: '${MEDIA_INTERNAL_SECRET:-replace-me-for-local-media-internal-secret}'
-      STUN_URLS: '${STUN_URLS:-stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302}'
-      TURN_URLS: '${TURN_URLS:-}'
-      TURN_USERNAME: '${TURN_USERNAME:-}'
-      TURN_PASSWORD: '${TURN_PASSWORD:-}'
-      DESKTOP_DEV_SERVER_URL: '${DESKTOP_DEV_SERVER_URL:-http://localhost:5174}'
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3001/health >/dev/null 2>&1']
       interval: 10s
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    volumes:
+      - runtime-config:/run/baker:ro
 
   media:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: services-runtime
-    image: baker-media:local
+    image: '${BAKER_MEDIA_IMAGE:-ghcr.io/blockcat2333/baker-media:latest}'
+    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/media/dist/index.js']
-    environment:
-      NODE_ENV: production
-      ADMIN_PANEL_PASSWORD: '${ADMIN_PANEL_PASSWORD:-admin}'
-      JWT_ACCESS_SECRET: '${JWT_ACCESS_SECRET:-replace-me-for-local-access}'
-      JWT_REFRESH_SECRET: '${JWT_REFRESH_SECRET:-replace-me-for-local-refresh}'
-      MEDIA_HOST: 0.0.0.0
-      MEDIA_PORT: 3003
-      MEDIA_INTERNAL_SECRET: '${MEDIA_INTERNAL_SECRET:-replace-me-for-local-media-internal-secret}'
-      STUN_URLS: '${STUN_URLS:-stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302}'
-      TURN_URLS: '${TURN_URLS:-}'
-      TURN_USERNAME: '${TURN_USERNAME:-}'
-      TURN_PASSWORD: '${TURN_PASSWORD:-}'
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3003/health >/dev/null 2>&1']
       interval: 10s
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    volumes:
+      - runtime-config:/run/baker:ro
 
   gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: services-runtime
-    image: baker-gateway:local
+    image: '${BAKER_GATEWAY_IMAGE:-ghcr.io/blockcat2333/baker-gateway:latest}'
+    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/gateway/dist/index.js']
     depends_on:
+      bootstrap:
+        condition: service_completed_successfully
       migrate:
         condition: service_completed_successfully
       postgres:
@@ -130,64 +130,40 @@ services:
         condition: service_healthy
       media:
         condition: service_healthy
-    environment:
-      NODE_ENV: production
-      ADMIN_PANEL_PASSWORD: '${ADMIN_PANEL_PASSWORD:-admin}'
-      API_HOST: 0.0.0.0
-      API_PORT: 3001
-      GATEWAY_HOST: 0.0.0.0
-      GATEWAY_PORT: 3002
-      MEDIA_HOST: 0.0.0.0
-      MEDIA_PORT: 3003
-      MEDIA_INTERNAL_URL: 'http://media:3003'
-      DATABASE_URL: 'postgres://${POSTGRES_USER:-baker}:${POSTGRES_PASSWORD:-baker}@postgres:5432/${POSTGRES_DB:-baker}'
-      REDIS_URL: 'redis://redis:6379'
-      JWT_ACCESS_SECRET: '${JWT_ACCESS_SECRET:-replace-me-for-local-access}'
-      JWT_REFRESH_SECRET: '${JWT_REFRESH_SECRET:-replace-me-for-local-refresh}'
-      MEDIA_INTERNAL_SECRET: '${MEDIA_INTERNAL_SECRET:-replace-me-for-local-media-internal-secret}'
-      STUN_URLS: '${STUN_URLS:-stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302}'
-      TURN_URLS: '${TURN_URLS:-}'
-      TURN_USERNAME: '${TURN_USERNAME:-}'
-      TURN_PASSWORD: '${TURN_PASSWORD:-}'
     healthcheck:
       test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3002/health >/dev/null 2>&1']
       interval: 10s
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    volumes:
+      - runtime-config:/run/baker:ro
 
   proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: proxy-runtime
-    image: baker-proxy:local
+    image: '${BAKER_PROXY_IMAGE:-ghcr.io/blockcat2333/baker-proxy:latest}'
     depends_on:
       api:
         condition: service_healthy
       gateway:
         condition: service_healthy
     ports:
-      - '${WEB_PORT:-80}:80'
-      - '${ADMIN_HTTP_PORT:-8080}:8080'
+      - '${WEB_PORT:-3000}:80'
+      - '${ADMIN_HTTP_PORT:-3001}:8080'
     restart: unless-stopped
 
   # Optional TURN relay for WebRTC reliability across NAT/VPN/cross-region networks.
   # Enable by setting TURN_URLS/TURN_USERNAME/TURN_PASSWORD and starting via:
   #   docker compose --profile turn up -d turn
-  # or `scripts/dev-up.ps1 -EnableTurn`.
   turn:
     image: coturn/coturn:4.6.2
     container_name: baker-turn
     profiles: ['turn']
     restart: unless-stopped
-    # Expose TURN and a small relay port range (both UDP+TCP).
     ports:
       - '${TURN_PORT:-3478}:${TURN_PORT:-3478}/tcp'
       - '${TURN_PORT:-3478}:${TURN_PORT:-3478}/udp'
       - '${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/tcp'
       - '${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}:${TURN_MIN_PORT:-49160}-${TURN_MAX_PORT:-49200}/udp'
-    # Compose reads env vars from the repo `.env` by default (if present), and also from the current shell env.
     environment:
       TURN_USERNAME: '${TURN_USERNAME:-}'
       TURN_PASSWORD: '${TURN_PASSWORD:-}'
@@ -200,7 +176,7 @@ services:
     command:
       - |
         if [ -z "$$TURN_USERNAME" ] || [ -z "$$TURN_PASSWORD" ]; then
-          echo "TURN_USERNAME/TURN_PASSWORD must be set (see .env.example). Refusing to start an open TURN relay."
+          echo "TURN_USERNAME/TURN_PASSWORD must be set (see .env.selfhost.example). Refusing to start an open TURN relay."
           exit 1
         fi
         if [ -n "$$TURN_EXTERNAL_IP" ]; then
@@ -220,3 +196,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  runtime-config:

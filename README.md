@@ -65,41 +65,53 @@ docs/        Architecture, history, status, and decisions
 
 ## Docker Deploy / Docker 部署
 
-The fastest way to run Baker as a private self-hosted service is Docker Compose.
+The fastest way to run Baker as a private self-hosted service is Docker Compose with prebuilt images.
 
-Baker 当前最简单的私有部署方式是 Docker Compose。
+Baker 当前最简单的私有部署方式是使用预构建镜像的 Docker Compose。
 
-1. Copy the self-hosted env template:
-   `cp .env.selfhost.example .env`
-   PowerShell: `Copy-Item .env.selfhost.example .env`
-2. Change these values before first boot:
-   `POSTGRES_PASSWORD`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `MEDIA_INTERNAL_SECRET`, `ADMIN_PANEL_PASSWORD`
-3. Start the full stack:
-   `docker compose up -d --build`
-4. Open:
-   - Web: `http://localhost`
-   - Admin: `http://localhost:8080`
+1. Start the full stack:
+   `docker compose up -d`
+2. Read the first-run bootstrap output once:
+   `docker compose logs bootstrap`
+3. Open:
+   - Web: `http://localhost:3000`
+   - Admin: `http://localhost:3001`
+4. Use the admin password printed by `bootstrap` for the control panel.
 5. Optional TURN relay for internet/NAT-heavy voice or livestream usage:
-   `docker compose --profile turn up -d --build`
+   `docker compose --profile turn up -d`
 
-1. 复制自托管环境模板：
-   `cp .env.selfhost.example .env`
-   PowerShell 可使用：`Copy-Item .env.selfhost.example .env`
-2. 首次启动前至少要修改以下值：
-   `POSTGRES_PASSWORD`、`JWT_ACCESS_SECRET`、`JWT_REFRESH_SECRET`、`MEDIA_INTERNAL_SECRET`、`ADMIN_PANEL_PASSWORD`
-3. 启动完整栈：
-   `docker compose up -d --build`
-4. 打开：
-   - Web：`http://localhost`
-   - 管理后台：`http://localhost:8080`
+1. 启动完整栈：
+   `docker compose up -d`
+2. 第一次启动后查看一次 bootstrap 输出：
+   `docker compose logs bootstrap`
+3. 打开：
+   - Web：`http://localhost:3000`
+   - 管理后台：`http://localhost:3001`
+4. 使用 `bootstrap` 打印出来的管理后台密码登录。
 5. 如果是公网 / NAT 较复杂的语音或直播场景，可选启用 TURN：
-   `docker compose --profile turn up -d --build`
+   `docker compose --profile turn up -d`
 
 Notes / 说明:
 
+- The default `docker-compose.yml` now pulls published runtime images instead of building locally, so first-time startup is much faster and simpler.
+- Those images are now self-contained: `bootstrap`, Postgres, migration, API, gateway, media, and proxy no longer depend on bind-mounted runtime scripts from the repo.
+- The `bootstrap` service auto-generates strong runtime secrets on first start and persists them in a Docker volume.
+- The default host ports are `3000` for Web and `3001` for Admin to avoid common `:80` bind conflicts on Docker Desktop / local machines.
+- If you want fixed ports, fixed secrets, or different image registries, copy `.env.selfhost.example` to `.env` before the first startup.
+- The publish workflow targets GHCR by default and can also mirror to Docker Hub, which is the path that makes Baker images searchable directly inside Docker Desktop.
+- To build from source locally instead of pulling published images:
+  `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`
 - The Compose stack includes Postgres, Redis, schema migration, API, gateway, media boundary service, and a Caddy reverse proxy serving both the user web app and the admin panel.
 - By default, only the web/admin ports are exposed publicly; Postgres and Redis bind to `127.0.0.1`.
 - `apps/media` is still a placeholder media boundary, so voice and livestream are currently best suited for small-room P2P deployments.
+- 默认 `docker-compose.yml` 现在优先拉取已发布镜像，而不是本地构建，因此首次启动更快、更适合公开用户。
+- 这些镜像现在已经自包含：`bootstrap`、Postgres、迁移、API、gateway、media、proxy 不再依赖仓库里的运行时脚本挂载。
+- `bootstrap` 服务会在第一次启动时自动生成强随机运行时密钥，并持久化到 Docker volume。
+- 默认宿主机端口改成了 Web `3000` 和管理后台 `3001`，这样在 Docker Desktop / 本地机器上更不容易撞上 `80` 端口占用。
+- 如果你想固定端口、固定密码/密钥，或切换镜像仓库，请在首次启动前把 `.env.selfhost.example` 复制为 `.env` 后再修改。
+- 发布工作流默认推送到 GHCR，也可以镜像到 Docker Hub；接上 Docker Hub 后，用户就能在 Docker Desktop 里直接搜索到 Baker 镜像。
+- 如果你想在本地从源码构建，而不是拉取预构建镜像：
+  `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`
 - Compose 栈包含 Postgres、Redis、数据库迁移、API、gateway、media 边界服务，以及同时承载用户 Web 与管理后台的 Caddy 反向代理。
 - 默认只有 Web / Admin 端口对外暴露；Postgres 和 Redis 默认仅绑定到 `127.0.0.1`。
 - `apps/media` 目前仍是占位的媒体边界，因此当前语音和直播更适合小房间的 P2P 自托管场景。

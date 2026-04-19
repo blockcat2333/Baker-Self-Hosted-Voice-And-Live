@@ -58,6 +58,7 @@
 
 - Docker Compose is now the first-party self-hosted runtime entry point
 - the shipped compose topology is:
+  - `bootstrap`
   - `postgres`
   - `redis`
   - `migrate`
@@ -71,7 +72,11 @@
   - `:8080` serves the admin panel
   - `/v1` and `/health` proxy to `apps/api`
   - `/ws` proxies to `apps/gateway`
+- the default host bindings are now `:3000 -> :80` for Web and `:3001 -> :8080` for Admin so local Docker Desktop startup avoids common port-80 collisions; operators can still override them through `.env`
 - Postgres and Redis bind to `127.0.0.1` on the host by default so the exposed surface is the proxy tier rather than raw infra ports
+- the default `docker-compose.yml` is now registry-first and pulls self-contained published runtime images; `docker-compose.build.yml` re-enables local source builds for contributors and validation
+- first boot now runs a dedicated `bootstrap` container that writes persisted runtime secrets/admin credentials into a Docker volume consumed by the service containers
+- the image publish workflow targets GHCR by default and can optionally mirror to Docker Hub for Docker Desktop search/discovery
 - the optional coturn container stays behind the `turn` compose profile to avoid forcing TURN relay ports on every small/local deployment
 
 ## Protocol Design

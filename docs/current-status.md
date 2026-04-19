@@ -22,6 +22,7 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
 - M5 revised stability/UX slice (server RTT + voice roster visibility + bitrate + auth recovery): complete and validated
 - M5.2 revised slice (per-user voice network quality + connection/UI fixes): complete and validated
 - self-hosted Docker Compose baseline: complete and validated
+- prebuilt-image self-hosted Docker path: complete and validated
 
 ## Recently Completed
 
@@ -52,6 +53,27 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
   - Docker `up --build` was exporting multiple services to the same image tag, which caused BuildKit snapshot conflicts on Windows
   - Caddy route ordering initially let SPA fallback swallow `/health`, so route handling was locked with explicit `route` blocks
 - updated the public `README.md` so GitHub visitors now see a real Docker-first self-hosted quick-start before local dev instructions
+
+### 2026-04-19 Prebuilt Docker Image Delivery Pass
+
+- split the self-hosted compose story into:
+  - `docker-compose.yml` for pulling published runtime images
+  - `docker-compose.build.yml` for local source builds
+- added a `bootstrap` service plus `docker/runtime/*` scripts so first boot now:
+  - auto-generates strong persisted runtime secrets
+  - auto-generates an admin-panel password
+  - prints the admin URL/password through `docker compose logs bootstrap`
+- moved the runtime helper scripts into the shipped images themselves so the public compose path no longer depends on bind-mounting repo files into `bootstrap`, Postgres, migration, API, gateway, or media containers
+- changed the default host ports to:
+  - Web on `3000`
+  - Admin on `3001`
+  so Docker Desktop / local-machine startup avoids common `:80` bind failures
+- removed the old "copy `.env` and manually fill secrets before startup" requirement for the default quick-start path
+- added `.github/workflows/publish-images.yml` so GitHub Actions can publish the runtime images to GHCR automatically and optionally to Docker Hub when repo secrets are configured
+- updated `.env.selfhost.example` and `README.md` so public users now see:
+  - `docker compose up -d` as the fastest path
+  - `.env` as an optional advanced override, not a mandatory first-run step
+  - Docker Hub mirroring as the searchable-image path for Docker Desktop discovery
 
 ### 2026-04-18 Open-Source Publication Prep
 
@@ -481,8 +503,8 @@ Open-source publication prep validation:
 ## Current Blockers
 
 - workspace residue cleanup is complete except for the currently locked `output/dev` runtime files held open by active processes
-- a clean public GitHub release should not push the existing local history; it should publish from a fresh initial commit
-- the public repository is still pending license selection and authenticated GitHub publication from the sanitized fresh-history snapshot
+- the local private development history is still not suitable for direct publication because it contains personal author metadata; any future public-history refresh should continue to use a fresh initial commit
+- searchable Docker Desktop deployment is still pending Docker Hub credentials/secrets so `.github/workflows/publish-images.yml` can mirror the runtime images there
 
 ## Known Gaps
 
@@ -508,7 +530,7 @@ A Git snapshot is recommended after this bug-hunt pass.
 
 Recommended next work:
 
-1. Release hygiene: choose an open-source license and publish the sanitized working tree as a fresh-history public repository
+1. Deployment finish: configure Docker Hub mirroring secrets and publish the self-contained runtime images so Baker becomes directly searchable in Docker Desktop
 2. Quick hardening: replace the shared admin password model with explicit admin identities / revocable sessions
 3. Medium feature work: move refresh-token handling toward `HttpOnly` cookies while keeping deployment simplicity
 4. Larger architecture/product work: TURN / real media-adapter hardening beyond the current internal-route secret gate

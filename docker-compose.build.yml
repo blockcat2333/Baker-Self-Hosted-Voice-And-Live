@@ -1,0 +1,49 @@
+services:
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: bootstrap-runtime
+    image: baker-bootstrap:local
+
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: postgres-runtime
+    image: baker-postgres:local
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: services-runtime
+    image: baker-migrate:local
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: services-runtime
+    image: baker-api:local
+
+  media:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: services-runtime
+    image: baker-media:local
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: services-runtime
+    image: baker-gateway:local
+
+  proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: proxy-runtime
+    image: baker-proxy:local

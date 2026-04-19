@@ -2,6 +2,29 @@
 
 ## 2026-04-18
 
+### Prebuilt Docker image delivery pass
+
+What changed:
+
+- split the self-hosted Docker path into:
+  - `docker-compose.yml` for pulling published images
+  - `docker-compose.build.yml` for local source builds
+- added a `bootstrap` container and `docker/runtime/*` scripts so the default first boot auto-generates strong persisted secrets and prints the admin password once through compose logs
+- baked the runtime helper scripts into the shipped `bootstrap`, Postgres, and Node service images so the default public path no longer requires bind-mounted repo scripts at runtime
+- changed the default host ports to `3000` (Web) and `3001` (Admin) so local Docker Desktop startup avoids the common `:80` bind conflict
+- changed the quick-start path so public users no longer need to copy `.env` and hand-edit secrets before the first startup
+- added `.github/workflows/publish-images.yml` so GitHub Actions can publish the runtime images to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
+- updated `.env.selfhost.example` so it now documents optional fixed-secret/image overrides instead of mandatory first-run secret editing
+
+Why:
+
+- public self-hosted users should not need a local build toolchain for the default deployment path
+- "docker compose up -d" is materially easier to explain and closer to true one-click deployment than "copy env, edit secrets, then build"
+- self-contained images are required before the app can realistically be pulled and started from registry-discovery surfaces such as Docker Desktop
+- Docker Hub mirroring is the piece that makes those images directly searchable in Docker Desktop
+
+## 2026-04-18
+
 ### Self-hosted Docker Compose baseline
 
 What changed:

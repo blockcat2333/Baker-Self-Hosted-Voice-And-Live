@@ -220,13 +220,19 @@ Migration state:
 ## Self-Hosted Deployment Files
 
 - `docker-compose.yml`
-  - first-party self-hosted stack for Postgres, Redis, migration, API, gateway, media boundary, proxy, and optional TURN
+  - registry-first self-hosted stack for bootstrap, Postgres, Redis, migration, API, gateway, media boundary, proxy, and optional TURN, with default host bindings on `3000` (Web) and `3001` (Admin)
+- `docker-compose.build.yml`
+  - local source-build override for contributors and validation, keeping the public compose path pull-first
 - `Dockerfile`
   - multi-stage build for service runtimes plus static web/admin proxy runtime
 - `.env.selfhost.example`
-  - deployment-focused env template with production-secret placeholders and default public/admin ports
+  - optional advanced override template for fixed secrets, custom ports, TURN, and alternate image registries
 - `docker/Caddyfile`
   - Caddy edge config serving the user app on `:80`, the admin panel on `:8080`, `/v1` + `/health` through the API, and `/ws` through the gateway
+- `docker/runtime/*`
+  - first-boot bootstrap + runtime env loading scripts that are baked into the published runtime images for the prebuilt-image compose path
+- `.github/workflows/publish-images.yml`
+  - GitHub Actions workflow for publishing runtime images to GHCR and optionally Docker Hub for searchable Docker Desktop discovery
 - `packages/shared/package.json`
 - `packages/protocol/package.json`
 - `packages/db/package.json`
@@ -266,17 +272,20 @@ Community and release metadata:
 - `.github/pull_request_template.md`
   - standard validation/docs/privacy checklist for incoming PRs
 - public release note:
-  - the tracked working tree is suitable for publication after placeholder cleanup
-  - the existing local git history is not suitable for direct publication because commit author metadata includes personal information; a fresh initial commit is recommended for the public repo
+  - the public GitHub repository now exists with AGPL licensing and a bilingual landing page
+  - the existing local development history is still not suitable for direct publication because commit author metadata includes personal information; any future public-history refresh should continue to use a fresh initial commit
 - self-hosted release note:
   - GitHub visitors now have a Docker-first deployment path documented in `README.md`
   - the shipped compose stack has been smoke-tested with healthy `api`, `gateway`, `media`, and `proxy`
+  - the default public compose path is now pull-first (`docker compose up -d`) and no longer requires manual secret editing before the first boot
+  - the public compose path now uses self-contained images instead of bind-mounted runtime scripts, which is required for true registry-first deployment
 
 - local agent/tool residue that was previously committed (`.claude/worktrees/*`, `.claude/settings.local.json`, `.npm-cache/*`, `.playwright-cli/*`, `__codex_patch_test__.txt`) is being removed from the repo working set and is now ignored where appropriate
 - ad-hoc local artifact directories from prior tool runs (`download/`, `scripts/sidebar-screenshots/`, `test-results/`, local Codex/Claude logs/caches) were cleaned from the workspace; `output/dev` remains partially present only because the current live processes still hold open runtime logs and `caddy.exe`
 - Docker Compose is now the primary self-hosted runtime path for public users:
-  - Caddy serves the user web app on `:80`
-  - Caddy serves the admin panel on `:8080`
+  - `bootstrap` auto-generates/persists runtime secrets and prints the initial admin password
+  - Caddy serves the user web app on container `:80` / host `:3000`
+  - Caddy serves the admin panel on container `:8080` / host `:3001`
   - `/v1` and `/health` proxy to the API
   - `/ws` proxies to the gateway
 - Postgres and Redis remain host-local (`127.0.0.1`) in the compose topology so the exposed surface is the reverse proxy rather than raw infra ports

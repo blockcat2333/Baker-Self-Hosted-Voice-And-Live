@@ -1,0 +1,34 @@
+{
+  "name": "baker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel --filter=@baker/api --filter=@baker/gateway --filter=@baker/media --filter=@baker/web --filter=@baker/admin",
+    "dev:admin": "pnpm --filter @baker/admin dev",
+    "dev:desktop": "pnpm --filter @baker/desktop dev",
+    "format": "prettier --check .",
+    "infra:down": "docker compose down",
+    "infra:up": "docker compose up -d postgres redis",
+    "lint": "turbo run lint",
+    "test": "vitest run",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^22.10.2",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.13.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0",
+    "vitest": "^2.1.8"
+  }
+}

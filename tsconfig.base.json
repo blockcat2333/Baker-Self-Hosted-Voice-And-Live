@@ -1,0 +1,55 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "baseUrl": ".",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2022"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "paths": {
+      "@baker/client": [
+        "packages/client/src/index.ts"
+      ],
+      "@baker/client/*": [
+        "packages/client/src/*"
+      ],
+      "@baker/db": [
+        "packages/db/src/index.ts"
+      ],
+      "@baker/db/*": [
+        "packages/db/src/*"
+      ],
+      "@baker/protocol": [
+        "packages/protocol/src/index.ts"
+      ],
+      "@baker/protocol/*": [
+        "packages/protocol/src/*"
+      ],
+      "@baker/sdk": [
+        "packages/sdk/src/index.ts"
+      ],
+      "@baker/sdk/*": [
+        "packages/sdk/src/*"
+      ],
+      "@baker/shared": [
+        "packages/shared/src/index.ts"
+      ],
+      "@baker/shared/*": [
+        "packages/shared/src/*"
+      ]
+    }
+  }
+}

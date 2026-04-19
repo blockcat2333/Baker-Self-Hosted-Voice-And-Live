@@ -1,0 +1,136 @@
+.stream-pill--good {
+  background: rgba(34, 197, 94, 0.14);
+  color: #bbf7d0;
+}
+
+.stream-pill--warn {
+  background: rgba(251, 191, 36, 0.14);
+  color: #fde68a;
+}
+
+.stream-pill--danger {
+  background: rgba(248, 113, 113, 0.14);
+  color: #fecaca;
+}
+
+.stream-quality-controls {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.stream-owned-health {
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.stream-owned-health-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.stream-owned-health-title,
+.stream-owned-health-copy {
+  margin: 0;
+}
+
+.stream-owned-health-title {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.stream-owned-health-copy {
+  color: #94a3b8;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.stream-owned-health-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.stream-owned-health-item {
+  background: rgba(2, 6, 23, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.stream-owned-health-label {
+  color: #94a3b8;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stream-owned-health-value {
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stream-popup-controls {
+  display: grid;
+  gap: 16px;
+}
+
+.stream-popup-stats {
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  display: grid;
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.stream-popup-stats-header {
+  display: grid;
+  gap: 4px;
+}
+
+.stream-popup-stats-title,
+.stream-popup-stats-copy {
+  margin: 0;
+}
+
+.stream-popup-stats-title {
+  color: #f8fafc;
+  font-size: 14px;
+}
+
+.stream-popup-stats-copy {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.stream-popup-stats-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.stream-popup-stats-item {
+  background: rgba(2, 6, 23, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.stream-popup-stats-label {
+  color: #94a3b8;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stream-popup-stats-value {
+  color: #f8fafc;
+  font-size: 14px;
+  font-weight: 600;
+}

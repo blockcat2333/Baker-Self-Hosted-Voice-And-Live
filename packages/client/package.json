@@ -1,0 +1,29 @@
+{
+  "name": "@baker/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "lint": "eslint src",
+    "test": "vitest run packages/client",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@baker/protocol": "workspace:*",
+    "@baker/sdk": "workspace:*",
+    "i18next": "^26.0.4",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^17.0.3",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "tsup": "^8.3.5"
+  }
+}

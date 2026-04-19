@@ -2,7 +2,7 @@
 
 ## 2026-04-18
 
-### Prebuilt Docker image delivery pass
+### Docker image delivery pass
 
 What changed:
 
@@ -11,19 +11,25 @@ What changed:
   - `docker-compose.build.yml` for local source builds
 - added a `bootstrap` container and `docker/runtime/*` scripts so the default first boot auto-generates strong persisted secrets and prints the admin password once through compose logs
 - baked the runtime helper scripts into the shipped Baker runtime image so the default public path no longer requires bind-mounted repo scripts at runtime for bootstrap/migration/API/gateway/media
-- consolidated the application-side published images into one canonical `baker` runtime image plus one `baker-proxy` image so Docker Hub search no longer needs to lead with separate `baker-api` / `baker-media` style app repositories
-- added a standalone help command to the canonical `baker` runtime image so Docker Desktop users who launch it directly are pointed back to the Compose stack instead of seeing an unexplained exit
+- introduced a true all-in-one `baker` image that now bundles web/admin assets, API/gateway/media, PostgreSQL, Redis, Caddy, and optional coturn under `supervisord`
+- changed the public image roles to:
+  - `baker` for the easiest direct `docker run` deployment
+  - `baker-runtime` for the advanced Compose runtime image
+  - `baker-proxy` for the advanced Compose edge image
+- moved the standalone help command to `baker-runtime`, so Compose users who launch the runtime image directly are pointed back to the advanced stack while the public `baker` image actually starts the app
+- added TURN-in-the-same-container support behind `TURN_ENABLED=false` by default; enabling TURN now requires credentials and can auto-derive `TURN_URLS` from `TURN_EXTERNAL_IP`
 - switched Postgres back to the official upstream image while preserving first-boot runtime secret loading through the compose bootstrap volume
 - changed the default host ports to `3000` (Web) and `3001` (Admin) so local Docker Desktop startup avoids the common `:80` bind conflict
 - changed the quick-start path so public users no longer need to copy `.env` and hand-edit secrets before the first startup
-- added `.github/workflows/publish-images.yml` so GitHub Actions can publish the runtime images to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
+- added `.github/workflows/publish-images.yml` so GitHub Actions can publish `baker`, `baker-runtime`, and `baker-proxy` to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
 - updated `.env.selfhost.example` so it now documents optional fixed-secret/image overrides instead of mandatory first-run secret editing
 
 Why:
 
 - public self-hosted users should not need a local build toolchain for the default deployment path
-- "docker compose up -d" is materially easier to explain and closer to true one-click deployment than "copy env, edit secrets, then build"
+- a real one-container image is materially easier for newcomers than teaching the full multi-service topology first
 - self-contained images are required before the app can realistically be pulled and started from registry-discovery surfaces such as Docker Desktop
+- the advanced Compose topology still matters for operators who want service separation, but it should be the second story instead of the first
 - Docker Hub mirroring is the piece that makes those images directly searchable in Docker Desktop
 
 ## 2026-04-18

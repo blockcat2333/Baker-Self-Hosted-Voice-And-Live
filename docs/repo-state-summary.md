@@ -220,19 +220,21 @@ Migration state:
 ## Self-Hosted Deployment Files
 
 - `docker-compose.yml`
-  - registry-first self-hosted stack for bootstrap, Postgres, Redis, migration, API, gateway, media boundary, proxy, and optional TURN, with default host bindings on `3000` (Web) and `3001` (Admin)
+  - registry-first advanced self-hosted stack for bootstrap, Postgres, Redis, migration, API, gateway, media boundary, proxy, and optional TURN, with default host bindings on `3000` (Web) and `3001` (Admin)
 - `docker-compose.build.yml`
-  - local source-build override for contributors and validation, keeping the public compose path pull-first
+  - local source-build override for contributors and validation, keeping the advanced compose path pull-first
 - `Dockerfile`
-  - multi-stage build for service runtimes plus static web/admin proxy runtime
+  - multi-stage build for the all-in-one `baker` image, the advanced `baker-runtime` image, and the `baker-proxy` image
 - `.env.selfhost.example`
-  - optional advanced override template for fixed secrets, custom ports, TURN, and alternate image registries, now centered around a canonical `BAKER_RUNTIME_IMAGE`
+  - optional advanced Compose override template for fixed secrets, custom ports, TURN, and alternate image registries, centered around `BAKER_RUNTIME_IMAGE`
 - `docker/Caddyfile`
   - Caddy edge config serving the user app on `:80`, the admin panel on `:8080`, `/v1` + `/health` through the API, and `/ws` through the gateway
+- `docker/allinone/*`
+  - one-container runtime scripts, Caddy config, and `supervisord` wiring for bundled Postgres/Redis/API/gateway/media/coturn
 - `docker/runtime/*`
-  - first-boot bootstrap + runtime env loading scripts that are baked into the canonical published Baker runtime image for the prebuilt-image compose path, including the standalone help script shown to users who run `blockcat233/baker` directly
+  - first-boot bootstrap + runtime env loading scripts that are baked into both the all-in-one image and the advanced Compose runtime image, including the standalone help script shown to users who run `blockcat233/baker-runtime` directly
 - `.github/workflows/publish-images.yml`
-  - GitHub Actions workflow for publishing the canonical `baker` and `baker-proxy` images to GHCR and optionally Docker Hub for searchable Docker Desktop discovery
+  - GitHub Actions workflow for publishing `baker`, `baker-runtime`, and `baker-proxy` to GHCR and optionally Docker Hub for searchable Docker Desktop discovery
 - `packages/shared/package.json`
 - `packages/protocol/package.json`
 - `packages/db/package.json`
@@ -277,20 +279,24 @@ Community and release metadata:
   - the public GitHub repository now exists with AGPL licensing and a bilingual landing page
   - the existing local development history is still not suitable for direct publication because commit author metadata includes personal information; any future public-history refresh should continue to use a fresh initial commit
 - self-hosted release note:
-  - GitHub visitors now have a Docker-first deployment path documented in `README.md`
-  - the shipped compose stack has been smoke-tested with healthy `api`, `gateway`, `media`, and `proxy`
-  - the default public compose path is now pull-first (`docker compose up -d`) and no longer requires manual secret editing before the first boot
-  - the public compose path now uses a canonical self-contained `baker` runtime image instead of separate app-service image repos, which is required for a cleaner registry-first deployment and search story
+  - GitHub visitors now have a one-container Docker-first deployment path documented in `README.md`
+  - the all-in-one `baker` image has been smoke-tested with working Web/Admin entrypoints plus auth and voice-join flows
+  - the advanced compose stack has also been smoke-tested with healthy `api`, `gateway`, `media`, and `proxy`
+  - the default newcomer path is now `docker run ... blockcat233/baker`, while the advanced multi-service path remains pull-first (`docker compose up -d`)
+  - the advanced compose path now uses `baker-runtime` / `baker-proxy`, which keeps registry discovery cleaner than separate app-service image repos
 
 - local agent/tool residue that was previously committed (`.claude/worktrees/*`, `.claude/settings.local.json`, `.npm-cache/*`, `.playwright-cli/*`, `__codex_patch_test__.txt`) is being removed from the repo working set and is now ignored where appropriate
 - ad-hoc local artifact directories from prior tool runs (`download/`, `scripts/sidebar-screenshots/`, `test-results/`, local Codex/Claude logs/caches) were cleaned from the workspace; `output/dev` remains partially present only because the current live processes still hold open runtime logs and `caddy.exe`
-- Docker Compose is now the primary self-hosted runtime path for public users:
+- Baker now has two self-hosted deployment stories:
+  - the primary newcomer path is the all-in-one `baker` image with one persistent data root at `/var/lib/baker`
+  - the advanced operator path is the multi-service Compose stack
+- In the advanced Compose stack:
   - `bootstrap` auto-generates/persists runtime secrets and prints the initial admin password
   - Caddy serves the user web app on container `:80` / host `:3000`
   - Caddy serves the admin panel on container `:8080` / host `:3001`
   - `/v1` and `/health` proxy to the API
   - `/ws` proxies to the gateway
-- Postgres and Redis remain host-local (`127.0.0.1`) in the compose topology so the exposed surface is the reverse proxy rather than raw infra ports
+- In the advanced Compose stack, Postgres and Redis remain host-local (`127.0.0.1`) so the exposed surface is the reverse proxy rather than raw infra ports
 - API auth and text-chat HTTP flows are implemented
 - authenticated username updates now persist through the existing auth API/session flow
 - public server-config is now served by the API and consumed by the client before auth UI renders

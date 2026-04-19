@@ -2,7 +2,7 @@
 
 ## Branch Goal
 
-Milestone 5 quality hardening plus a first real security-hardening and self-hosted deployment pass for the new server control plane and media boundary, with multi-stream livestreaming stable, quality controls implemented, per-user voice link quality fanout in place, admin-managed server/workspace settings available, and a smoke-tested Docker Compose deployment path now in place.
+Milestone 5 quality hardening plus a first real self-hosted productization pass for the new server control plane and media boundary, with multi-stream livestreaming stable, quality controls implemented, per-user voice link quality fanout in place, admin-managed server/workspace settings available, a real one-container newcomer deployment path in place, and the older multi-service Docker Compose topology preserved as the advanced/production option.
 
 ## Milestone State
 
@@ -23,6 +23,7 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
 - M5.2 revised slice (per-user voice network quality + connection/UI fixes): complete and validated
 - self-hosted Docker Compose baseline: complete and validated
 - prebuilt-image self-hosted Docker path: complete and validated
+- all-in-one Baker image path: complete and validated
 
 ## Recently Completed
 
@@ -54,7 +55,7 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
   - Caddy route ordering initially let SPA fallback swallow `/health`, so route handling was locked with explicit `route` blocks
 - updated the public `README.md` so GitHub visitors now see a real Docker-first self-hosted quick-start before local dev instructions
 
-### 2026-04-19 Prebuilt Docker Image Delivery Pass
+### 2026-04-19 All-In-One Baker Image Path
 
 - split the self-hosted compose story into:
   - `docker-compose.yml` for pulling published runtime images
@@ -64,17 +65,32 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
   - auto-generates an admin-panel password
   - prints the admin URL/password through `docker compose logs bootstrap`
 - moved the runtime helper scripts into the shipped application image itself so the public compose path no longer depends on bind-mounting repo files into `bootstrap`, migration, API, gateway, or media containers
-- consolidated the published Baker application services into one canonical runtime image (`baker`) plus one proxy image (`baker-proxy`) so Docker Hub / Docker Desktop search surfaces a clear main image instead of separate `baker-api` / `baker-media` style app images
-- the canonical `baker` runtime image now prints a Compose-first help message and exits when launched standalone, so Docker Desktop users get an explicit hint instead of a silent immediate exit
+- introduced a true all-in-one `blockcat233/baker` image that now bundles:
+  - web and admin static assets
+  - API, gateway, and media Node runtimes
+  - PostgreSQL
+  - Redis
+  - Caddy
+  - optional coturn
+- the all-in-one image now starts through `supervisord`, keeps durable state under `/var/lib/baker`, and is validated as the primary newcomer path through:
+  - `docker run -d -p 3000:80 -p 3001:8080 -v baker-data:/var/lib/baker blockcat233/baker:latest`
+- re-pointed the advanced Compose path to `blockcat233/baker-runtime` instead of `blockcat233/baker`
+- `blockcat233/baker-runtime` now prints the Compose-first help text when launched by itself, while `blockcat233/baker` is the directly runnable image
+- bundled TURN inside the all-in-one image behind `TURN_ENABLED=false` by default; enabling TURN now requires credentials and can auto-derive `TURN_URLS` from `TURN_EXTERNAL_IP` when the operator does not provide them explicitly
 - switched Postgres back to the official upstream image while keeping first-boot runtime secrets through the compose bootstrap volume
 - changed the default host ports to:
   - Web on `3000`
   - Admin on `3001`
   so Docker Desktop / local-machine startup avoids common `:80` bind failures
 - removed the old "copy `.env` and manually fill secrets before startup" requirement for the default quick-start path
-- added `.github/workflows/publish-images.yml` so GitHub Actions can publish the runtime images to GHCR automatically and optionally to Docker Hub when repo secrets are configured
+- added `.github/workflows/publish-images.yml` so GitHub Actions can publish:
+  - `baker`
+  - `baker-runtime`
+  - `baker-proxy`
+  to GHCR automatically and optionally mirror them to Docker Hub when repo secrets are configured
 - updated `.env.selfhost.example` and `README.md` so public users now see:
-  - `docker compose up -d` as the fastest path
+  - one-container `docker run` as the fastest path
+  - multi-service Compose as the advanced path
   - `.env` as an optional advanced override, not a mandatory first-run step
   - Docker Hub mirroring as the searchable-image path for Docker Desktop discovery
 

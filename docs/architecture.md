@@ -56,8 +56,17 @@
 
 ### Deployment Topology
 
-- Docker Compose is now the first-party self-hosted runtime entry point
-- the shipped compose topology is:
+- the primary newcomer deployment path is now the all-in-one `blockcat233/baker` image
+- the all-in-one image bundles:
+  - web/admin static assets
+  - API, gateway, and media runtimes
+  - PostgreSQL
+  - Redis
+  - Caddy
+  - optional coturn
+- the all-in-one container persists runtime secrets plus service data under `/var/lib/baker`
+- Docker Compose remains the advanced self-hosted runtime topology
+- the shipped advanced compose topology is:
   - `bootstrap`
   - `postgres`
   - `redis`
@@ -74,10 +83,10 @@
   - `/ws` proxies to `apps/gateway`
 - the default host bindings are now `:3000 -> :80` for Web and `:3001 -> :8080` for Admin so local Docker Desktop startup avoids common port-80 collisions; operators can still override them through `.env`
 - Postgres and Redis bind to `127.0.0.1` on the host by default so the exposed surface is the proxy tier rather than raw infra ports
-- the default `docker-compose.yml` is now registry-first and pulls a canonical self-contained `baker` runtime image plus `baker-proxy`; `docker-compose.build.yml` re-enables local source builds for contributors and validation, and the standalone `baker` image now prints a Compose-first hint when launched by itself
+- the default `docker-compose.yml` is now registry-first and pulls `baker-runtime` plus `baker-proxy`; `docker-compose.build.yml` re-enables local source builds for contributors and validation, and the standalone `baker-runtime` image now prints a Compose-first hint when launched by itself
 - first boot now runs a dedicated `bootstrap` container that writes persisted runtime secrets/admin credentials into a Docker volume consumed by the service containers
-- the image publish workflow targets GHCR by default and can optionally mirror the canonical `baker` / `baker-proxy` images to Docker Hub for Docker Desktop search/discovery
-- the optional coturn container stays behind the `turn` compose profile to avoid forcing TURN relay ports on every small/local deployment
+- the image publish workflow targets GHCR by default and can optionally mirror `baker`, `baker-runtime`, and `baker-proxy` to Docker Hub for Docker Desktop search/discovery
+- the all-in-one image keeps TURN disabled by default and only starts coturn when `TURN_ENABLED=true`; the advanced compose topology still keeps coturn behind the `turn` profile to avoid forcing relay ports on every small/local deployment
 
 ## Protocol Design
 

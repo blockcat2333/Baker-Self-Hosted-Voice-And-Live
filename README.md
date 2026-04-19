@@ -22,48 +22,96 @@ The project name is inspired by Baker from Arknights: Endfield.
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
+- `blockcat233/baker` now ships as a real all-in-one image for newcomer deployment
+- The advanced Docker Compose path now uses `blockcat233/baker-runtime` plus `blockcat233/baker-proxy`
 - Standard validation loop is `pnpm typecheck`, `pnpm lint`, and `pnpm test`
 
-## Docker Quick Start
+## Quick Start: One Container
 
-The fastest way to run Baker is the published Docker Compose stack.
+The fastest way to try Baker is a single container with one persistent data volume.
 
-1. Start the full stack:
-   `docker compose up -d`
-2. Read the first-boot output once:
-   `docker compose logs bootstrap`
-3. Open:
-   - Web: `http://localhost:3000`
-   - Admin: `http://localhost:3001`
-4. Use the admin password printed by `bootstrap`.
-5. Optional TURN relay for internet/NAT-heavy voice or livestream usage:
-   `docker compose --profile turn up -d`
+```bash
+docker volume create baker-data
 
-### Images
+docker run -d \
+  --name baker \
+  -p 3000:80 \
+  -p 3001:8080 \
+  -v baker-data:/var/lib/baker \
+  blockcat233/baker:latest
 
-The canonical public application image is:
+docker logs baker
+```
 
-- `blockcat233/baker`
+Open:
 
-The static edge image used by the Compose stack is:
+- Web: `http://localhost:3000`
+- Admin: `http://localhost:3001`
 
-- `blockcat233/baker-proxy`
+The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-The stack also uses official infrastructure images for PostgreSQL, Redis, and optional coturn. That is why Baker remains a one-command deployment through Docker Compose, not a single all-in-one container. The app still starts with `docker compose up -d`, but the Docker Hub search surface now has a clear main image instead of separate app-service images like `baker-api` and `baker-media`.
+## Optional TURN Relay
 
-If Docker Hub still shows older service-specific repositories, those are legacy artifacts from earlier publishing runs. New releases are now centered on `baker` and `baker-proxy`.
+For internet-facing voice or livestream usage across NAT, VPN, mobile, or cross-region networks, enable the bundled TURN server in the same container and publish the relay ports:
 
-If you run `docker run blockcat233/baker:latest` directly, the container now prints a short Compose-first help message and exits. That image is the shared Baker runtime used by multiple services inside the stack.
+```bash
+docker rm -f baker
 
-### Notes
+docker run -d \
+  --name baker \
+  -p 3000:80 \
+  -p 3001:8080 \
+  -p 3478:3478/tcp \
+  -p 3478:3478/udp \
+  -p 49160-49200:49160-49200/tcp \
+  -p 49160-49200:49160-49200/udp \
+  -e TURN_ENABLED=true \
+  -e TURN_EXTERNAL_IP=203.0.113.10 \
+  -e TURN_USERNAME=baker \
+  -e TURN_PASSWORD=change-this \
+  -v baker-data:/var/lib/baker \
+  blockcat233/baker:latest
+```
 
-- The default `docker-compose.yml` pulls published images instead of building locally.
-- The `bootstrap` service auto-generates strong runtime secrets on first start and persists them in a Docker volume.
-- The default host ports are `3000` for Web and `3001` for Admin to avoid common `:80` conflicts on local machines.
-- If you want fixed ports, fixed secrets, or different image registries, copy [`.env.selfhost.example`](./.env.selfhost.example) to `.env` before first startup.
-- To build from source locally instead of pulling published images:
+If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
+
+## Advanced / Production Compose
+
+The advanced path keeps the current multi-service topology and is the better fit when you want clearer service separation, independent upgrades, or to plug in your own Postgres/Redis/TURN choices.
+
+```bash
+docker compose up -d
+docker compose logs bootstrap
+```
+
+Open:
+
+- Web: `http://localhost:3000`
+- Admin: `http://localhost:3001`
+
+Notes:
+
+- `docker-compose.yml` is registry-first and now pulls `blockcat233/baker-runtime` plus `blockcat233/baker-proxy`
+- [`.env.selfhost.example`](./.env.selfhost.example) is now the advanced override template for fixed secrets, custom ports, or alternate registries
+- local source-build validation still works with:
   `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`
-- By default, only the web/admin ports are exposed publicly; Postgres and Redis bind to `127.0.0.1`.
+- optional bundled coturn is still available in the advanced stack through:
+  `docker compose --profile turn up -d`
+
+## Image Roles
+
+- `blockcat233/baker`: the all-in-one image for the easiest `docker run` deployment
+- `blockcat233/baker-runtime`: the advanced Compose runtime image used by `bootstrap`, `migrate`, `api`, `gateway`, and `media`
+- `blockcat233/baker-proxy`: the advanced Compose edge image that serves Web/Admin and proxies `/v1`, `/health`, and `/ws`
+
+Older service-specific repositories such as `baker-api` or `baker-media` are legacy artifacts from earlier publishing runs and are no longer the canonical public deployment story.
+
+## Migration Note
+
+- `blockcat233/baker` changed meaning: it is now the supported all-in-one image instead of the shared Compose runtime
+- existing Compose users should move to `blockcat233/baker-runtime`
+- `blockcat233/baker-proxy` stays the advanced edge image
+- legacy `baker-api` / `baker-media` / `baker-gateway` style repos are no longer the main published interface
 
 ## Current Limits
 

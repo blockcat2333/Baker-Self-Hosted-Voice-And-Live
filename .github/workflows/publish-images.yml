@@ -25,6 +25,8 @@ jobs:
       matrix:
         include:
           - image_name: baker
+            target: allinone-runtime
+          - image_name: baker-runtime
             target: services-runtime
           - image_name: baker-proxy
             target: proxy-runtime

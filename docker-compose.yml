@@ -1,6 +1,6 @@
 services:
   bootstrap:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
     command: ['sh', '/opt/baker-runtime/bootstrap.sh']
     environment:
       NODE_ENV: '${NODE_ENV:-production}'
@@ -72,7 +72,7 @@ services:
       - redis-data:/data
 
   migrate:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['pnpm', '--filter', '@baker/db', 'db:push']
     depends_on:
@@ -85,7 +85,7 @@ services:
       - runtime-config:/run/baker:ro
 
   api:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/api/dist/index.js']
     depends_on:
@@ -98,7 +98,13 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3001/health >/dev/null 2>&1']
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3001/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -107,14 +113,20 @@ services:
       - runtime-config:/run/baker:ro
 
   media:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/media/dist/index.js']
     depends_on:
       bootstrap:
         condition: service_completed_successfully
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3003/health >/dev/null 2>&1']
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3003/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -123,7 +135,7 @@ services:
       - runtime-config:/run/baker:ro
 
   gateway:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/gateway/dist/index.js']
     depends_on:
@@ -138,7 +150,13 @@ services:
       media:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q -O - http://127.0.0.1:3002/health >/dev/null 2>&1']
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 10s
       timeout: 3s
       retries: 10

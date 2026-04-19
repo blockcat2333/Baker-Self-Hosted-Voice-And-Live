@@ -24,17 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - image_name: baker-bootstrap
-            target: bootstrap-runtime
-          - image_name: baker-postgres
-            target: postgres-runtime
-          - image_name: baker-migrate
-            target: services-runtime
-          - image_name: baker-api
-            target: services-runtime
-          - image_name: baker-gateway
-            target: services-runtime
-          - image_name: baker-media
+          - image_name: baker
             target: services-runtime
           - image_name: baker-proxy
             target: proxy-runtime

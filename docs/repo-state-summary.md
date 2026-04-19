@@ -226,13 +226,13 @@ Migration state:
 - `Dockerfile`
   - multi-stage build for service runtimes plus static web/admin proxy runtime
 - `.env.selfhost.example`
-  - optional advanced override template for fixed secrets, custom ports, TURN, and alternate image registries
+  - optional advanced override template for fixed secrets, custom ports, TURN, and alternate image registries, now centered around a canonical `BAKER_RUNTIME_IMAGE`
 - `docker/Caddyfile`
   - Caddy edge config serving the user app on `:80`, the admin panel on `:8080`, `/v1` + `/health` through the API, and `/ws` through the gateway
 - `docker/runtime/*`
-  - first-boot bootstrap + runtime env loading scripts that are baked into the published runtime images for the prebuilt-image compose path
+  - first-boot bootstrap + runtime env loading scripts that are baked into the canonical published Baker runtime image for the prebuilt-image compose path
 - `.github/workflows/publish-images.yml`
-  - GitHub Actions workflow for publishing runtime images to GHCR and optionally Docker Hub for searchable Docker Desktop discovery
+  - GitHub Actions workflow for publishing the canonical `baker` and `baker-proxy` images to GHCR and optionally Docker Hub for searchable Docker Desktop discovery
 - `packages/shared/package.json`
 - `packages/protocol/package.json`
 - `packages/db/package.json`
@@ -260,7 +260,9 @@ Scripts:
 Community and release metadata:
 
 - `README.md`
-  - public-facing bilingual project introduction for GitHub visitors
+  - public-facing English-first project introduction for GitHub visitors
+- `README.zh-CN.md`
+  - linked Simplified Chinese introduction and deployment guide
 - `CONTRIBUTING.md`
   - contributor workflow, validation loop, boundaries, and privacy expectations
 - `SECURITY.md`
@@ -278,7 +280,7 @@ Community and release metadata:
   - GitHub visitors now have a Docker-first deployment path documented in `README.md`
   - the shipped compose stack has been smoke-tested with healthy `api`, `gateway`, `media`, and `proxy`
   - the default public compose path is now pull-first (`docker compose up -d`) and no longer requires manual secret editing before the first boot
-  - the public compose path now uses self-contained images instead of bind-mounted runtime scripts, which is required for true registry-first deployment
+  - the public compose path now uses a canonical self-contained `baker` runtime image instead of separate app-service image repos, which is required for a cleaner registry-first deployment and search story
 
 - local agent/tool residue that was previously committed (`.claude/worktrees/*`, `.claude/settings.local.json`, `.npm-cache/*`, `.playwright-cli/*`, `__codex_patch_test__.txt`) is being removed from the repo working set and is now ignored where appropriate
 - ad-hoc local artifact directories from prior tool runs (`download/`, `scripts/sidebar-screenshots/`, `test-results/`, local Codex/Claude logs/caches) were cleaned from the workspace; `output/dev` remains partially present only because the current live processes still hold open runtime logs and `caddy.exe`

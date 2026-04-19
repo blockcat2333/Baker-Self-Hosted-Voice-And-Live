@@ -1,6 +1,6 @@
 services:
   bootstrap:
-    image: '${BAKER_BOOTSTRAP_IMAGE:-ghcr.io/blockcat2333/baker-bootstrap:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
     command: ['sh', '/opt/baker-runtime/bootstrap.sh']
     environment:
       NODE_ENV: '${NODE_ENV:-production}'
@@ -30,15 +30,22 @@ services:
       - runtime-config:/run/baker
 
   postgres:
-    image: '${BAKER_POSTGRES_IMAGE:-ghcr.io/blockcat2333/baker-postgres:latest}'
+    image: '${BAKER_POSTGRES_IMAGE:-postgres:16-alpine}'
     container_name: baker-postgres
     depends_on:
       bootstrap:
         condition: service_completed_successfully
-    entrypoint: ['sh', '/opt/baker-runtime/postgres-entrypoint.sh']
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        . /run/baker/runtime.env
+        export POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
+        exec docker-entrypoint.sh "$$@"
+      - sh
     command: ['postgres']
     healthcheck:
-      test: ['CMD-SHELL', 'sh /opt/baker-runtime/postgres-healthcheck.sh']
+      test: ['CMD-SHELL', '. /run/baker/runtime.env && pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -65,7 +72,7 @@ services:
       - redis-data:/data
 
   migrate:
-    image: '${BAKER_MIGRATE_IMAGE:-ghcr.io/blockcat2333/baker-migrate:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['pnpm', '--filter', '@baker/db', 'db:push']
     depends_on:
@@ -78,7 +85,7 @@ services:
       - runtime-config:/run/baker:ro
 
   api:
-    image: '${BAKER_API_IMAGE:-ghcr.io/blockcat2333/baker-api:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/api/dist/index.js']
     depends_on:
@@ -100,7 +107,7 @@ services:
       - runtime-config:/run/baker:ro
 
   media:
-    image: '${BAKER_MEDIA_IMAGE:-ghcr.io/blockcat2333/baker-media:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/media/dist/index.js']
     depends_on:
@@ -116,7 +123,7 @@ services:
       - runtime-config:/run/baker:ro
 
   gateway:
-    image: '${BAKER_GATEWAY_IMAGE:-ghcr.io/blockcat2333/baker-gateway:latest}'
+    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker:latest}'
     entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
     command: ['node', 'apps/gateway/dist/index.js']
     depends_on:

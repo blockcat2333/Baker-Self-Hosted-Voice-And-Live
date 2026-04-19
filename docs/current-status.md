@@ -63,7 +63,9 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
   - auto-generates strong persisted runtime secrets
   - auto-generates an admin-panel password
   - prints the admin URL/password through `docker compose logs bootstrap`
-- moved the runtime helper scripts into the shipped images themselves so the public compose path no longer depends on bind-mounting repo files into `bootstrap`, Postgres, migration, API, gateway, or media containers
+- moved the runtime helper scripts into the shipped application image itself so the public compose path no longer depends on bind-mounting repo files into `bootstrap`, migration, API, gateway, or media containers
+- consolidated the published Baker application services into one canonical runtime image (`baker`) plus one proxy image (`baker-proxy`) so Docker Hub / Docker Desktop search surfaces a clear main image instead of separate `baker-api` / `baker-media` style app images
+- switched Postgres back to the official upstream image while keeping first-boot runtime secrets through the compose bootstrap volume
 - changed the default host ports to:
   - Web on `3000`
   - Admin on `3001`
@@ -79,7 +81,7 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
 
 - audited the tracked repository contents for personal identifiers, local-only artifacts, and public-release blockers
 - replaced personal-looking example values with neutral placeholders such as `demo.example.com` and `long.username@example.com`
-- rewrote the root `README.md` into a public-facing bilingual introduction (English + Simplified Chinese)
+- rewrote the root `README.md` into an English-first public-facing introduction and added a dedicated `README.zh-CN.md` guide linked from the top of the homepage
 - selected `AGPL-3.0` for the public release and added the Baker name-origin note to the bilingual `README.md`
 - added open-source collaboration docs and GitHub defaults:
   - `CONTRIBUTING.md`

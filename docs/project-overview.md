@@ -14,7 +14,7 @@ Baker is a Discord-like realtime social communication product. The target scope 
 
 ## Current Milestone
 
-Current milestone: `Milestone 5` stability, quality, and deployment hardening after the Milestone 4 multi-stream redesign, with revised stability/UX scope complete (per-user voice link quality fanout, non-joined voice roster visibility, bitrate+1440p stream quality, auth/bootstrap and gateway reconnect hardening, startup-script governance) plus follow-up security fixes for media-internal auth, session-backed token validation, logout revocation, browser-storage hardening, and a smoke-tested Docker Compose self-hosted deployment path that now uses self-contained prebuilt images with Docker-Desktop-friendly default host ports.
+Current milestone: `Milestone 5` stability, quality, and deployment hardening after the Milestone 4 multi-stream redesign, with revised stability/UX scope complete (per-user voice link quality fanout, non-joined voice roster visibility, bitrate+1440p stream quality, auth/bootstrap and gateway reconnect hardening, startup-script governance) plus follow-up security fixes for media-internal auth, session-backed token validation, logout revocation, browser-storage hardening, and a smoke-tested Docker Compose self-hosted deployment path that now uses a canonical self-contained `baker` runtime image with Docker-Desktop-friendly default host ports.
 
 Current validated state:
 
@@ -41,7 +41,7 @@ Current validated state:
 - `pnpm test` passes
 - `pnpm audit --prod` passes
 - `docker compose --project-name baker-smoke -f docker-compose.yml -f docker-compose.build.yml up -d --build` self-hosted smoke test passes with healthy `api`, `gateway`, `media`, and `proxy`, plus working `http://localhost:3000` (Web) and `http://localhost:3001` (Admin) entrypoints
-- public-facing repo docs now include a bilingual `README.md` plus baseline contribution, security, conduct, and issue/PR templates
+- public-facing repo docs now include an English-first `README.md`, a linked `README.zh-CN.md`, plus baseline contribution, security, conduct, and issue/PR templates
 
 ## Tech Stack
 
@@ -81,7 +81,7 @@ Current validated state:
 - Browser capture and WebRTC peer logic live in the client/sdk layer.
 - Media adapter and future SFU work stay behind `apps/media`.
 - The admin panel manages durable server/workspace settings, not realtime room orchestration.
-- Docker Compose packages the default self-hosted topology, with self-contained published runtime images for the default public path, local source-build overrides for contributors, and Caddy as the public edge for web/admin/API/gateway routes.
+- Docker Compose packages the default self-hosted topology, with a canonical self-contained published `baker` runtime image for bootstrap/migration/API/gateway/media, local source-build overrides for contributors, and Caddy as the public edge for web/admin/API/gateway routes.
 
 ## Real Runtime Scope
 
@@ -125,7 +125,7 @@ Implemented today:
 - dev startup now reports Docker daemon last-error details and exits early when Docker backend is stuck in `starting`, with explicit `wsl --shutdown` recovery guidance
 - TURN startup now enforces public relay IP correctness for public domains (resolves from `TurnHost` DNS and rejects private `TURN_EXTERNAL_IP`), preventing "signaling works but media path fails" regressions for internet clients
 - Docker Compose now ships as the first-party self-hosted path: Postgres, Redis, schema migration, API, gateway, media boundary, and a Caddy edge proxy for web/admin
-- the default public path now uses self-contained prebuilt images plus a first-boot `bootstrap` container that persists generated runtime secrets and prints the initial admin password
+- the default public path now uses a canonical self-contained `baker` runtime image plus a first-boot `bootstrap` container that persists generated runtime secrets and prints the initial admin password
 - the shipped Caddy proxy still serves the user app on container port `:80` and the admin panel on container port `:8080`, while the default host bindings are now `:3000` (Web) and `:3001` (Admin) for easier local Docker startup
 - Postgres and Redis stay bound to `127.0.0.1` by default in the compose topology so the public surface remains the proxy tier
 - optional bundled coturn remains available behind the `turn` compose profile for harder NAT / internet voice-stream deployments

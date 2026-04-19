@@ -30,23 +30,11 @@ COPY --from=services-builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-wor
 COPY --from=services-builder /app/node_modules ./node_modules
 COPY --from=services-builder /app/apps ./apps
 COPY --from=services-builder /app/packages ./packages
+COPY docker/runtime/bootstrap.sh /opt/baker-runtime/bootstrap.sh
 COPY docker/runtime/lib.sh /opt/baker-runtime/lib.sh
 COPY docker/runtime/node-service-entrypoint.sh /opt/baker-runtime/node-service-entrypoint.sh
-RUN chmod +x /opt/baker-runtime/lib.sh /opt/baker-runtime/node-service-entrypoint.sh
+RUN chmod +x /opt/baker-runtime/bootstrap.sh /opt/baker-runtime/lib.sh /opt/baker-runtime/node-service-entrypoint.sh
 RUN node -e 'const fs = require("node:fs"); for (const name of ["shared", "protocol", "db"]) { const path = "/app/packages/" + name + "/package.json"; const pkg = JSON.parse(fs.readFileSync(path, "utf8")); pkg.main = "./dist/index.js"; pkg.types = "./dist/index.d.ts"; fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n"); }'
-
-FROM alpine:3.20 AS bootstrap-runtime
-
-COPY docker/runtime/lib.sh /opt/baker-runtime/lib.sh
-COPY docker/runtime/bootstrap.sh /opt/baker-runtime/bootstrap.sh
-RUN chmod +x /opt/baker-runtime/lib.sh /opt/baker-runtime/bootstrap.sh
-
-FROM postgres:16-alpine AS postgres-runtime
-
-COPY docker/runtime/lib.sh /opt/baker-runtime/lib.sh
-COPY docker/runtime/postgres-entrypoint.sh /opt/baker-runtime/postgres-entrypoint.sh
-COPY docker/runtime/postgres-healthcheck.sh /opt/baker-runtime/postgres-healthcheck.sh
-RUN chmod +x /opt/baker-runtime/lib.sh /opt/baker-runtime/postgres-entrypoint.sh /opt/baker-runtime/postgres-healthcheck.sh
 
 FROM workspace-base AS proxy-builder
 

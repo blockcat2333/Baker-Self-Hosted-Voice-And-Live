@@ -3,15 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: bootstrap-runtime
+      target: services-runtime
     image: baker-bootstrap:local
-
-  postgres:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: postgres-runtime
-    image: baker-postgres:local
 
   migrate:
     build:

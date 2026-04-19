@@ -10,7 +10,9 @@ What changed:
   - `docker-compose.yml` for pulling published images
   - `docker-compose.build.yml` for local source builds
 - added a `bootstrap` container and `docker/runtime/*` scripts so the default first boot auto-generates strong persisted secrets and prints the admin password once through compose logs
-- baked the runtime helper scripts into the shipped `bootstrap`, Postgres, and Node service images so the default public path no longer requires bind-mounted repo scripts at runtime
+- baked the runtime helper scripts into the shipped Baker runtime image so the default public path no longer requires bind-mounted repo scripts at runtime for bootstrap/migration/API/gateway/media
+- consolidated the application-side published images into one canonical `baker` runtime image plus one `baker-proxy` image so Docker Hub search no longer needs to lead with separate `baker-api` / `baker-media` style app repositories
+- switched Postgres back to the official upstream image while preserving first-boot runtime secret loading through the compose bootstrap volume
 - changed the default host ports to `3000` (Web) and `3001` (Admin) so local Docker Desktop startup avoids the common `:80` bind conflict
 - changed the quick-start path so public users no longer need to copy `.env` and hand-edit secrets before the first startup
 - added `.github/workflows/publish-images.yml` so GitHub Actions can publish the runtime images to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
@@ -63,7 +65,7 @@ What changed:
 
 - audited the tracked repository contents for personal identifiers, local-only artifacts, and public-release blockers
 - replaced personal-looking example values with neutral placeholders such as `demo.example.com` and `long.username@example.com`
-- rewrote `README.md` into a bilingual public-facing project introduction
+- rewrote the root `README.md` into an English-first public-facing project introduction and added a linked `README.zh-CN.md` for Simplified Chinese readers
 - selected `AGPL-3.0` as the open-source license and added the Baker name-origin note to `README.md`
 - added baseline open-source collaboration files:
   - `CONTRIBUTING.md`

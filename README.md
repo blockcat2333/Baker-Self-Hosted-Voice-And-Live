@@ -50,6 +50,44 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
+### Docker Desktop Walkthrough
+
+If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
+
+- Image: `blockcat233/baker:latest`
+- Container name: `baker` or `baker-test`
+- Ports:
+  - host `3000` -> container `80/tcp`
+  - host `3001` -> container `8080/tcp`
+- Leave these container ports empty unless you explicitly need a TURN relay or direct database debugging:
+  - `3478/tcp`
+  - `3478/udp`
+  - `5432/tcp`
+- Volume:
+  - source / volume name: `baker-data`
+  - container path: `/var/lib/baker`
+- Environment variables: leave empty for the default local setup
+
+After the container starts:
+
+1. Open `http://localhost:3000`
+2. Open `http://localhost:3001`
+3. Read the initial admin password from:
+   `docker logs baker`
+
+If `3000` or `3001` is already in use on your machine, change them to another pair such as `13000 -> 80` and `13001 -> 8080`, then open `http://localhost:13000` and `http://localhost:13001`.
+
+### Common Mistake
+
+If Docker Desktop shows the container as running but `http://localhost:3000` and `http://localhost:3001` do not open, the usual cause is missing host-port mappings.
+
+You must publish:
+
+- host `3000` -> container `80`
+- host `3001` -> container `8080`
+
+If those host-side ports are blank, Baker is only listening inside the container and will not be reachable from your browser.
+
 ## Optional TURN Relay
 
 For internet-facing voice or livestream usage across NAT, VPN, mobile, or cross-region networks, enable the bundled TURN server in the same container and publish the relay ports:

@@ -50,6 +50,44 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
+### Docker Desktop 图形界面填写示例
+
+如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
+
+- 镜像：`blockcat233/baker:latest`
+- 容器名：`baker` 或 `baker-test`
+- 端口：
+  - 宿主机 `3000` -> 容器 `80/tcp`
+  - 宿主机 `3001` -> 容器 `8080/tcp`
+- 下面这些端口先不要填，除非你明确需要 TURN 中继或数据库调试：
+  - `3478/tcp`
+  - `3478/udp`
+  - `5432/tcp`
+- 数据卷：
+  - source / volume name：`baker-data`
+  - container path：`/var/lib/baker`
+- 环境变量：本地默认体验时先全部留空
+
+容器启动后：
+
+1. 打开 `http://localhost:3000`
+2. 打开 `http://localhost:3001`
+3. 用下面这条命令读取首次启动打印出来的管理后台密码：
+   `docker logs baker`
+
+如果你机器上的 `3000` 或 `3001` 已经被占用，可以改成例如 `13000 -> 80`、`13001 -> 8080`，然后访问 `http://localhost:13000` 和 `http://localhost:13001`。
+
+### 最常见的错误
+
+如果 Docker Desktop 里显示容器正在运行，但 `http://localhost:3000` 和 `http://localhost:3001` 打不开，最常见原因就是没有填写宿主机端口映射。
+
+必须发布：
+
+- 宿主机 `3000` -> 容器 `80`
+- 宿主机 `3001` -> 容器 `8080`
+
+如果左侧宿主机端口留空，Baker 就只会监听在容器内部，浏览器当然访问不到。
+
 ## 可选：启用 TURN 中继
 
 如果你要在公网、复杂 NAT、VPN、移动网络或跨地区环境下使用语音和直播，建议在同一个容器里启用内置 TURN，并映射中继端口：

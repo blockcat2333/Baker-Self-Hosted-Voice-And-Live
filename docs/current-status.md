@@ -65,6 +65,7 @@ Milestone 5 quality hardening plus a first real security-hardening and self-host
   - prints the admin URL/password through `docker compose logs bootstrap`
 - moved the runtime helper scripts into the shipped application image itself so the public compose path no longer depends on bind-mounting repo files into `bootstrap`, migration, API, gateway, or media containers
 - consolidated the published Baker application services into one canonical runtime image (`baker`) plus one proxy image (`baker-proxy`) so Docker Hub / Docker Desktop search surfaces a clear main image instead of separate `baker-api` / `baker-media` style app images
+- the canonical `baker` runtime image now prints a Compose-first help message and exits when launched standalone, so Docker Desktop users get an explicit hint instead of a silent immediate exit
 - switched Postgres back to the official upstream image while keeping first-boot runtime secrets through the compose bootstrap volume
 - changed the default host ports to:
   - Web on `3000`

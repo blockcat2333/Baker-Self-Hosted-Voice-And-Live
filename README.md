@@ -53,6 +53,8 @@ The stack also uses official infrastructure images for PostgreSQL, Redis, and op
 
 If Docker Hub still shows older service-specific repositories, those are legacy artifacts from earlier publishing runs. New releases are now centered on `baker` and `baker-proxy`.
 
+If you run `docker run blockcat233/baker:latest` directly, the container now prints a short Compose-first help message and exits. That image is the shared Baker runtime used by multiple services inside the stack.
+
 ### Notes
 
 - The default `docker-compose.yml` pulls published images instead of building locally.

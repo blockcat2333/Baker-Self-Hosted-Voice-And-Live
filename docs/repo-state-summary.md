@@ -230,7 +230,7 @@ Migration state:
 - `docker/Caddyfile`
   - Caddy edge config serving the user app on `:80`, the admin panel on `:8080`, `/v1` + `/health` through the API, and `/ws` through the gateway
 - `docker/runtime/*`
-  - first-boot bootstrap + runtime env loading scripts that are baked into the canonical published Baker runtime image for the prebuilt-image compose path
+  - first-boot bootstrap + runtime env loading scripts that are baked into the canonical published Baker runtime image for the prebuilt-image compose path, including the standalone help script shown to users who run `blockcat233/baker` directly
 - `.github/workflows/publish-images.yml`
   - GitHub Actions workflow for publishing the canonical `baker` and `baker-proxy` images to GHCR and optionally Docker Hub for searchable Docker Desktop discovery
 - `packages/shared/package.json`

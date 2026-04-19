@@ -33,8 +33,10 @@ COPY --from=services-builder /app/packages ./packages
 COPY docker/runtime/bootstrap.sh /opt/baker-runtime/bootstrap.sh
 COPY docker/runtime/lib.sh /opt/baker-runtime/lib.sh
 COPY docker/runtime/node-service-entrypoint.sh /opt/baker-runtime/node-service-entrypoint.sh
-RUN chmod +x /opt/baker-runtime/bootstrap.sh /opt/baker-runtime/lib.sh /opt/baker-runtime/node-service-entrypoint.sh
+COPY docker/runtime/standalone-help.sh /opt/baker-runtime/standalone-help.sh
+RUN chmod +x /opt/baker-runtime/bootstrap.sh /opt/baker-runtime/lib.sh /opt/baker-runtime/node-service-entrypoint.sh /opt/baker-runtime/standalone-help.sh
 RUN node -e 'const fs = require("node:fs"); for (const name of ["shared", "protocol", "db"]) { const path = "/app/packages/" + name + "/package.json"; const pkg = JSON.parse(fs.readFileSync(path, "utf8")); pkg.main = "./dist/index.js"; pkg.types = "./dist/index.d.ts"; fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n"); }'
+CMD ["sh", "/opt/baker-runtime/standalone-help.sh"]
 
 FROM workspace-base AS proxy-builder
 

@@ -74,7 +74,7 @@
   - `/ws` proxies to `apps/gateway`
 - the default host bindings are now `:3000 -> :80` for Web and `:3001 -> :8080` for Admin so local Docker Desktop startup avoids common port-80 collisions; operators can still override them through `.env`
 - Postgres and Redis bind to `127.0.0.1` on the host by default so the exposed surface is the proxy tier rather than raw infra ports
-- the default `docker-compose.yml` is now registry-first and pulls a canonical self-contained `baker` runtime image plus `baker-proxy`; `docker-compose.build.yml` re-enables local source builds for contributors and validation
+- the default `docker-compose.yml` is now registry-first and pulls a canonical self-contained `baker` runtime image plus `baker-proxy`; `docker-compose.build.yml` re-enables local source builds for contributors and validation, and the standalone `baker` image now prints a Compose-first hint when launched by itself
 - first boot now runs a dedicated `bootstrap` container that writes persisted runtime secrets/admin credentials into a Docker volume consumed by the service containers
 - the image publish workflow targets GHCR by default and can optionally mirror the canonical `baker` / `baker-proxy` images to Docker Hub for Docker Desktop search/discovery
 - the optional coturn container stays behind the `turn` compose profile to avoid forcing TURN relay ports on every small/local deployment

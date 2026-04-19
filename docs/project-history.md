@@ -12,6 +12,7 @@ What changed:
 - added a `bootstrap` container and `docker/runtime/*` scripts so the default first boot auto-generates strong persisted secrets and prints the admin password once through compose logs
 - baked the runtime helper scripts into the shipped Baker runtime image so the default public path no longer requires bind-mounted repo scripts at runtime for bootstrap/migration/API/gateway/media
 - consolidated the application-side published images into one canonical `baker` runtime image plus one `baker-proxy` image so Docker Hub search no longer needs to lead with separate `baker-api` / `baker-media` style app repositories
+- added a standalone help command to the canonical `baker` runtime image so Docker Desktop users who launch it directly are pointed back to the Compose stack instead of seeing an unexplained exit
 - switched Postgres back to the official upstream image while preserving first-boot runtime secret loading through the compose bootstrap volume
 - changed the default host ports to `3000` (Web) and `3001` (Admin) so local Docker Desktop startup avoids the common `:80` bind conflict
 - changed the quick-start path so public users no longer need to copy `.env` and hand-edit secrets before the first startup

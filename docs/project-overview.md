@@ -41,7 +41,7 @@ Current validated state:
 - `pnpm test` passes
 - `pnpm audit --prod` passes
 - `docker compose --project-name baker-smoke -f docker-compose.yml -f docker-compose.build.yml up -d --build` self-hosted smoke test passes with healthy `api`, `gateway`, `media`, and `proxy`, plus working `http://localhost:3000` (Web) and `http://localhost:3001` (Admin) entrypoints
-- public-facing repo docs now include an English-first `README.md`, a linked `README.zh-CN.md`, plus baseline contribution, security, conduct, and issue/PR templates
+- public-facing repo docs now include an English-first `README.md`, a linked `README.zh-CN.md`, plus baseline contribution, security, conduct, and issue/PR templates, and the canonical `baker` image now explains that Compose is the supported startup path when users launch it directly
 
 ## Tech Stack
 

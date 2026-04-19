@@ -68,6 +68,10 @@ If you prefer Docker Desktop instead of the command line, use these exact values
   - container path: `/var/lib/baker`
 - Environment variables: leave empty for the default local setup
 
+Example screen:
+
+![Docker Desktop example for Baker](./ScreenShot_2026-04-19_041048_485.png)
+
 After the container starts:
 
 1. Open `http://localhost:3000`

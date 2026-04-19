@@ -68,6 +68,10 @@ docker logs baker
   - container path：`/var/lib/baker`
 - 环境变量：本地默认体验时先全部留空
 
+示例截图：
+
+![Baker Docker Desktop 中文示例](./微信图片_20260419041022_6_128.png)
+
 容器启动后：
 
 1. 打开 `http://localhost:3000`

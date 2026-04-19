@@ -262,9 +262,9 @@ Scripts:
 Community and release metadata:
 
 - `README.md`
-  - public-facing English-first project introduction for GitHub visitors
+  - public-facing English-first project introduction for GitHub visitors, now including a Docker Desktop walkthrough and English setup screenshot for the one-container path
 - `README.zh-CN.md`
-  - linked Simplified Chinese introduction and deployment guide
+  - linked Simplified Chinese introduction and deployment guide, now including the matching Chinese Docker Desktop walkthrough and setup screenshot
 - `CONTRIBUTING.md`
   - contributor workflow, validation loop, boundaries, and privacy expectations
 - `SECURITY.md`

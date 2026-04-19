@@ -23,6 +23,7 @@ What changed:
 - changed the quick-start path so public users no longer need to copy `.env` and hand-edit secrets before the first startup
 - added `.github/workflows/publish-images.yml` so GitHub Actions can publish `baker`, `baker-runtime`, and `baker-proxy` to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
 - updated `.env.selfhost.example` so it now documents optional fixed-secret/image overrides instead of mandatory first-run secret editing
+- expanded both `README.md` and `README.zh-CN.md` with a Docker Desktop walkthrough that shows the exact port/volume fields to fill and embeds matching English/Chinese screenshots from the live UI flow
 
 Why:
 
@@ -31,6 +32,7 @@ Why:
 - self-contained images are required before the app can realistically be pulled and started from registry-discovery surfaces such as Docker Desktop
 - the advanced Compose topology still matters for operators who want service separation, but it should be the second story instead of the first
 - Docker Hub mirroring is the piece that makes those images directly searchable in Docker Desktop
+- new self-hosted users were still getting blocked by Docker Desktop's container form even after the all-in-one image existed, so the landing docs now teach the GUI path directly instead of assuming command-line familiarity
 
 ## 2026-04-18
 

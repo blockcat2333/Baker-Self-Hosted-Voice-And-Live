@@ -24,6 +24,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - self-hosted Docker Compose baseline: complete and validated
 - prebuilt-image self-hosted Docker path: complete and validated
 - all-in-one Baker image path: complete and validated
+- newcomer Docker Desktop documentation pass: complete and validated
 
 ## Recently Completed
 
@@ -93,6 +94,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
   - multi-service Compose as the advanced path
   - `.env` as an optional advanced override, not a mandatory first-run step
   - Docker Hub mirroring as the searchable-image path for Docker Desktop discovery
+- expanded the English and Chinese GitHub landing docs with a Docker Desktop form walkthrough, explicit port/volume values, the most common missing-port-mapping mistake, and matching UI screenshots so new users can follow the setup without translating field names manually
 
 ### 2026-04-18 Open-Source Publication Prep
 

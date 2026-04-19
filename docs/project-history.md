@@ -24,6 +24,8 @@ What changed:
 - added `.github/workflows/publish-images.yml` so GitHub Actions can publish `baker`, `baker-runtime`, and `baker-proxy` to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
 - updated `.env.selfhost.example` so it now documents optional fixed-secret/image overrides instead of mandatory first-run secret editing
 - expanded both `README.md` and `README.zh-CN.md` with a Docker Desktop walkthrough that shows the exact port/volume fields to fill and embeds matching English/Chinese screenshots from the live UI flow
+- moved those screenshots to the top introduction area of both landing pages and added a plain-text Chinese entry link near the top of `README.md`
+- moved the screenshot assets themselves under `docs/images/`, relocated the personal launcher template to `docs/examples/dev-test.local.env.example`, and expanded the homepage introduction to call out browser-only usage, game/screen sharing, and the HTTPS requirement for media features
 
 Why:
 
@@ -33,6 +35,8 @@ Why:
 - the advanced Compose topology still matters for operators who want service separation, but it should be the second story instead of the first
 - Docker Hub mirroring is the piece that makes those images directly searchable in Docker Desktop
 - new self-hosted users were still getting blocked by Docker Desktop's container form even after the all-in-one image existed, so the landing docs now teach the GUI path directly instead of assuming command-line familiarity
+- the badge-only bilingual entry was still easy to miss, and the screenshots work better as part of the first impression near the project introduction instead of being buried deeper in the setup section
+- GitHub root clarity matters for first-time open-source visitors, but Docker/GitHub convention files still need to stay at the top level, so this pass only moved safe assets/examples while making the homepage explain the real deployment story faster
 
 ## 2026-04-18
 
@@ -329,7 +333,7 @@ What changed:
   - widened desktop sidebar and hardened account-panel truncation so long IDs no longer push edit controls out of view
 - startup/docs:
   - `scripts/dev-up.ps1` now prints a required open-port checklist with protocol mode (TCP/UDP/TCP+UDP), including TURN relay ranges
-  - added `docs/dev-test-personal-config.md` + `dev-test.local.env.example` to move personal launcher values out of scripts
+  - added `docs/dev-test-personal-config.md` + `docs/examples/dev-test.local.env.example` to move personal launcher values out of scripts
 
 Why:
 

@@ -25,6 +25,8 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - prebuilt-image self-hosted Docker path: complete and validated
 - all-in-one Baker image path: complete and validated
 - newcomer Docker Desktop documentation pass: complete and validated
+- root documentation declutter pass: complete and validated
+- landing-page screenshot/link prominence pass: complete and validated
 
 ## Recently Completed
 
@@ -95,6 +97,8 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
   - `.env` as an optional advanced override, not a mandatory first-run step
   - Docker Hub mirroring as the searchable-image path for Docker Desktop discovery
 - expanded the English and Chinese GitHub landing docs with a Docker Desktop form walkthrough, explicit port/volume values, the most common missing-port-mapping mistake, and matching UI screenshots so new users can follow the setup without translating field names manually
+- moved the landing-page screenshots into the opening introduction area and added a plain-text `点此查看中文` link near the top of the English homepage so bilingual navigation is more obvious
+- moved public-facing screenshot assets under `docs/images/`, moved the personal launcher example env to `docs/examples/`, and expanded the landing-page introduction so GitHub visitors immediately understand browser-only usage, game/screen sharing support, and the HTTPS requirement for media features
 
 ### 2026-04-18 Open-Source Publication Prep
 
@@ -278,7 +282,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 **Startup scripts / docs**
 
 - `scripts/dev-up.ps1` now prints a clear open-port checklist with protocol type (TCP / UDP / TCP+UDP), including TURN entry and relay ranges
-- personal one-click startup values are now documented in `docs/dev-test-personal-config.md` and template file `dev-test.local.env.example`
+- personal one-click startup values are now documented in `docs/dev-test-personal-config.md` and template file `docs/examples/dev-test.local.env.example`
 
 ### Cross-Network Voice/Stream TURN Runtime Fix (dev-test)
 

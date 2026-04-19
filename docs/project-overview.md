@@ -43,7 +43,7 @@ Current validated state:
 - `pnpm audit --prod` passes
 - `docker compose --project-name baker-smoke -f docker-compose.yml -f docker-compose.build.yml up -d --build` self-hosted smoke test passes with healthy `api`, `gateway`, `media`, and `proxy`, plus working `http://localhost:3000` (Web) and `http://localhost:3001` (Admin) entrypoints
 - `docker run -d -p 3000:80 -p 3001:8080 -v baker-data:/var/lib/baker blockcat233/baker:latest` now starts a validated all-in-one Baker instance with persisted secrets/data and optional bundled TURN
-- public-facing repo docs now include an English-first `README.md`, a linked `README.zh-CN.md`, plus baseline contribution, security, conduct, and issue/PR templates, and the homepage now leads with the one-container path while documenting the advanced Compose migration to `baker-runtime`
+- public-facing repo docs now include an English-first `README.md`, a linked `README.zh-CN.md`, plus baseline contribution, security, conduct, and issue/PR templates; the homepage leads with the one-container path, calls out browser-only game/screen sharing plus the HTTPS requirement, and keeps auxiliary assets/examples under `docs/` instead of cluttering the root
 
 ## Tech Stack
 
@@ -73,7 +73,7 @@ Current validated state:
 - `packages/shared`: env/logger/result helpers
 - `packages/db`: DB client, schema, and repositories
 - `docker`: self-hosted proxy configuration
-- `docs`: architecture, history, status, decisions
+- `docs`: architecture, history, status, decisions, example configs, and landing-page assets
 - root collaboration docs: `README.md`, `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.github/*`, `.env.selfhost.example`, `Dockerfile`, `docker-compose.yml`, `docker-compose.build.yml`
 
 ## Module Responsibilities

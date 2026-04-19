@@ -4,7 +4,7 @@
 
 ## How to configure
 
-1. Copy `dev-test.local.env.example` to `dev-test.local.env`.
+1. Copy `docs/examples/dev-test.local.env.example` to `dev-test.local.env`.
 2. Fill your own values in `dev-test.local.env`.
 3. Run `dev-test.bat` as usual.
 

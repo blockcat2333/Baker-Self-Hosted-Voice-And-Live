@@ -4,11 +4,19 @@
   </a>
 </p>
 
+**[点此查看中文](./README.zh-CN.md)**
+
 # Baker
 
 Baker is a self-hosted, Discord-like realtime communication platform for private communities, game groups, and small teams.
 
+It supports browser-based text chat, low-latency voice rooms, and in-room game or screen sharing without requiring users to install a dedicated client. Deploy the server once, open it in a modern browser, and your users can join immediately.
+
+Because voice, microphone, camera, and screen sharing rely on secure browser media APIs, Baker should be served over HTTPS in real deployments.
+
 The project name is inspired by Baker from Arknights: Endfield.
+
+![Docker Desktop example for Baker](./docs/images/docker-desktop-en.png)
 
 ## Project Direction
 
@@ -67,10 +75,6 @@ If you prefer Docker Desktop instead of the command line, use these exact values
   - source / volume name: `baker-data`
   - container path: `/var/lib/baker`
 - Environment variables: leave empty for the default local setup
-
-Example screen:
-
-![Docker Desktop example for Baker](./ScreenShot_2026-04-19_041048_485.png)
 
 After the container starts:
 

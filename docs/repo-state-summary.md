@@ -250,7 +250,7 @@ Scripts:
   - stops leftover dev servers (by ports + saved PIDs) and starts infra + services with logs; auto-picks usable ports when Windows excludes `3001-3003`; honors persisted `webPort` from `/v1/meta/public-config` on restart; proactively ensures Docker engine readiness (best-effort auto-start Docker Desktop + wait), emits live daemon-error diagnostics, performs one automatic stuck-start recovery attempt (`restart Docker Desktop + wsl --shutdown`), and fails fast if Docker remains unhealthy; forwards `STUN_URLS`/`TURN_*` from `.env` into services for WebRTC reliability tuning; writes resolved runtime ports to `output/dev/runtime-ports.json`; `-EnableTurn -TurnHost <host>` starts the local compose TURN relay, validates that `baker-turn` is actually healthy, writes effective TURN runtime details to `output/dev/turn-runtime.json`, enforces public TURN_EXTERNAL_IP for public hosts (no silent LAN fallback), and prints an open-port/protocol checklist
 - `docs/dev-test-personal-config.md`
   - personal launcher configuration guidance and port/protocol checklist for local one-click startup
-- `dev-test.local.env.example`
+- `docs/examples/dev-test.local.env.example`
   - local-only starter template for one-click launcher personal settings
 - `scripts/dev-https.ps1`
   - starts Caddy HTTPS reverse proxy for the web dev server (secure context for mobile mic/voice) and now resolves upstream from runtime metadata/Vite logs before fallback ports to avoid stale `:80` proxying
@@ -262,9 +262,13 @@ Scripts:
 Community and release metadata:
 
 - `README.md`
-  - public-facing English-first project introduction for GitHub visitors, now including a Docker Desktop walkthrough and English setup screenshot for the one-container path
+  - public-facing English-first project introduction for GitHub visitors, now including a prominent plain-text Chinese entry link near the top, a top-of-page English setup screenshot, browser-only game/screen sharing and HTTPS callouts, and a Docker Desktop walkthrough for the one-container path
 - `README.zh-CN.md`
-  - linked Simplified Chinese introduction and deployment guide, now including the matching Chinese Docker Desktop walkthrough and setup screenshot
+  - linked Simplified Chinese introduction and deployment guide, now including the matching top-of-page Chinese setup screenshot plus the Docker Desktop walkthrough
+- `docs/images/docker-desktop-en.png`
+  - English GitHub landing-page screenshot asset referenced from `README.md`
+- `docs/images/docker-desktop-zh.png`
+  - Chinese GitHub landing-page screenshot asset referenced from `README.zh-CN.md`
 - `CONTRIBUTING.md`
   - contributor workflow, validation loop, boundaries, and privacy expectations
 - `SECURITY.md`

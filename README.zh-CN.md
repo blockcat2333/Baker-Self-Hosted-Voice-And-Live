@@ -1,4 +1,4 @@
-<p align="right">
+﻿<p align="right">
   <a href="./README.md">
     <img alt="English" src="https://img.shields.io/badge/English-Guide-111827?style=for-the-badge">
   </a>
@@ -8,7 +8,13 @@
 
 Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时通信平台，适合私有社区、游戏群组和小团队。
 
+它支持浏览器中的文字聊天、低延迟语音房间，以及房间内的游戏/屏幕共享，不需要额外安装专用客户端。只要部署这一套服务端，用户直接用现代浏览器打开即可加入。
+
+由于语音、麦克风、摄像头和屏幕共享依赖浏览器的安全媒体 API，正式部署时应该通过 HTTPS 提供服务。
+
 项目名 Baker 取自《明日方舟：终末地》中的 Baker。
+
+![Baker Docker Desktop Chinese example](./docs/images/docker-desktop-zh.png)
 
 ## 项目方向
 
@@ -70,7 +76,6 @@ docker logs baker
 
 示例截图：
 
-![Baker Docker Desktop 中文示例](./微信图片_20260419041022_6_128.png)
 
 容器启动后：
 

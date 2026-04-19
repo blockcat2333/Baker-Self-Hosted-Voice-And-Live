@@ -56,7 +56,7 @@
 
 ### Deployment Topology
 
-- the primary newcomer deployment path is now the all-in-one `blockcat233/baker` image
+- the only supported public deployment path is the all-in-one `blockcat233/baker` image
 - the all-in-one image bundles:
   - web/admin static assets
   - API, gateway, and media runtimes
@@ -65,28 +65,15 @@
   - Caddy
   - optional coturn
 - the all-in-one container persists runtime secrets plus service data under `/var/lib/baker`
-- Docker Compose remains the advanced self-hosted runtime topology
-- the shipped advanced compose topology is:
-  - `bootstrap`
-  - `postgres`
-  - `redis`
-  - `migrate`
-  - `api`
-  - `gateway`
-  - `media`
-  - `proxy`
-  - optional `turn`
-- Caddy is the public edge in the default topology:
+- Caddy is the public edge inside the container:
   - `:80` serves the user web app
   - `:8080` serves the admin panel
   - `/v1` and `/health` proxy to `apps/api`
   - `/ws` proxies to `apps/gateway`
-- the default host bindings are now `:3000 -> :80` for Web and `:3001 -> :8080` for Admin so local Docker Desktop startup avoids common port-80 collisions; operators can still override them through `.env`
-- Postgres and Redis bind to `127.0.0.1` on the host by default so the exposed surface is the proxy tier rather than raw infra ports
-- the default `docker-compose.yml` is now registry-first and pulls `baker-runtime` plus `baker-proxy`; `docker-compose.build.yml` re-enables local source builds for contributors and validation, and the standalone `baker-runtime` image now prints a Compose-first hint when launched by itself
-- first boot now runs a dedicated `bootstrap` container that writes persisted runtime secrets/admin credentials into a Docker volume consumed by the service containers
-- the image publish workflow targets GHCR by default and can optionally mirror `baker`, `baker-runtime`, and `baker-proxy` to Docker Hub for Docker Desktop search/discovery
-- the all-in-one image keeps TURN disabled by default and only starts coturn when `TURN_ENABLED=true`; the advanced compose topology still keeps coturn behind the `turn` profile to avoid forcing relay ports on every small/local deployment
+- the default host bindings are `:3000 -> :80` for Web and `:3001 -> :8080` for Admin so local Docker Desktop startup avoids common port-80 collisions
+- the image publish workflow now targets the single public `baker` image on Docker Hub
+- the all-in-one image keeps TURN disabled by default and only starts coturn when `TURN_ENABLED=true`
+- `docker-compose.yml` remains in the repo only for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment topology
 
 ## Protocol Design
 

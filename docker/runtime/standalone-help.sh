@@ -3,24 +3,21 @@
 set -eu
 
 cat <<'EOF'
-Baker's `blockcat233/baker-runtime` image is the advanced Compose runtime image, not a standalone all-in-one container.
+Baker's `services-runtime` image target is an internal runtime layer for local development and image assembly. It is not the supported public deployment entrypoint.
 
-Use Docker Compose to start the full stack instead:
+Use the published all-in-one image instead:
 
-  1. Copy `.env.selfhost.example` to `.env` only if you want fixed secrets, custom ports, or custom image tags.
-  2. Start the stack:
-       docker compose up -d
-  3. Read the first-boot output:
-       docker compose logs bootstrap
+  docker run -d --name baker \
+    -p 3000:80 \
+    -p 3001:8080 \
+    -v baker-data:/var/lib/baker \
+    blockcat233/baker:latest
 
-The advanced Compose stack starts Baker with:
-  - blockcat233/baker-runtime
-  - blockcat233/baker-proxy
-  - postgres:16-alpine
-  - redis:7-alpine
+Then open:
+  - http://localhost:3000
+  - http://localhost:3001
 
-If you want the easiest direct-start image, use `blockcat233/baker`.
-If you want the advanced multi-service deployment, run the Compose stack from the repository root.
+Browser voice, camera, and screen sharing require HTTPS in real deployments.
 EOF
 
 exit 64

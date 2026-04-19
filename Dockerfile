@@ -110,9 +110,3 @@ VOLUME ["/var/lib/baker"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 CMD ["/opt/baker-allinone/healthcheck.sh"]
 
 ENTRYPOINT ["/opt/baker-allinone/entrypoint.sh"]
-
-FROM caddy:2.10-alpine AS proxy-runtime
-
-COPY docker/Caddyfile /etc/caddy/Caddyfile
-COPY --from=proxy-builder /app/apps/web/dist /srv/web
-COPY --from=proxy-builder /app/apps/admin/dist /srv/admin

@@ -2,27 +2,43 @@
 
 ## 2026-04-18
 
+### Single-image public deployment consolidation
+
+What changed:
+
+- reduced image publishing to a single public image: `blockcat233/baker`
+- changed `.github/workflows/publish-images.yml` so it now publishes only the all-in-one Baker image to Docker Hub
+- removed the no-longer-supported public deployment files:
+  - `docker-compose.build.yml`
+  - `.env.selfhost.example`
+  - `docker/Caddyfile`
+- repurposed `docker-compose.yml` into a local development infrastructure stack for:
+  - `postgres`
+  - `redis`
+  - optional `turn`
+- updated the landing docs to frame Baker as a browser-first service deployment:
+  - users do not need a dedicated client
+  - game/screen sharing is supported in-browser
+  - HTTPS is required for browser media features
+
+Why:
+
+- the public open-source story should be one obvious path, not multiple partially overlapping deployment products
+- keeping legacy image names around in docs and publishing workflows made GitHub Packages and Docker Hub look noisier than the actual product
+- `docker-compose.yml` is still useful for contributor infrastructure, but it should not be marketed as a second public deployment track when the product direction is now clearly one-container-first
+
 ### Docker image delivery pass
 
 What changed:
 
-- split the self-hosted Docker path into:
-  - `docker-compose.yml` for pulling published images
-  - `docker-compose.build.yml` for local source builds
 - added a `bootstrap` container and `docker/runtime/*` scripts so the default first boot auto-generates strong persisted secrets and prints the admin password once through compose logs
 - baked the runtime helper scripts into the shipped Baker runtime image so the default public path no longer requires bind-mounted repo scripts at runtime for bootstrap/migration/API/gateway/media
 - introduced a true all-in-one `baker` image that now bundles web/admin assets, API/gateway/media, PostgreSQL, Redis, Caddy, and optional coturn under `supervisord`
-- changed the public image roles to:
-  - `baker` for the easiest direct `docker run` deployment
-  - `baker-runtime` for the advanced Compose runtime image
-  - `baker-proxy` for the advanced Compose edge image
-- moved the standalone help command to `baker-runtime`, so Compose users who launch the runtime image directly are pointed back to the advanced stack while the public `baker` image actually starts the app
 - added TURN-in-the-same-container support behind `TURN_ENABLED=false` by default; enabling TURN now requires credentials and can auto-derive `TURN_URLS` from `TURN_EXTERNAL_IP`
 - switched Postgres back to the official upstream image while preserving first-boot runtime secret loading through the compose bootstrap volume
 - changed the default host ports to `3000` (Web) and `3001` (Admin) so local Docker Desktop startup avoids the common `:80` bind conflict
 - changed the quick-start path so public users no longer need to copy `.env` and hand-edit secrets before the first startup
-- added `.github/workflows/publish-images.yml` so GitHub Actions can publish `baker`, `baker-runtime`, and `baker-proxy` to GHCR on `main`/tag pushes and optionally mirror them to Docker Hub when repo secrets are configured
-- updated `.env.selfhost.example` so it now documents optional fixed-secret/image overrides instead of mandatory first-run secret editing
+- added `.github/workflows/publish-images.yml` so GitHub Actions can publish the all-in-one `baker` image to Docker Hub
 - expanded both `README.md` and `README.zh-CN.md` with a Docker Desktop walkthrough that shows the exact port/volume fields to fill and embeds matching English/Chinese screenshots from the live UI flow
 - moved those screenshots to the top introduction area of both landing pages and added a plain-text Chinese entry link near the top of `README.md`
 - moved the screenshot assets themselves under `docs/images/`, relocated the personal launcher template to `docs/examples/dev-test.local.env.example`, and expanded the homepage introduction to call out browser-only usage, game/screen sharing, and the HTTPS requirement for media features
@@ -32,8 +48,6 @@ Why:
 - public self-hosted users should not need a local build toolchain for the default deployment path
 - a real one-container image is materially easier for newcomers than teaching the full multi-service topology first
 - self-contained images are required before the app can realistically be pulled and started from registry-discovery surfaces such as Docker Desktop
-- the advanced Compose topology still matters for operators who want service separation, but it should be the second story instead of the first
-- Docker Hub mirroring is the piece that makes those images directly searchable in Docker Desktop
 - new self-hosted users were still getting blocked by Docker Desktop's container form even after the all-in-one image existed, so the landing docs now teach the GUI path directly instead of assuming command-line familiarity
 - the badge-only bilingual entry was still easy to miss, and the screenshots work better as part of the first impression near the project introduction instead of being buried deeper in the setup section
 - GitHub root clarity matters for first-time open-source visitors, but Docker/GitHub convention files still need to stay at the top level, so this pass only moved safe assets/examples while making the homepage explain the real deployment story faster

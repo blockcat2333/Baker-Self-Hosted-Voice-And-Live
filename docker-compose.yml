@@ -1,51 +1,13 @@
 services:
-  bootstrap:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
-    command: ['sh', '/opt/baker-runtime/bootstrap.sh']
-    environment:
-      NODE_ENV: '${NODE_ENV:-production}'
-      WEB_PORT: '${WEB_PORT:-3000}'
-      ADMIN_HTTP_PORT: '${ADMIN_HTTP_PORT:-3001}'
-      POSTGRES_DB: '${POSTGRES_DB:-}'
-      POSTGRES_USER: '${POSTGRES_USER:-}'
-      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-}'
-      JWT_ACCESS_SECRET: '${JWT_ACCESS_SECRET:-}'
-      JWT_REFRESH_SECRET: '${JWT_REFRESH_SECRET:-}'
-      MEDIA_INTERNAL_SECRET: '${MEDIA_INTERNAL_SECRET:-}'
-      ADMIN_PANEL_PASSWORD: '${ADMIN_PANEL_PASSWORD:-}'
-      DESKTOP_DEV_SERVER_URL: '${DESKTOP_DEV_SERVER_URL:-http://localhost:5174}'
-      VITE_ALLOWED_HOSTS: '${VITE_ALLOWED_HOSTS:-}'
-      ALLOWED_HOSTS: '${ALLOWED_HOSTS:-}'
-      STUN_URLS: '${STUN_URLS:-stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302}'
-      TURN_URLS: '${TURN_URLS:-}'
-      TURN_USERNAME: '${TURN_USERNAME:-}'
-      TURN_PASSWORD: '${TURN_PASSWORD:-}'
-      TURN_REALM: '${TURN_REALM:-baker}'
-      TURN_PORT: '${TURN_PORT:-3478}'
-      TURN_MIN_PORT: '${TURN_MIN_PORT:-49160}'
-      TURN_MAX_PORT: '${TURN_MAX_PORT:-49200}'
-      TURN_EXTERNAL_IP: '${TURN_EXTERNAL_IP:-}'
-    restart: 'no'
-    volumes:
-      - runtime-config:/run/baker
-
   postgres:
-    image: '${BAKER_POSTGRES_IMAGE:-postgres:16-alpine}'
+    image: postgres:16-alpine
     container_name: baker-postgres
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-    entrypoint:
-      - sh
-      - -ec
-      - |
-        . /run/baker/runtime.env
-        export POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
-        exec docker-entrypoint.sh "$$@"
-      - sh
-    command: ['postgres']
+    environment:
+      POSTGRES_DB: '${POSTGRES_DB:-baker}'
+      POSTGRES_USER: '${POSTGRES_USER:-baker}'
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:-baker}'
     healthcheck:
-      test: ['CMD-SHELL', '. /run/baker/runtime.env && pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -54,10 +16,9 @@ services:
     restart: unless-stopped
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - runtime-config:/run/baker:ro
 
   redis:
-    image: '${BAKER_REDIS_IMAGE:-redis:7-alpine}'
+    image: redis:7-alpine
     container_name: baker-redis
     command: ['redis-server', '--appendonly', 'yes']
     healthcheck:
@@ -71,114 +32,9 @@ services:
     volumes:
       - redis-data:/data
 
-  migrate:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
-    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
-    command: ['pnpm', '--filter', '@baker/db', 'db:push']
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    restart: 'no'
-    volumes:
-      - runtime-config:/run/baker:ro
-
-  api:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
-    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
-    command: ['node', 'apps/api/dist/index.js']
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3001/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
-        ]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-    volumes:
-      - runtime-config:/run/baker:ro
-
-  media:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
-    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
-    command: ['node', 'apps/media/dist/index.js']
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3003/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
-        ]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-    volumes:
-      - runtime-config:/run/baker:ro
-
-  gateway:
-    image: '${BAKER_RUNTIME_IMAGE:-ghcr.io/blockcat2333/baker-runtime:latest}'
-    entrypoint: ['sh', '/opt/baker-runtime/node-service-entrypoint.sh']
-    command: ['node', 'apps/gateway/dist/index.js']
-    depends_on:
-      bootstrap:
-        condition: service_completed_successfully
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      media:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          'CMD',
-          'node',
-          '-e',
-          "fetch('http://127.0.0.1:3002/health').then((res) => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))",
-        ]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    restart: unless-stopped
-    volumes:
-      - runtime-config:/run/baker:ro
-
-  proxy:
-    image: '${BAKER_PROXY_IMAGE:-ghcr.io/blockcat2333/baker-proxy:latest}'
-    depends_on:
-      api:
-        condition: service_healthy
-      gateway:
-        condition: service_healthy
-    ports:
-      - '${WEB_PORT:-3000}:80'
-      - '${ADMIN_HTTP_PORT:-3001}:8080'
-    restart: unless-stopped
-
   # Optional TURN relay for WebRTC reliability across NAT/VPN/cross-region networks.
-  # Enable by setting TURN_URLS/TURN_USERNAME/TURN_PASSWORD and starting via:
-  #   docker compose --profile turn up -d turn
+  # This is for local development/testing only. Public deployment should use the
+  # bundled TURN support inside `blockcat233/baker`.
   turn:
     image: coturn/coturn:4.6.2
     container_name: baker-turn
@@ -201,7 +57,7 @@ services:
     command:
       - |
         if [ -z "$$TURN_USERNAME" ] || [ -z "$$TURN_PASSWORD" ]; then
-          echo "TURN_USERNAME/TURN_PASSWORD must be set (see .env.selfhost.example). Refusing to start an open TURN relay."
+          echo "TURN_USERNAME/TURN_PASSWORD must be set before starting the local TURN relay. Refusing to start an open TURN relay."
           exit 1
         fi
         if [ -n "$$TURN_EXTERNAL_IP" ]; then
@@ -221,4 +77,3 @@ services:
 volumes:
   postgres-data:
   redis-data:
-  runtime-config:

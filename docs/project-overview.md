@@ -14,7 +14,7 @@ Baker is a Discord-like realtime social communication product. The target scope 
 
 ## Current Milestone
 
-Current milestone: `Milestone 5` stability, quality, and deployment hardening after the Milestone 4 multi-stream redesign, with revised stability/UX scope complete (per-user voice link quality fanout, non-joined voice roster visibility, bitrate+1440p stream quality, auth/bootstrap and gateway reconnect hardening, startup-script governance) plus follow-up security fixes for media-internal auth, session-backed token validation, logout revocation, browser-storage hardening, and a smoke-tested self-hosted deployment story that now offers both a real all-in-one `baker` image for newcomers and a preserved advanced Docker Compose topology built around `baker-runtime`.
+Current milestone: `Milestone 5` stability, quality, and deployment hardening after the Milestone 4 multi-stream redesign, with revised stability/UX scope complete (per-user voice link quality fanout, non-joined voice roster visibility, bitrate+1440p stream quality, auth/bootstrap and gateway reconnect hardening, startup-script governance) plus follow-up security fixes for media-internal auth, session-backed token validation, logout revocation, browser-storage hardening, and a smoke-tested single-image self-hosted deployment story built around `blockcat233/baker`.
 
 Current validated state:
 
@@ -33,15 +33,12 @@ Current validated state:
 - server control panel baseline complete
 - revised M5 stability/UX slice complete (server RTT/roster visibility/bitrate/auth recovery/startup governance)
 - revised M5.2 slice complete (per-user voice network snapshots, close/handshake reconnect hardening, voice/stream layout fixes)
-- self-hosted Docker Compose baseline complete
-- advanced prebuilt-image Docker Compose quick-start complete
 - all-in-one Docker quick-start complete
 - protocol compatibility, gateway runtime, stream-session repository, client-state migration, and gallery UI stages are complete
 - `pnpm typecheck` passes
 - `pnpm lint` passes
 - `pnpm test` passes
 - `pnpm audit --prod` passes
-- `docker compose --project-name baker-smoke -f docker-compose.yml -f docker-compose.build.yml up -d --build` self-hosted smoke test passes with healthy `api`, `gateway`, `media`, and `proxy`, plus working `http://localhost:3000` (Web) and `http://localhost:3001` (Admin) entrypoints
 - `docker run -d -p 3000:80 -p 3001:8080 -v baker-data:/var/lib/baker blockcat233/baker:latest` now starts a validated all-in-one Baker instance with persisted secrets/data and optional bundled TURN
 - public-facing repo docs now include an English-first `README.md`, a linked `README.zh-CN.md`, plus baseline contribution, security, conduct, and issue/PR templates; the homepage leads with the one-container path, calls out browser-only game/screen sharing plus the HTTPS requirement, and keeps auxiliary assets/examples under `docs/` instead of cluttering the root
 
@@ -53,7 +50,7 @@ Current validated state:
 - Desktop: Electron + React
 - API: Fastify
 - Realtime gateway: Fastify WebSocket
-- Self-hosted runtime: one-container Docker image or advanced Docker Compose + Caddy
+- Self-hosted runtime: one-container Docker image
 - Data: PostgreSQL + Redis
 - Schema: Drizzle ORM
 - Validation / protocol schema: Zod
@@ -72,9 +69,9 @@ Current validated state:
 - `packages/sdk`: client transport wrappers and WebRTC helpers
 - `packages/shared`: env/logger/result helpers
 - `packages/db`: DB client, schema, and repositories
-- `docker`: self-hosted proxy configuration
+- `docker`: container runtime and local infrastructure support files
 - `docs`: architecture, history, status, decisions, example configs, and landing-page assets
-- root collaboration docs: `README.md`, `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.github/*`, `.env.selfhost.example`, `Dockerfile`, `docker-compose.yml`, `docker-compose.build.yml`
+- root collaboration docs: `README.md`, `LICENSE`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.github/*`, `Dockerfile`, `docker-compose.yml`
 
 ## Module Responsibilities
 
@@ -83,8 +80,8 @@ Current validated state:
 - Browser capture and WebRTC peer logic live in the client/sdk layer.
 - Media adapter and future SFU work stay behind `apps/media`.
 - The admin panel manages durable server/workspace settings, not realtime room orchestration.
-- the primary newcomer path is the published all-in-one `baker` image, which bundles the current service topology into one container with one data root at `/var/lib/baker`
-- Docker Compose remains the advanced self-hosted topology, with published `baker-runtime` and `baker-proxy` images, local source-build overrides for contributors, and Caddy as the public edge for web/admin/API/gateway routes
+- the primary self-hosted path is the published all-in-one `baker` image, which bundles the current service topology into one container with one data root at `/var/lib/baker`
+- `docker-compose.yml` is now only a development-support file for local Postgres/Redis/TURN infra
 
 ## Real Runtime Scope
 
@@ -128,11 +125,8 @@ Implemented today:
 - dev startup now reports Docker daemon last-error details and exits early when Docker backend is stuck in `starting`, with explicit `wsl --shutdown` recovery guidance
 - TURN startup now enforces public relay IP correctness for public domains (resolves from `TurnHost` DNS and rejects private `TURN_EXTERNAL_IP`), preventing "signaling works but media path fails" regressions for internet clients
 - Baker now ships as a validated all-in-one Docker image for the simplest public self-hosted path: one container, one data root (`/var/lib/baker`), bundled Postgres/Redis/Caddy, and optional bundled TURN
-- the advanced Compose path still ships Postgres, Redis, schema migration, API, gateway, media boundary, and a Caddy edge proxy for operators who want clearer service separation
-- the advanced public Compose path now uses `baker-runtime` plus a first-boot `bootstrap` container that persists generated runtime secrets and prints the initial admin password
-- the shipped Caddy proxy still serves the user app on container port `:80` and the admin panel on container port `:8080`, while the default host bindings are now `:3000` (Web) and `:3001` (Admin) for easier local Docker startup
-- Postgres and Redis stay bound to `127.0.0.1` by default in the compose topology so the public surface remains the proxy tier
-- the all-in-one image can also bundle coturn behind `TURN_ENABLED=true`; the advanced Compose topology still exposes coturn through the `turn` profile for harder NAT / internet voice-stream deployments
+- the shipped container serves the user app on container port `:80` and the admin panel on container port `:8080`, while the recommended host bindings are `:3000` (Web) and `:3001` (Admin)
+- the all-in-one image can bundle coturn behind `TURN_ENABLED=true` for harder NAT / internet voice-stream deployments
 
 Still placeholders or deferred:
 

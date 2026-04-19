@@ -30,8 +30,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
-- `blockcat233/baker` now ships as a real all-in-one image for newcomer deployment
-- The advanced Docker Compose path now uses `blockcat233/baker-runtime` plus `blockcat233/baker-proxy`
+- `blockcat233/baker` is now the only supported public deployment image
 - Standard validation loop is `pnpm typecheck`, `pnpm lint`, and `pnpm test`
 
 ## Quick Start: One Container
@@ -121,43 +120,12 @@ docker run -d \
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
 
-## Advanced / Production Compose
+## Deployment Notes
 
-The advanced path keeps the current multi-service topology and is the better fit when you want clearer service separation, independent upgrades, or to plug in your own Postgres/Redis/TURN choices.
-
-```bash
-docker compose up -d
-docker compose logs bootstrap
-```
-
-Open:
-
-- Web: `http://localhost:3000`
-- Admin: `http://localhost:3001`
-
-Notes:
-
-- `docker-compose.yml` is registry-first and now pulls `blockcat233/baker-runtime` plus `blockcat233/baker-proxy`
-- [`.env.selfhost.example`](./.env.selfhost.example) is now the advanced override template for fixed secrets, custom ports, or alternate registries
-- local source-build validation still works with:
-  `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`
-- optional bundled coturn is still available in the advanced stack through:
-  `docker compose --profile turn up -d`
-
-## Image Roles
-
-- `blockcat233/baker`: the all-in-one image for the easiest `docker run` deployment
-- `blockcat233/baker-runtime`: the advanced Compose runtime image used by `bootstrap`, `migrate`, `api`, `gateway`, and `media`
-- `blockcat233/baker-proxy`: the advanced Compose edge image that serves Web/Admin and proxies `/v1`, `/health`, and `/ws`
-
-Older service-specific repositories such as `baker-api` or `baker-media` are legacy artifacts from earlier publishing runs and are no longer the canonical public deployment story.
-
-## Migration Note
-
-- `blockcat233/baker` changed meaning: it is now the supported all-in-one image instead of the shared Compose runtime
-- existing Compose users should move to `blockcat233/baker-runtime`
-- `blockcat233/baker-proxy` stays the advanced edge image
-- legacy `baker-api` / `baker-media` / `baker-gateway` style repos are no longer the main published interface
+- Public deployment is intentionally documented as a single-image path only: `blockcat233/baker`
+- For browser voice, microphone, camera, and screen sharing, serve Baker over HTTPS
+- TURN is optional for small/local setups but strongly recommended for public internet, mobile, VPN, or cross-region usage
+- `docker-compose.yml` remains in the repo for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment product
 
 ## Current Limits
 

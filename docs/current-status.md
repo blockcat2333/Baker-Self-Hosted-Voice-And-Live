@@ -2,7 +2,7 @@
 
 ## Branch Goal
 
-Milestone 5 quality hardening plus a first real self-hosted productization pass for the new server control plane and media boundary, with multi-stream livestreaming stable, quality controls implemented, per-user voice link quality fanout in place, admin-managed server/workspace settings available, a real one-container newcomer deployment path in place, and the older multi-service Docker Compose topology preserved as the advanced/production option.
+Milestone 5 quality hardening plus a first real self-hosted productization pass for the new server control plane and media boundary, with multi-stream livestreaming stable, quality controls implemented, per-user voice link quality fanout in place, admin-managed server/workspace settings available, and a single-image public deployment story centered on `blockcat233/baker`.
 
 ## Milestone State
 
@@ -21,48 +21,34 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - server control panel baseline: complete and validated
 - M5 revised stability/UX slice (server RTT + voice roster visibility + bitrate + auth recovery): complete and validated
 - M5.2 revised slice (per-user voice network quality + connection/UI fixes): complete and validated
-- self-hosted Docker Compose baseline: complete and validated
-- prebuilt-image self-hosted Docker path: complete and validated
 - all-in-one Baker image path: complete and validated
+- single-image public deployment consolidation: complete and validated
+
+### 2026-04-19 Single-Image Public Deployment Consolidation
+
+- removed the public multi-path deployment messaging from the English and Chinese READMEs
+- reduced image publishing to a single Docker Hub image: `blockcat233/baker`
+- deleted the no-longer-supported public deployment files:
+  - `docker-compose.build.yml`
+  - `.env.selfhost.example`
+  - `docker/Caddyfile`
+- kept `docker-compose.yml` only as a local development infrastructure helper for:
+  - `postgres`
+  - `redis`
+  - optional `turn`
+- updated the homepage introduction to explain the real deployment story directly:
+  - browser-based usage
+  - game/screen sharing
+  - no dedicated client required
+  - HTTPS requirement for media features
 - newcomer Docker Desktop documentation pass: complete and validated
 - root documentation declutter pass: complete and validated
 - landing-page screenshot/link prominence pass: complete and validated
 
 ## Recently Completed
 
-### 2026-04-18 Self-Hosted Docker Compose Baseline
-
-- expanded `docker-compose.yml` from infra-only services into a first-party self-hosted stack covering:
-  - `postgres`
-  - `redis`
-  - `migrate`
-  - `api`
-  - `gateway`
-  - `media`
-  - `proxy`
-  - optional `turn`
-- added `.env.selfhost.example` so public users have a deploy-focused env template instead of reverse-engineering local dev settings
-- added a multi-stage `Dockerfile` that:
-  - builds the Node services into a shared runtime target
-  - builds the web and admin frontends into a Caddy-served proxy target
-- added `docker/Caddyfile` so the shipped stack serves:
-  - user Web UI on port `80`
-  - admin panel on port `8080`
-  - `/v1` and `/health` through the API
-  - `/ws` through the gateway
-- changed Postgres and Redis host bindings to `127.0.0.1` by default so the public-facing surface is the proxy, not raw infra ports
-- fixed compose/runtime blockers discovered by real container smoke tests:
-  - `gateway` and `media` were missing production secret env vars required by shared env parsing
-  - workspace packages still use source-first entrypoints in the repo for local DX, so the Docker runtime now rewrites the needed package manifests to built `dist/*` files inside the image
-  - Docker `up --build` was exporting multiple services to the same image tag, which caused BuildKit snapshot conflicts on Windows
-  - Caddy route ordering initially let SPA fallback swallow `/health`, so route handling was locked with explicit `route` blocks
-- updated the public `README.md` so GitHub visitors now see a real Docker-first self-hosted quick-start before local dev instructions
-
 ### 2026-04-19 All-In-One Baker Image Path
 
-- split the self-hosted compose story into:
-  - `docker-compose.yml` for pulling published runtime images
-  - `docker-compose.build.yml` for local source builds
 - added a `bootstrap` service plus `docker/runtime/*` scripts so first boot now:
   - auto-generates strong persisted runtime secrets
   - auto-generates an admin-panel password
@@ -77,8 +63,6 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
   - optional coturn
 - the all-in-one image now starts through `supervisord`, keeps durable state under `/var/lib/baker`, and is validated as the primary newcomer path through:
   - `docker run -d -p 3000:80 -p 3001:8080 -v baker-data:/var/lib/baker blockcat233/baker:latest`
-- re-pointed the advanced Compose path to `blockcat233/baker-runtime` instead of `blockcat233/baker`
-- `blockcat233/baker-runtime` now prints the Compose-first help text when launched by itself, while `blockcat233/baker` is the directly runnable image
 - bundled TURN inside the all-in-one image behind `TURN_ENABLED=false` by default; enabling TURN now requires credentials and can auto-derive `TURN_URLS` from `TURN_EXTERNAL_IP` when the operator does not provide them explicitly
 - switched Postgres back to the official upstream image while keeping first-boot runtime secrets through the compose bootstrap volume
 - changed the default host ports to:
@@ -86,16 +70,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
   - Admin on `3001`
   so Docker Desktop / local-machine startup avoids common `:80` bind failures
 - removed the old "copy `.env` and manually fill secrets before startup" requirement for the default quick-start path
-- added `.github/workflows/publish-images.yml` so GitHub Actions can publish:
-  - `baker`
-  - `baker-runtime`
-  - `baker-proxy`
-  to GHCR automatically and optionally mirror them to Docker Hub when repo secrets are configured
-- updated `.env.selfhost.example` and `README.md` so public users now see:
-  - one-container `docker run` as the fastest path
-  - multi-service Compose as the advanced path
-  - `.env` as an optional advanced override, not a mandatory first-run step
-  - Docker Hub mirroring as the searchable-image path for Docker Desktop discovery
+- added `.github/workflows/publish-images.yml` so GitHub Actions can publish the all-in-one `baker` image to Docker Hub
 - expanded the English and Chinese GitHub landing docs with a Docker Desktop form walkthrough, explicit port/volume values, the most common missing-port-mapping mistake, and matching UI screenshots so new users can follow the setup without translating field names manually
 - moved the landing-page screenshots into the opening introduction area and added a plain-text `点此查看中文` link near the top of the English homepage so bilingual navigation is more obvious
 - moved public-facing screenshot assets under `docs/images/`, moved the personal launcher example env to `docs/examples/`, and expanded the landing-page introduction so GitHub visitors immediately understand browser-only usage, game/screen sharing support, and the HTTPS requirement for media features

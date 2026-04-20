@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiClient } from '@baker/sdk';
@@ -8,6 +8,7 @@ import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
+import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
 import { VoicePanel } from '../voice/VoicePanel';
 import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
@@ -15,6 +16,7 @@ import { useChatStore } from './chat-store';
 import { GuildList } from './GuildList';
 import { ChannelList } from './ChannelList';
 import { MessagePanel } from './MessagePanel';
+import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { PresenceBar } from './PresenceBar';
 
 export interface ChatShellProps {
@@ -40,6 +42,11 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
   const reconnectAttempt = useGatewayStore((s) => s.reconnectAttempt);
   const connect = useGatewayStore((s) => s.connect);
   const voiceStatus = useVoiceStore((s) => s.status);
+  const voiceChannelId = useVoiceStore((s) => s.channelId);
+  const ownedStream = useStreamStore((s) => s.ownedStream);
+  const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
+
+  const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
 
   // Load guilds once on mount
   useEffect(() => {
@@ -61,6 +68,15 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
     void loadMessages(api, activeChannelId);
   }, [activeChannelId, api, loadMessages, messagesByChannel]);
 
+  // After picking a text channel from mobile Channels tab, jump to Chat.
+  function handleNavigateAfterChannelPick(kind: 'text' | 'voice') {
+    if (kind === 'text') {
+      setMobileTab('chat');
+    } else {
+      setMobileTab('voice');
+    }
+  }
+
   const bannerByStatus: Record<string, { label: string; className: string }> = {
     authenticating: { className: 'gateway-banner--info', label: t('gateway.authenticating') },
     connecting: { className: 'gateway-banner--info', label: t('gateway.connecting') },
@@ -75,27 +91,45 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
       ? t('gateway.reconnecting_attempt', { attempt: String(reconnectAttempt) })
       : banner?.label;
 
+  const isVoiceActive =
+    voiceStatus === 'active' ||
+    voiceStatus === 'requesting_mic' ||
+    voiceStatus === 'joining' ||
+    voiceStatus === 'reconnecting' ||
+    voiceStatus === 'leaving' ||
+    voiceStatus === 'error' ||
+    !!voiceChannelId;
+
+  const showVoicePanel = isVoiceActive;
+  const hasAnyStream = !!ownedStream || Object.keys(watchedStreamsById).length > 0;
+  const voiceHasContent = showVoicePanel || hasAnyStream;
+
   return (
-    <div className="chat-shell">
+    <div className="chat-shell" data-mobile-tab={mobileTab}>
       <GuildList />
 
-      <div className="sidebar">
-        <div className="sidebar-header">{isLoadingGuilds && <span className="sidebar-title">{t('common.loading')}</span>}</div>
-        <div className="sidebar-channels">
-          {isLoadingChannels ? (
-            <div className="channel-loading">{t('chat.loading_channels')}</div>
+      <div className="sidebar" data-on-mobile="channels voice more">
+        <div className="sidebar-section sidebar-section--channels" data-on-mobile="channels">
+          <div className="sidebar-header">{isLoadingGuilds && <span className="sidebar-title">{t('common.loading')}</span>}</div>
+          <div className="sidebar-channels">
+            {isLoadingChannels ? (
+              <div className="channel-loading">{t('chat.loading_channels')}</div>
+            ) : (
+              <ChannelList onAfterPick={handleNavigateAfterChannelPick} />
+            )}
+          </div>
+        </div>
+
+        <div className="sidebar-section sidebar-section--voice" data-on-mobile="voice">
+          {showVoicePanel ? (
+            <VoicePanel />
           ) : (
-            <ChannelList />
+            <p className="sidebar-voice-empty">{t('chat.voice_section_idle')}</p>
           )}
         </div>
-        <div className="sidebar-bottom">
+
+        <div className="sidebar-section sidebar-section--more" data-on-mobile="more">
           <PresenceBar />
-          {(voiceStatus === 'active' ||
-            voiceStatus === 'requesting_mic' ||
-            voiceStatus === 'joining' ||
-            voiceStatus === 'reconnecting' ||
-            voiceStatus === 'leaving' ||
-            voiceStatus === 'error') && <VoicePanel />}
           <div className="sidebar-footer">
             <AccountPanel api={api} />
             <div className="sidebar-footer-actions">
@@ -108,8 +142,8 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
         </div>
       </div>
 
-      <main className="chat-main">
-        <header className="chat-main-header">
+      <main className="chat-main" data-on-mobile="chat voice">
+        <header className="chat-main-header" data-on-mobile="chat">
           <div>
             <p className="chat-main-eyebrow">{t('common.server')}</p>
             <h1 className="chat-main-title">{serverName}</h1>
@@ -118,7 +152,7 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
 
         {/* Gateway status banner */}
         {banner && (
-          <div className={`gateway-banner ${banner.className}`}>
+          <div className={`gateway-banner ${banner.className}`} data-on-mobile="chat voice more">
             <span>{gatewayError && gatewayStatus === 'error' ? gatewayError : reconnectLabel}</span>
             {gatewayStatus === 'error' && (
               <button type="button" className="gateway-banner-retry" onClick={() => connect(api, gatewayUrl)}>
@@ -129,13 +163,25 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
         )}
 
         {/* Chat-layer error (HTTP errors) */}
-        {chatError && <div className="chat-error">{chatError}</div>}
+        {chatError && <div className="chat-error" data-on-mobile="chat">{chatError}</div>}
 
-        <div className={'chat-main-body'}>
-          <MessagePanel api={api} />
-          <StreamPanel />
+        <div className="chat-main-body">
+          <div className="chat-main-pane chat-main-pane--messages" data-on-mobile="chat">
+            <MessagePanel api={api} />
+          </div>
+          <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
+            <StreamPanel />
+          </div>
         </div>
       </main>
+
+      <MobileTabBar
+        tab={mobileTab}
+        onChange={setMobileTab}
+        voiceActive={isVoiceActive}
+        streamActive={hasAnyStream}
+        notifyVoice={voiceHasContent}
+      />
 
       <StreamPopupHost />
     </div>

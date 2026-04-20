@@ -190,8 +190,10 @@ Migration state:
   - helper coverage for stream playback-volume, stream capture constraint behavior, and quality-based capture presets
 - `packages/client/src/features/voice/VoicePanel.tsx`
   - voice controls, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
+- `packages/client/src/features/chat/MobileTabBar.tsx`
+  - phone-width bottom navigation for `Channels` / `Chat` / `Voice` / `More`, including active-voice notification state
 - `packages/client/src/features/chat/ChannelList.tsx`
-  - text/voice channel rendering plus non-joined voice-channel member roster visibility
+  - text/voice channel rendering plus non-joined voice-channel member roster visibility and mobile post-pick navigation hooks
 - `packages/client/src/features/voice/voice-audio.ts`
   - voice-audio clamp/effective-volume helpers used by the voice store and panel
 - `packages/client/src/features/voice/voice-audio.test.ts`
@@ -205,7 +207,7 @@ Migration state:
 - `packages/client/src/features/stream/stream-popup-controller.ts`
   - `window.open` popup registry keyed by `streamId`, duplicate-prevention, and popup-close cleanup
 - `packages/client/src/features/chat/ChatShell.tsx`
-  - top-level chat/sidebar composition plus server-name header and popup host mount point; sign-out now uses the authenticated logout path
+  - top-level chat/sidebar composition plus server-name header and popup host mount point; mobile now uses a four-tab shell while desktop/tablet keep the multi-column layout, and sign-out still uses the authenticated logout path
 - `apps/media/src/app.ts`
   - media service bootstrap; internal routes no longer expose permissive CORS and now reject unauthorized callers
 - `apps/media/src/lib/internal-auth.ts`

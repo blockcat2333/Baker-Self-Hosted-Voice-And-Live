@@ -191,7 +191,9 @@ body {
   display: flex;
   justify-content: center;
   min-height: 100vh;
+  min-height: 100svh;
   padding: 24px;
+  overflow-y: auto;
 }
 
 .login-card {
@@ -279,10 +281,11 @@ body {
   border: 1px solid var(--border-2);
   border-radius: var(--radius-sm);
   color: var(--text-0);
-  font-size: 15px;
+  font-size: 16px;
   padding: 10px 12px;
   transition: border-color 0.15s, box-shadow 0.15s;
   width: 100%;
+  min-height: 44px;
 }
 
 .field input:focus-visible {
@@ -306,6 +309,7 @@ body {
   padding: 11px 0;
   transition: background 0.15s;
   width: 100%;
+  min-height: 44px;
 }
 
 /* Login form — ghost buttons should be full-width too */
@@ -490,10 +494,34 @@ body {
   min-height: 0;
 }
 
-.sidebar-bottom {
+.sidebar-section {
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  min-height: 0;
+}
+
+.sidebar-section--channels {
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar-section--voice {
+  flex: 0 0 auto;
+}
+
+.sidebar-section--more {
+  flex: 0 0 auto;
+}
+
+.sidebar-voice-empty {
+  color: var(--text-4);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 12px;
+  padding: 10px 12px;
+  background: rgba(2, 6, 23, 0.34);
+  border: 1px dashed var(--border-1);
+  border-radius: var(--radius-sm);
 }
 
 .sidebar-footer {
@@ -700,6 +728,21 @@ body {
   min-width: 0;
 }
 
+.chat-main-pane--messages {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-main-pane--stream {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .chat-error {
   background: rgba(220, 38, 38, 0.15);
   border-bottom: 1px solid rgba(220, 38, 38, 0.3);
@@ -837,22 +880,49 @@ body {
   cursor: not-allowed;
 }
 
-/* Mobile-first usability (narrow widths) */
+/* ── Mobile tab bar (always rendered, hidden by default on desktop) ─────── */
+
+.mobile-tabbar {
+  display: none;
+}
+
+/* ── Mobile-first chat shell (segmented bottom-nav pattern) ──────────────── */
+
 @media (max-width: 640px) {
   .chat-shell {
     flex-direction: column;
+    /* Anchor full viewport height; the tab bar is the last flex child. */
+    height: 100vh;
+    height: 100svh;
   }
 
-  /* Top guild rail */
+  /* Hide any non-active pane based on current mobile tab. */
+  .chat-shell[data-mobile-tab='channels'] [data-on-mobile]:not([data-on-mobile~='channels']),
+  .chat-shell[data-mobile-tab='chat'] [data-on-mobile]:not([data-on-mobile~='chat']),
+  .chat-shell[data-mobile-tab='voice'] [data-on-mobile]:not([data-on-mobile~='voice']),
+  .chat-shell[data-mobile-tab='more'] [data-on-mobile]:not([data-on-mobile~='more']) {
+    display: none !important;
+  }
+
+  /* Guild rail: only on Channels tab; horizontal strip across the top. */
   .guild-list {
     border-right: none;
     border-bottom: 1px solid var(--border-0);
+    flex: 0 0 auto;
     flex-direction: row;
     gap: 10px;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 10px 12px;
+    padding: 8px 12px;
     width: 100%;
+  }
+
+  .chat-shell[data-mobile-tab='channels'] .guild-list {
+    /* Guild list participates in Channels tab only. */
+  }
+
+  .chat-shell:not([data-mobile-tab='channels']) .guild-list {
+    display: none;
   }
 
   .guild-btn {
@@ -861,49 +931,67 @@ body {
     width: 44px;
   }
 
-  /* Sidebar becomes a compact rail: channel chips + horizontally scrollable bottom stack */
+  /* Sidebar fills remaining height (above the tabbar) on its tabs. */
   .sidebar {
+    background: transparent;
     border-right: none;
-    border-bottom: 1px solid var(--border-0);
+    flex: 1 1 auto;
+    min-height: 0;
     width: 100%;
   }
 
+  .sidebar-section {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .sidebar-section--channels {
+    background: var(--surface-0);
+  }
+
+  .sidebar-section--voice {
+    background: transparent;
+    overflow-y: auto;
+  }
+
+  .sidebar-section--more {
+    background: var(--surface-0);
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+
   .sidebar-header {
-    padding: 10px 12px 6px;
+    padding: 4px 14px 0;
   }
 
   .sidebar-channels {
-    flex: 0 0 auto;
-    min-height: unset;
+    overflow-y: auto;
+    padding: 4px 0 12px;
   }
 
   .channel-list {
-    align-items: flex-start;
-    flex-direction: row;
-    gap: 8px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 10px 12px 12px;
+    gap: 4px;
+    padding: 8px 12px 16px;
   }
 
   .channel-row {
-    flex: 0 0 auto;
-    min-width: 150px;
+    width: 100%;
   }
 
   .channel-btn {
     background: rgba(2, 6, 23, 0.28);
     border: 1px solid var(--border-0);
-    border-radius: 999px;
-    font-size: 14px;
-    min-height: 44px;
-    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    min-height: 48px;
+    padding: 12px 14px;
     width: 100%;
   }
 
   .channel-btn.active {
     background: rgba(59, 130, 246, 0.18);
-    border-color: rgba(59, 130, 246, 0.28);
+    border-color: rgba(59, 130, 246, 0.32);
   }
 
   .channel-btn--voice.active {
@@ -911,143 +999,197 @@ body {
     border-color: rgba(34, 197, 94, 0.26);
   }
 
-  .channel-badge {
-    padding: 3px 7px;
+  .channel-section-label {
+    margin-top: 12px;
+    padding: 4px 14px 4px;
+  }
+
+  .channel-section-label:first-child {
+    margin-top: 0;
   }
 
   .channel-voice-roster {
-    margin-left: 4px;
-    max-height: 56px;
-    padding: 5px;
+    margin-left: 8px;
+    margin-top: 4px;
+    max-height: 120px;
+    padding: 6px;
   }
 
-  /* Sidebar bottom: compact horizontal strip.
-     Target: ≤ 80px tall so the channel list + bottom rail together ≤ 160px,
-     leaving the chat area the majority of the screen. */
-  .sidebar-bottom {
-    align-items: center;
-    border-top: 1px solid rgba(148, 163, 184, 0.1);
-    flex-direction: row;
-    flex-wrap: nowrap;
-    gap: 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 8px 12px;
-  }
-
-  .sidebar-bottom > * {
-    flex: 0 0 auto;
-    max-width: 92vw;
-  }
-
-  /* Presence bar — compact horizontal pill list */
-  .presence-bar {
-    border-top: none;
-    margin: 0;
-    padding: 6px 10px;
-    width: auto;
-    max-width: 220px;
-  }
-
-  .presence-bar-header {
-    margin-bottom: 4px;
-  }
-
-  .presence-list {
-    flex-direction: row;
-    gap: 6px;
-    max-height: 32px;
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 2px;
-  }
-
-  .presence-item {
-    border: 1px solid var(--border-0);
-    border-radius: 999px;
-    padding: 4px 8px;
-  }
-
-  /* Voice panel — horizontal compact card */
+  /* Voice section: VoicePanel naturally fits, give it room and breathing space. */
   .voice-panel {
     border-radius: var(--radius-md);
-    margin: 0;
-    max-width: 320px;
-    padding: 8px 12px;
-    width: auto;
+    margin: 12px;
   }
 
   .voice-participant-list {
-    max-height: 120px;
+    max-height: min(128px, 18svh);
     overflow-y: auto;
     padding-right: 2px;
   }
 
-  .voice-panel-controls .btn-ghost {
-    min-height: 36px;
+  /* More section: presence + account stacked, comfortable touch sizes. */
+  .sidebar-section--more .presence-bar {
+    border-top: none;
+    padding: 12px 14px 8px;
   }
 
-  /* Sidebar footer — horizontal row: account info + lang switcher + sign out */
+  .sidebar-section--more .presence-list {
+    max-height: 200px;
+  }
+
   .sidebar-footer {
-    align-items: center;
-    flex-direction: row;
-    gap: 8px;
-    padding: 0;
-    width: auto;
+    padding: 12px 14px 16px;
   }
 
   .sidebar-footer-actions {
-    gap: 4px;
+    gap: 8px;
   }
 
-  /* Account panel: compact, just name + email + edit button */
-  .account-panel {
-    border-radius: 8px;
-    gap: 4px;
-    padding: 6px 10px;
-    width: auto;
-    min-width: 130px;
-    max-width: 200px;
-  }
-
-  .account-panel-title {
+  .sidebar-footer-signout {
     font-size: 13px;
+    min-height: 40px;
+    padding: 8px 14px;
   }
 
-  .account-panel-subtitle {
-    font-size: 11px;
-    margin-top: 2px;
-  }
-
-  .account-panel-edit-btn {
-    font-size: 11px;
-    padding: 4px 8px;
-  }
-
-  /* Language switcher — compact pill pair */
   .language-switcher {
-    gap: 4px;
-    flex: none;
+    flex: 1;
+    gap: 6px;
   }
 
   .language-switcher .btn-ghost {
-    font-size: 11px;
-    min-height: 30px;
-    padding: 4px 8px;
+    font-size: 12px;
+    min-height: 36px;
+    padding: 6px 10px;
   }
 
-  /* Sign out button — compact */
-  .sidebar-footer-signout {
-    font-size: 11px;
-    min-height: 30px;
-    padding: 4px 10px;
+  .account-panel {
+    width: 100%;
   }
 
-  /* Channel section labels hidden in horizontal chip layout */
-  .channel-section-label {
+  .account-panel-edit-btn {
+    font-size: 12px;
+    min-height: 36px;
+    padding: 6px 12px;
+  }
+
+  /* Chat main + body: take full width on Chat / Voice tabs. */
+  .chat-main {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .chat-shell[data-mobile-tab='voice'] .sidebar {
+    flex: 0 0 auto;
+  }
+
+  .chat-shell[data-mobile-tab='voice'] .sidebar-section--voice {
+    overflow: visible;
+  }
+
+  .chat-main-header {
+    padding: 8px 14px 8px;
+  }
+
+  .chat-main-eyebrow {
     display: none;
   }
 
+  .chat-main-title {
+    font-size: 17px;
+    margin-top: 0;
+  }
+
+  .chat-main-body {
+    flex-direction: column;
+  }
+
+  .chat-main-pane {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .chat-main-pane--stream {
+    overflow-y: auto;
+  }
+
+  /* Mobile tab bar pinned to bottom of the chat-shell flex column. */
+  .mobile-tabbar {
+    align-items: stretch;
+    background: rgba(2, 6, 23, 0.92);
+    backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border-1);
+    display: flex;
+    flex: 0 0 auto;
+    gap: 0;
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
+    width: 100%;
+  }
+
+  .mobile-tabbar-btn {
+    align-items: center;
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    color: var(--text-3);
+    cursor: pointer;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 2px;
+    justify-content: center;
+    min-height: 52px;
+    padding: 6px 4px;
+    transition: color 0.12s, background 0.12s;
+  }
+
+  .mobile-tabbar-btn:hover {
+    color: var(--text-1);
+  }
+
+  .mobile-tabbar-btn--active {
+    background: rgba(59, 130, 246, 0.16);
+    color: var(--text-0);
+  }
+
+  .mobile-tabbar-btn--voice-live:not(.mobile-tabbar-btn--active) {
+    color: #86efac;
+  }
+
+  .mobile-tabbar-btn--voice-live.mobile-tabbar-btn--active {
+    background: var(--green-1);
+  }
+
+  .mobile-tabbar-glyph {
+    align-items: center;
+    display: inline-flex;
+    font-size: 18px;
+    font-weight: 700;
+    height: 22px;
+    justify-content: center;
+    line-height: 1;
+    position: relative;
+  }
+
+  .mobile-tabbar-dot {
+    background: var(--green-0);
+    border-radius: 50%;
+    height: 6px;
+    position: absolute;
+    right: -8px;
+    top: 0;
+    width: 6px;
+  }
+
+  .mobile-tabbar-label {
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+
+  /* Touch-friendly defaults */
   .btn-ghost {
     min-height: 40px;
   }
@@ -1059,6 +1201,23 @@ body {
   .send-btn {
     min-height: 44px;
     padding: 10px 16px;
+  }
+
+  .send-input {
+    font-size: 16px; /* prevents iOS zoom */
+  }
+
+  /* Stream panel: drop the narrow desktop column constraints on mobile. */
+  .chat-main-pane--stream .stream-panel {
+    border-left: none;
+    border-top: none;
+    flex: 1 1 auto;
+    height: auto;
+    max-height: none;
+    max-width: none;
+    min-width: 0;
+    padding: 12px;
+    width: 100%;
   }
 }
 
@@ -2021,5 +2180,47 @@ body {
   .stream-card-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .login-shell {
+    align-items: flex-start;
+    padding: 16px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .login-card {
+    backdrop-filter: none;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    gap: 16px;
+    padding: 8px 0 0;
+    max-width: 100%;
+  }
+
+  .login-title {
+    font-size: 22px;
+  }
+
+  .login-eyebrow {
+    font-size: 11px;
+  }
+
+  .login-tabs {
+    padding: 4px;
+  }
+
+  .tab {
+    font-size: 14px;
+    padding: 12px 0;
+    min-height: 44px;
+  }
+
+  .login-form {
+    gap: 12px;
+  }
+
+  .field span {
+    font-size: 12px;
   }
 }

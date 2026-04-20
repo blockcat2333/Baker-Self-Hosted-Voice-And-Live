@@ -1,5 +1,28 @@
 # Project History
 
+## 2026-04-20
+
+### Mobile web tabbed UI + joined-voice usability
+
+What changed:
+
+- reworked the phone-width web client into a four-tab shell:
+  - `Channels`
+  - `Chat`
+  - `Voice`
+  - `More`
+- moved mobile channel navigation from horizontal chips to full-width stacked rows so narrow screens can read text and voice channel names without wasting vertical space on desktop-only sidebar chrome
+- mobile voice-channel picks now auto-switch into the dedicated Voice tab instead of leaving the user buried in a stacked multi-panel layout
+- adjusted the Voice tab layout so the joined-voice controls stay on the first screen while the stream panel occupies the remaining space below
+- tightened the mobile login surface with lighter chrome, larger tap targets, and `16px` form inputs to prevent iOS auto-zoom
+- added `scripts/mobile-audit.mjs` coverage for signed-out, signed-in, and joined-voice mobile states with real Playwright/Chromium screenshots and layout assertions
+
+Why:
+
+- the previous "mobile" behavior was still a squeezed desktop shell: navigation, account controls, voice, and stream surfaces were all competing for the same narrow viewport
+- the most important regression risk was the joined-voice state on phones; if `mute` / `leave` are not immediately reachable, the UI is not actually safe to use on mobile
+- real-browser assertions are necessary here because the failures are spatial and interaction-driven rather than purely functional
+
 ## 2026-04-18
 
 ### Single-image public deployment consolidation

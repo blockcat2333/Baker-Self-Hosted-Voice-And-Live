@@ -33,6 +33,7 @@ Current validated state:
 - server control panel baseline complete
 - revised M5 stability/UX slice complete (server RTT/roster visibility/bitrate/auth recovery/startup governance)
 - revised M5.2 slice complete (per-user voice network snapshots, close/handshake reconnect hardening, voice/stream layout fixes)
+- mobile web tabbed UI and joined-voice usability pass complete
 - all-in-one Docker quick-start complete
 - protocol compatibility, gateway runtime, stream-session repository, client-state migration, and gallery UI stages are complete
 - `pnpm typecheck` passes
@@ -133,7 +134,7 @@ Still placeholders or deferred:
 - real media backend / SFU
 - recording / replay
 - CDN/HLS stream distribution
-- mobile-specific behavior
+- deeper mobile-specific media polish
 - complex permissions / RBAC
 - automatic process restart/orchestration after admin port changes
 

@@ -8,7 +8,11 @@ import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
 import { useChatStore } from './chat-store';
 
-export function ChannelList() {
+export interface ChannelListProps {
+  onAfterPick?: (kind: 'text' | 'voice') => void;
+}
+
+export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
   const { t } = useTranslation();
   const activeGuildId = useChatStore((s) => s.activeGuildId);
   const channelsByGuild = useChatStore((s) => s.channelsByGuild);
@@ -28,17 +32,23 @@ export function ChannelList() {
   const channels = activeGuildId ? (channelsByGuild[activeGuildId] ?? []) : [];
 
   function handleTextSelect(channelId: string) {
-    if (channelId === activeChannelId) return;
-    switchChannel(activeChannelId, channelId);
-    setActiveChannel(channelId);
+    if (channelId !== activeChannelId) {
+      switchChannel(activeChannelId, channelId);
+      setActiveChannel(channelId);
+    }
+    onAfterPick?.('text');
   }
 
   async function handleVoiceSelect(channelId: string) {
-    if (channelId === voiceChannelId) return;
+    if (channelId === voiceChannelId) {
+      onAfterPick?.('voice');
+      return;
+    }
     if (ownedStream || Object.keys(watchedStreamsById).length > 0) {
       await disconnectCurrentStream(sendCommandAwaitAck);
     }
     void joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+    onAfterPick?.('voice');
   }
 
   const textChannels = channels.filter((c) => c.type !== 'voice');

@@ -21,6 +21,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - server control panel baseline: complete and validated
 - M5 revised stability/UX slice (server RTT + voice roster visibility + bitrate + auth recovery): complete and validated
 - M5.2 revised slice (per-user voice network quality + connection/UI fixes): complete and validated
+- mobile web tabbed UI + joined-voice usability pass: complete and validated
 - all-in-one Baker image path: complete and validated
 - single-image public deployment consolidation: complete and validated
 
@@ -46,6 +47,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - landing-page screenshot/link prominence pass: complete and validated
 
 ## Recently Completed
+
+### 2026-04-20 Mobile Web Tabbed UI + Joined-Voice Usability
+
+- reworked phone-width web navigation into a bottom-tab shell with dedicated `Channels`, `Chat`, `Voice`, and `More` sections while keeping the desktop/tablet composition intact
+- tightened the mobile login screen with smaller chrome, 44px tap targets, and 16px text inputs to avoid iOS zooming
+- changed mobile channel rows from horizontal chips to full-width stacked rows so text/voice selection remains readable and touch-friendly on `320px` screens
+- voice-channel picks on mobile now jump directly into the Voice tab, and the Voice tab keeps the core `mute` / `leave` controls visible on the first screen instead of clipping them above the stream controls
+- added `scripts/mobile-audit.mjs` real-browser coverage for login, signed-in chat, and joined-voice mobile states across `320x568`, `375x667`, `390x844`, `428x926`, `768x1024`, and `1280x800`
+- validated no horizontal overflow in the audited viewports and explicitly checked that joined-voice controls stay visible on phone-sized screens
 
 ### 2026-04-19 All-In-One Baker Image Path
 

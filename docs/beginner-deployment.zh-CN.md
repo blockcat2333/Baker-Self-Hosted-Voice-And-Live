@@ -39,7 +39,7 @@ docker run -d \
   -p 3000:80 \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.0
+  blockcat233/baker:1.0.1
 ```
 
 4. 读取首次启动打印出来的管理后台密码：
@@ -106,7 +106,7 @@ docker run -d \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.0
+  blockcat233/baker:1.0.1
 ```
 
 如果要给真实用户用，Web 入口前面仍然需要配好 HTTPS。
@@ -151,7 +151,7 @@ docker run -d \
 常见升级步骤：
 
 ```bash
-docker pull blockcat233/baker:1.0.0
+docker pull blockcat233/baker:1.0.1
 docker rm -f baker
 ```
 

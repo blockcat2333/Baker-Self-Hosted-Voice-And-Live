@@ -401,6 +401,15 @@ export class WebRtcManager {
     return offer;
   }
 
+  async replaceOutgoingVideoTrack(track: MediaStreamTrack | null): Promise<void> {
+    for (const pc of this.peers.values()) {
+      const videoSenders = pc.getSenders().filter((sender) => sender.track?.kind === 'video');
+      for (const sender of videoSenders) {
+        await sender.replaceTrack(track);
+      }
+    }
+  }
+
   /**
    * Close and remove the connection to a specific peer.
    */

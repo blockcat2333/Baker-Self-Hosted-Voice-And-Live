@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiClient } from '@baker/sdk';
@@ -12,6 +12,7 @@ import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
 import { VoicePanel } from '../voice/VoicePanel';
 import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
+import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
 import { GuildList } from './GuildList';
 import { ChannelList } from './ChannelList';
@@ -41,12 +42,14 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
   const gatewayError = useGatewayStore((s) => s.error);
   const reconnectAttempt = useGatewayStore((s) => s.reconnectAttempt);
   const connect = useGatewayStore((s) => s.connect);
+  const switchChannel = useGatewayStore((s) => s.switchChannel);
   const voiceStatus = useVoiceStore((s) => s.status);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const ownedStream = useStreamStore((s) => s.ownedStream);
   const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
+  const previousActiveChannelIdRef = useRef<string | null>(null);
 
   // Load guilds once on mount
   useEffect(() => {
@@ -67,6 +70,11 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
     if (messagesByChannel[activeChannelId] !== undefined) return;
     void loadMessages(api, activeChannelId);
   }, [activeChannelId, api, loadMessages, messagesByChannel]);
+
+  useEffect(() => {
+    syncGatewayChannelSubscription(previousActiveChannelIdRef.current, activeChannelId, switchChannel);
+    previousActiveChannelIdRef.current = activeChannelId;
+  }, [activeChannelId, switchChannel]);
 
   // After picking a text channel from mobile Channels tab, jump to Chat.
   function handleNavigateAfterChannelPick(kind: 'text' | 'voice') {

@@ -330,4 +330,159 @@ describe('api app', () => {
 
     await app.close();
   });
+
+  it('supports admin channel deletion constraints and position compaction', async () => {
+    const dataAccess = createInMemoryDataAccess();
+    const app = buildApiApp({ dataAccess });
+
+    const adminCreateUserResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'POST',
+      payload: {
+        email: 'owner@example.com',
+        password: 'ownerpassword',
+        username: 'Owner',
+      },
+      url: '/v1/admin/users',
+    });
+
+    expect(adminCreateUserResponse.statusCode).toBe(200);
+    const ownerId = adminCreateUserResponse.json().id as string;
+
+    const createTextChannelResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'POST',
+      payload: {
+        name: 'announcements',
+        type: 'text',
+      },
+      url: '/v1/admin/channels',
+    });
+
+    expect(createTextChannelResponse.statusCode).toBe(200);
+    const extraTextChannelId = createTextChannelResponse.json().id as string;
+
+    const createVoiceChannelResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'POST',
+      payload: {
+        name: 'ops-voice',
+        type: 'voice',
+        voiceQuality: 'high',
+      },
+      url: '/v1/admin/channels',
+    });
+
+    expect(createVoiceChannelResponse.statusCode).toBe(200);
+    const extraVoiceChannelId = createVoiceChannelResponse.json().id as string;
+
+    const deleteTextChannelResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'DELETE',
+      url: `/v1/admin/channels/${extraTextChannelId}`,
+    });
+
+    expect(deleteTextChannelResponse.statusCode).toBe(200);
+    expect(deleteTextChannelResponse.json()).toEqual({ ok: true });
+
+    const deleteVoiceChannelResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'DELETE',
+      url: `/v1/admin/channels/${extraVoiceChannelId}`,
+    });
+
+    expect(deleteVoiceChannelResponse.statusCode).toBe(200);
+    expect(deleteVoiceChannelResponse.json()).toEqual({ ok: true });
+
+    const workspaceAfterDeletes = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'GET',
+      url: '/v1/admin/workspace',
+    });
+
+    expect(workspaceAfterDeletes.statusCode).toBe(200);
+    expect(
+      workspaceAfterDeletes.json().channels.map((channel: { position: number }) => channel.position),
+    ).toEqual([0, 1]);
+
+    const remainingTextChannel = workspaceAfterDeletes.json().channels.find(
+      (channel: { type: string }) => channel.type === 'text',
+    );
+    const remainingVoiceChannel = workspaceAfterDeletes.json().channels.find(
+      (channel: { type: string }) => channel.type === 'voice',
+    );
+
+    const deleteLastTextResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'DELETE',
+      url: `/v1/admin/channels/${remainingTextChannel.id as string}`,
+    });
+
+    expect(deleteLastTextResponse.statusCode).toBe(409);
+    expect(deleteLastTextResponse.json().message).toBe('At least one text channel must remain.');
+
+    const deleteLastVoiceResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'DELETE',
+      url: `/v1/admin/channels/${remainingVoiceChannel.id as string}`,
+    });
+
+    expect(deleteLastVoiceResponse.statusCode).toBe(409);
+    expect(deleteLastVoiceResponse.json().message).toBe('At least one voice channel must remain.');
+
+    const createBlockedVoiceChannelResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'POST',
+      payload: {
+        name: 'blocked-voice',
+        type: 'voice',
+      },
+      url: '/v1/admin/channels',
+    });
+
+    expect(createBlockedVoiceChannelResponse.statusCode).toBe(200);
+    const blockedVoiceChannelId = createBlockedVoiceChannelResponse.json().id as string;
+
+    await dataAccess.streamSessions.create({
+      channelId: blockedVoiceChannelId,
+      hostUserId: ownerId,
+      id: 'stream-session-1',
+      sourceType: 'camera',
+    });
+    await dataAccess.streamSessions.updateStatus('stream-session-1', 'live', { startedAt: new Date() });
+
+    const deleteBlockedVoiceResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'DELETE',
+      url: `/v1/admin/channels/${blockedVoiceChannelId}`,
+    });
+
+    expect(deleteBlockedVoiceResponse.statusCode).toBe(409);
+    expect(deleteBlockedVoiceResponse.json().message).toBe('Stop active livestreams before deleting this voice channel.');
+
+    await dataAccess.streamSessions.updateStatus('stream-session-1', 'stopping', { endedAt: new Date() });
+
+    const deleteUnblockedVoiceResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'DELETE',
+      url: `/v1/admin/channels/${blockedVoiceChannelId}`,
+    });
+
+    expect(deleteUnblockedVoiceResponse.statusCode).toBe(200);
+
+    const createReplacementChannelResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'POST',
+      payload: {
+        name: 'ops-room',
+        type: 'voice',
+      },
+      url: '/v1/admin/channels',
+    });
+
+    expect(createReplacementChannelResponse.statusCode).toBe(200);
+    expect(createReplacementChannelResponse.json().position).toBe(2);
+
+    await app.close();
+  });
 });

@@ -7,6 +7,7 @@ import type {
   ChannelSummary,
 } from '@baker/protocol';
 import {
+  AdminDeleteChannelResponseSchema,
   AdminServerSettingsSchema,
   AdminVerifyPasswordResponseSchema,
   AdminWorkspaceStateSchema,
@@ -61,6 +62,17 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [newChannelVoiceQuality, setNewChannelVoiceQuality] = useState<'high' | 'standard'>('standard');
 
   const apiOrigin = useMemo(() => normalizeApiOrigin(apiBaseUrl), [apiBaseUrl]);
+  const channelTypeCounts = useMemo(
+    () =>
+      (workspace?.channels ?? []).reduce(
+        (counts, channel) => {
+          counts[channel.type] += 1;
+          return counts;
+        },
+        { text: 0, voice: 0 },
+      ),
+    [workspace],
+  );
 
   async function request<T>(
     path: string,
@@ -71,7 +83,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     const response = await fetch(`${apiOrigin}${path}`, {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(includePassword && password ? { 'x-admin-password': password } : {}),
         ...(init.headers ?? {}),
       },
@@ -272,6 +284,48 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     }
   }
 
+  function getDeleteBlockReason(channel: ChannelSummary) {
+    if (channel.type === 'text' && channelTypeCounts.text <= 1) {
+      return t('admin.delete_channel_blocked_last_text');
+    }
+
+    if (channel.type === 'voice' && channelTypeCounts.voice <= 1) {
+      return t('admin.delete_channel_blocked_last_voice');
+    }
+
+    return null;
+  }
+
+  async function handleDeleteChannel(channel: ChannelSummary) {
+    const blockedReason = getDeleteBlockReason(channel);
+    if (blockedReason) {
+      setError(blockedReason);
+      return;
+    }
+
+    if (!window.confirm(t('admin.confirm_delete_channel', { name: channel.name }))) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      await request(
+        `/v1/admin/channels/${channel.id}`,
+        {
+          method: 'DELETE',
+        },
+        AdminDeleteChannelResponseSchema,
+      );
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('admin.error_delete_channel'));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="admin-shell">
@@ -449,9 +503,22 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                     </select>
                   </label>
                 </div>
-                <button type="button" className="admin-secondary-btn" onClick={() => void handleSaveChannel(channel)} disabled={isLoading}>
-                  {t('admin.save_channel')}
-                </button>
+                <div className="admin-channel-actions">
+                  <button type="button" className="admin-secondary-btn" onClick={() => void handleSaveChannel(channel)} disabled={isLoading}>
+                    {t('admin.save_channel')}
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-danger-btn"
+                    onClick={() => void handleDeleteChannel(channel)}
+                    disabled={isLoading || getDeleteBlockReason(channel) !== null}
+                  >
+                    {t('admin.delete_channel_action')}
+                  </button>
+                </div>
+                {getDeleteBlockReason(channel) ? (
+                  <p className="admin-channel-hint">{getDeleteBlockReason(channel)}</p>
+                ) : null}
               </article>
             ))}
           </div>

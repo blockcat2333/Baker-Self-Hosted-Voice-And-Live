@@ -13,7 +13,7 @@ export type ChannelRecord = InferSelectModel<typeof channels>;
 export type ServerSettingsRecord = InferSelectModel<typeof serverSettings>;
 export type CreateAuthSessionInput = Pick<InferInsertModel<typeof authSessions>, 'userId'>;
 export type CreateChannelInput = Pick<InferInsertModel<typeof channels>, 'guildId' | 'name' | 'position' | 'topic' | 'type' | 'voiceQuality'>;
-export type UpdateChannelInput = Partial<Pick<InferInsertModel<typeof channels>, 'name' | 'topic' | 'voiceQuality'>>;
+export type UpdateChannelInput = Partial<Pick<InferInsertModel<typeof channels>, 'name' | 'position' | 'topic' | 'voiceQuality'>>;
 export type CreateGuildInput = Pick<InferInsertModel<typeof guilds>, 'name' | 'ownerUserId' | 'slug'>;
 export type UpdateGuildInput = Partial<Pick<InferInsertModel<typeof guilds>, 'name'>>;
 export type CreateGuildMemberInput = Pick<InferInsertModel<typeof guildMembers>, 'guildId' | 'nickname' | 'userId'>;
@@ -85,6 +85,7 @@ export interface GuildMembersRepository {
 
 export interface ChannelsRepository {
   create(input: CreateChannelInput): Promise<ChannelRecord>;
+  delete(channelId: string): Promise<ChannelRecord | null>;
   findById(channelId: string): Promise<ChannelRecord | null>;
   findAccessibleById(channelId: string, userId: string): Promise<ChannelRecord | null>;
   listByGuild(guildId: string): Promise<ChannelRecord[]>;

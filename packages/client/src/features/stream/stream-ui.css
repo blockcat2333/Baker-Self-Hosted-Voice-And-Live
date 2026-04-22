@@ -17,6 +17,17 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.stream-camera-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.stream-camera-status {
+  color: #94a3b8;
+  font-size: 12px;
+  margin: 0;
+}
+
 .stream-owned-health {
   border-top: 1px solid rgba(148, 163, 184, 0.12);
   display: grid;

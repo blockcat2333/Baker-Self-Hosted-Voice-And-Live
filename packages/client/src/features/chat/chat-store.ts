@@ -3,6 +3,22 @@ import { create } from 'zustand';
 import type { ApiClient } from '@baker/sdk';
 import type { ChannelSummary, GuildSummary, Message, MessageCreatedEventData } from '@baker/protocol';
 
+export function resolveActiveTextChannelId(
+  channels: ChannelSummary[],
+  activeChannelId: string | null,
+): string | null {
+  const textChannels = channels.filter((channel) => channel.type === 'text');
+  if (textChannels.length === 0) {
+    return null;
+  }
+
+  if (activeChannelId && textChannels.some((channel) => channel.id === activeChannelId)) {
+    return activeChannelId;
+  }
+
+  return textChannels[0]?.id ?? null;
+}
+
 interface ChatState {
   guilds: GuildSummary[];
   /** channels keyed by guildId */
@@ -64,15 +80,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isLoadingChannels: true, error: null });
     try {
       const channels = await api.listChannels(guildId);
+      const nextActiveChannelId = resolveActiveTextChannelId(channels, get().activeChannelId);
       set((state) => ({
+        activeChannelId: nextActiveChannelId,
         channelsByGuild: { ...state.channelsByGuild, [guildId]: channels },
         isLoadingChannels: false,
       }));
-      const { activeChannelId } = get();
-      if (!activeChannelId) {
-        const first = channels.find((c) => c.type === 'text');
-        if (first) set({ activeChannelId: first.id });
-      }
     } catch (err) {
       set({ isLoadingChannels: false, error: err instanceof Error ? err.message : 'Failed to load channels.' });
     }

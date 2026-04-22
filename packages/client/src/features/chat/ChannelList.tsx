@@ -18,7 +18,6 @@ export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
   const channelsByGuild = useChatStore((s) => s.channelsByGuild);
   const activeChannelId = useChatStore((s) => s.activeChannelId);
   const setActiveChannel = useChatStore((s) => s.setActiveChannel);
-  const switchChannel = useGatewayStore((s) => s.switchChannel);
   const joinVoiceChannel = useVoiceStore((s) => s.joinVoiceChannel);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const roomStateByChannel = useStreamStore((s) => s.roomStateByChannel);
@@ -33,7 +32,6 @@ export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
 
   function handleTextSelect(channelId: string) {
     if (channelId !== activeChannelId) {
-      switchChannel(activeChannelId, channelId);
       setActiveChannel(channelId);
     }
     onAfterPick?.('text');

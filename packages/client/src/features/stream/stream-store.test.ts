@@ -13,6 +13,8 @@ const getAggregatePeerVideoSendSample = vi.fn();
 const getPeerVideoReceiveSample = vi.fn();
 const getDisplayMedia = vi.fn();
 const getUserMedia = vi.fn();
+const enumerateDevices = vi.fn();
+const replaceOutgoingVideoTrack = vi.fn();
 let latestCallbacks: WebRtcManagerCallbacks | null = null;
 const OriginalMediaStream = globalThis.MediaStream;
 
@@ -34,6 +36,17 @@ class MockMediaStream {
   getVideoTracks() {
     return this.tracks.filter((track) => track.kind === 'video');
   }
+
+  getAudioTracks() {
+    return this.tracks.filter((track) => track.kind === 'audio');
+  }
+
+  removeTrack(track: MediaStreamTrack) {
+    const index = this.tracks.findIndex((entry) => entry.id === track.id);
+    if (index >= 0) {
+      this.tracks.splice(index, 1);
+    }
+  }
 }
 
 vi.mock('@baker/sdk', () => {
@@ -53,6 +66,7 @@ vi.mock('@baker/sdk', () => {
     getRemoteTracks = getRemoteTracks;
     getAggregatePeerVideoSendSample = getAggregatePeerVideoSendSample;
     getPeerVideoReceiveSample = getPeerVideoReceiveSample;
+    replaceOutgoingVideoTrack = replaceOutgoingVideoTrack;
   }
 
   return {
@@ -79,6 +93,17 @@ const localPreviewTrack = {
   stop: vi.fn(),
 } as unknown as MediaStreamTrack;
 
+function createMockTrack(id: string, kind: 'audio' | 'video'): MediaStreamTrack {
+  return {
+    enabled: true,
+    id,
+    kind,
+    muted: false,
+    readyState: 'live',
+    stop: vi.fn(),
+  } as unknown as MediaStreamTrack;
+}
+
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -103,12 +128,20 @@ beforeEach(() => {
   getPeerVideoReceiveSample.mockResolvedValue(null);
   getDisplayMedia.mockReset();
   getUserMedia.mockReset();
+  enumerateDevices.mockReset();
+  replaceOutgoingVideoTrack.mockReset();
+  replaceOutgoingVideoTrack.mockResolvedValue(undefined);
   getDisplayMedia.mockResolvedValue(new MockMediaStream([localPreviewTrack]));
   getUserMedia.mockResolvedValue(new MockMediaStream([localPreviewTrack]));
+  enumerateDevices.mockResolvedValue([
+    { deviceId: 'front-camera', kind: 'videoinput', label: 'Front Camera' },
+    { deviceId: 'rear-camera', kind: 'videoinput', label: 'Rear Camera' },
+  ]);
   latestCallbacks = null;
   Object.defineProperty(globalThis.navigator, 'mediaDevices', {
     configurable: true,
     value: {
+      enumerateDevices,
       getDisplayMedia,
       getUserMedia,
     },
@@ -197,6 +230,170 @@ describe('stream store watch startup', () => {
       status: 'live',
       streamId,
     });
+  });
+
+  it('uses the selected camera source when starting a camera stream', async () => {
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      iceServers: [],
+      sessionId: hostSessionId,
+      streamId,
+    });
+    const sendRawCommand = vi.fn();
+
+    useStreamStore.setState({
+      cameraOptions: [
+        {
+          key: 'device:rear-camera',
+          label: 'Rear Camera',
+          selection: { deviceId: 'rear-camera', kind: 'device' },
+        },
+      ],
+      selectedCameraKey: 'device:rear-camera',
+    });
+
+    await useStreamStore
+      .getState()
+      .startSharing(
+        channelId,
+        { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+        'camera',
+        sendCommandAwaitAck,
+        sendRawCommand,
+      );
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        autoGainControl: true,
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+      video: {
+        deviceId: {
+          exact: 'rear-camera',
+        },
+        frameRate: {
+          ideal: 30,
+          max: 30,
+        },
+        height: {
+          ideal: 720,
+          max: 720,
+        },
+        width: {
+          ideal: 1280,
+          max: 1280,
+        },
+      },
+    });
+  });
+
+  it('switches the live camera without ending the current stream', async () => {
+    const initialVideoTrack = createMockTrack('front-video', 'video');
+    const initialAudioTrack = createMockTrack('front-audio', 'audio');
+    const replacementVideoTrack = createMockTrack('rear-video', 'video');
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      iceServers: [],
+      sessionId: hostSessionId,
+      streamId,
+    });
+    const sendRawCommand = vi.fn();
+
+    getUserMedia
+      .mockResolvedValueOnce(new MockMediaStream([initialAudioTrack, initialVideoTrack]))
+      .mockResolvedValueOnce(new MockMediaStream([replacementVideoTrack]));
+
+    useStreamStore.setState({
+      cameraOptions: [
+        {
+          key: 'device:front-camera',
+          label: 'Front Camera',
+          selection: { deviceId: 'front-camera', kind: 'device' },
+        },
+        {
+          key: 'device:rear-camera',
+          label: 'Rear Camera',
+          selection: { deviceId: 'rear-camera', kind: 'device' },
+        },
+      ],
+      selectedCameraKey: 'device:front-camera',
+    });
+
+    await useStreamStore
+      .getState()
+      .startSharing(
+        channelId,
+        { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+        'camera',
+        sendCommandAwaitAck,
+        sendRawCommand,
+      );
+
+    await useStreamStore.getState().selectCamera('device:rear-camera');
+
+    expect(replaceOutgoingVideoTrack).toHaveBeenCalledWith(replacementVideoTrack);
+    expect(useStreamStore.getState().ownedStream).toMatchObject({
+      status: 'live',
+    });
+    expect(useStreamStore.getState().ownedStream?.localPreviewStream?.getVideoTracks()[0]).toBe(replacementVideoTrack);
+    expect(useStreamStore.getState().ownedStream?.localPreviewStream?.getAudioTracks()[0]).toBe(initialAudioTrack);
+    expect((initialVideoTrack.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the current camera stream live when camera switching fails', async () => {
+    const initialVideoTrack = createMockTrack('front-video', 'video');
+    const initialAudioTrack = createMockTrack('front-audio', 'audio');
+    const replacementVideoTrack = createMockTrack('rear-video', 'video');
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      iceServers: [],
+      sessionId: hostSessionId,
+      streamId,
+    });
+    const sendRawCommand = vi.fn();
+
+    getUserMedia
+      .mockResolvedValueOnce(new MockMediaStream([initialAudioTrack, initialVideoTrack]))
+      .mockResolvedValueOnce(new MockMediaStream([replacementVideoTrack]));
+    replaceOutgoingVideoTrack.mockRejectedValueOnce(new Error('switch failed'));
+
+    useStreamStore.setState({
+      cameraOptions: [
+        {
+          key: 'device:front-camera',
+          label: 'Front Camera',
+          selection: { deviceId: 'front-camera', kind: 'device' },
+        },
+        {
+          key: 'device:rear-camera',
+          label: 'Rear Camera',
+          selection: { deviceId: 'rear-camera', kind: 'device' },
+        },
+      ],
+      selectedCameraKey: 'device:front-camera',
+    });
+
+    await useStreamStore
+      .getState()
+      .startSharing(
+        channelId,
+        { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+        'camera',
+        sendCommandAwaitAck,
+        sendRawCommand,
+      );
+
+    const originalPreviewStream = useStreamStore.getState().ownedStream?.localPreviewStream;
+
+    await useStreamStore.getState().selectCamera('device:rear-camera');
+
+    expect(useStreamStore.getState().error).toBe('switch failed');
+    expect(useStreamStore.getState().selectedCameraKey).toBe('device:front-camera');
+    expect(useStreamStore.getState().ownedStream?.localPreviewStream).toBe(originalPreviewStream);
+    expect(useStreamStore.getState().ownedStream?.localPreviewStream?.getVideoTracks()[0]).toBe(initialVideoTrack);
+    expect((replacementVideoTrack.stop as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+    expect((initialVideoTrack.stop as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
 
   it('applies screen-share sender preferences when offering to a new viewer', async () => {

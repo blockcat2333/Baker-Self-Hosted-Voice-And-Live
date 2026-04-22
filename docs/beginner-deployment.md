@@ -39,7 +39,7 @@ docker run -d \
   -p 3000:80 \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.1
+  blockcat233/baker:1.0.2
 ```
 
 4. Read the first admin password:
@@ -106,7 +106,7 @@ docker run -d \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.1
+  blockcat233/baker:1.0.2
 ```
 
 You still need to place HTTPS in front of the web app for real users.
@@ -151,7 +151,7 @@ If you keep the same Docker volume, you can recreate the container without losin
 Typical upgrade flow:
 
 ```bash
-docker pull blockcat233/baker:1.0.1
+docker pull blockcat233/baker:1.0.2
 docker rm -f baker
 ```
 

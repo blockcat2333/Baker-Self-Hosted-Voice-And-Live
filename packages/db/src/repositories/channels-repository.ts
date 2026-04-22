@@ -15,6 +15,13 @@ export function createChannelsRepository(executor: DatabaseExecutor): ChannelsRe
 
       return channel;
     },
+    async delete(channelId) {
+      const [channel] = await executor
+        .delete(channels)
+        .where(eq(channels.id, channelId))
+        .returning();
+      return channel ?? null;
+    },
     async findById(channelId: string) {
       const [channel] = await executor.select().from(channels).where(eq(channels.id, channelId)).limit(1);
       return channel ?? null;

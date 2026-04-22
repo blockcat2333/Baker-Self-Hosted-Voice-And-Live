@@ -39,6 +39,10 @@ export const AdminVerifyPasswordResponseSchema = z.object({
   ok: z.literal(true),
 });
 
+export const AdminDeleteChannelResponseSchema = z.object({
+  ok: z.literal(true),
+});
+
 export const AdminServerSettingsSchema = PublicServerConfigSchema;
 
 export const AdminWorkspaceStateSchema = z.object({
@@ -76,6 +80,7 @@ export type ServiceName = z.infer<typeof ServiceNameSchema>;
 export type PublicServerConfig = z.infer<typeof PublicServerConfigSchema>;
 export type AdminVerifyPasswordRequest = z.infer<typeof AdminVerifyPasswordRequestSchema>;
 export type AdminVerifyPasswordResponse = z.infer<typeof AdminVerifyPasswordResponseSchema>;
+export type AdminDeleteChannelResponse = z.infer<typeof AdminDeleteChannelResponseSchema>;
 export type AdminServerSettings = z.infer<typeof AdminServerSettingsSchema>;
 export type AdminWorkspaceState = z.infer<typeof AdminWorkspaceStateSchema>;
 export type AdminUpdateSettingsRequest = z.infer<typeof AdminUpdateSettingsRequestSchema>;

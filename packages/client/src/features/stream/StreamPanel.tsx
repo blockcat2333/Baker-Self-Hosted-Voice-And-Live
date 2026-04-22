@@ -11,6 +11,7 @@ import { useGatewayStore } from '../gateway/gateway-store';
 import { useVoiceStore } from '../voice/voice-store';
 import { closeStreamPopup, ensureStreamPopupWindow } from './stream-popup-controller';
 import {
+  type CameraOption,
   DEFAULT_STREAM_CODEC_PREFERENCE,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
   DEFAULT_STREAM_QUALITY,
@@ -76,6 +77,18 @@ function codecPreferenceLabel(t: TFunction, codecPreference: StreamCodecPreferen
     default:
       return t('stream.codec_default');
   }
+}
+
+function cameraOptionLabel(t: TFunction, option: CameraOption) {
+  if (option.selection.kind === 'facing') {
+    return option.selection.facingMode === 'user' ? 'Front Camera' : 'Rear Camera';
+  }
+
+  if (option.selection.kind === 'default') {
+    return t('stream.source_camera');
+  }
+
+  return option.label?.trim() || t('stream.source_camera');
 }
 
 function formatQualityLabel(t: TFunction, quality: StreamQualitySettings, codecPreference: StreamCodecPreference) {
@@ -327,6 +340,12 @@ export function StreamPanel() {
   const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
   const roomStateByChannel = useStreamStore((s) => s.roomStateByChannel);
   const error = useStreamStore((s) => s.error);
+  const cameraOptions = useStreamStore((s) => s.cameraOptions);
+  const selectedCameraKey = useStreamStore((s) => s.selectedCameraKey);
+  const isRefreshingCameras = useStreamStore((s) => s.isRefreshingCameras);
+  const isSwitchingCamera = useStreamStore((s) => s.isSwitchingCamera);
+  const refreshCameraOptions = useStreamStore((s) => s.refreshCameraOptions);
+  const selectCamera = useStreamStore((s) => s.selectCamera);
   const startSharing = useStreamStore((s) => s.startSharing);
   const stopSharing = useStreamStore((s) => s.stopSharing);
   const watchStream = useStreamStore((s) => s.watchStream);
@@ -346,6 +365,10 @@ export function StreamPanel() {
   const liveCountLabel = t('stream.live_stream_count', { count: roomStreams.length });
   const watchingCountLabel = t('stream.watching_now_count', { count: watchedStreamsInChannel.length });
   const availableCountLabel = t('stream.available_count', { count: availableStreams.length });
+
+  useEffect(() => {
+    void refreshCameraOptions();
+  }, [refreshCameraOptions]);
 
   if (!activeChannelId && !ownedStream && watchedStreams.length === 0 && !error) {
     return null;
@@ -373,6 +396,39 @@ export function StreamPanel() {
     }
 
     void startSharing(voiceChannelId, streamQuality, 'camera', sendCommandAwaitAck, sendRawCommand, streamCodecPreference);
+  }
+
+  function renderCameraSourceControl(disabled: boolean) {
+    const selectValue = selectedCameraKey ?? cameraOptions[0]?.key ?? 'camera-refreshing';
+
+    return (
+      <div className={'stream-camera-controls'}>
+        <label className={'stream-quality-field'}>
+          <span className={'stream-quality-label'}>{t('stream.source_camera')}</span>
+          <select
+            className={'stream-quality-select'}
+            value={selectValue}
+            onChange={(event) => {
+              void selectCamera(event.target.value);
+            }}
+            disabled={disabled || isRefreshingCameras || cameraOptions.length === 0}
+          >
+            {cameraOptions.length > 0 ? (
+              cameraOptions.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {cameraOptionLabel(t, option)}
+                </option>
+              ))
+            ) : (
+              <option value={'camera-refreshing'}>{t('common.loading')}</option>
+            )}
+          </select>
+        </label>
+        {isSwitchingCamera ? (
+          <p className={'stream-camera-status'}>{t('common.please_wait')}</p>
+        ) : null}
+      </div>
+    );
   }
 
   function handleWatch(streamId: string) {
@@ -512,6 +568,9 @@ export function StreamPanel() {
                 </div>
                 <span className={'stream-pill'}>{sourceLabel(t, ownedStream.sourceType)}</span>
               </div>
+              {ownedStream.sourceType === 'camera'
+                ? renderCameraSourceControl(ownedStream.status !== 'live' || isSwitchingCamera)
+                : null}
               <StreamVideo muted stream={ownedStream.localPreviewStream} />
               <OwnedStreamHealthPanel ownedStream={ownedStream} />
               <div className={'stream-card-actions'}>
@@ -603,6 +662,7 @@ export function StreamPanel() {
                   </select>
                 </label>
               </div>
+              {renderCameraSourceControl(isSwitchingCamera)}
               <div className={'stream-share-actions'}>
                 <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={handleShareScreen}>
                   {t('stream.action_share_screen')}

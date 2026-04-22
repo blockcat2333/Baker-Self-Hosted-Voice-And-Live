@@ -1,5 +1,6 @@
 import {
   AdminCreateChannelRequestSchema,
+  AdminDeleteChannelResponseSchema,
   AdminCreateUserPayloadSchema,
   AdminCreateUserResponseSchema,
   AdminServerSettingsSchema,
@@ -104,6 +105,7 @@ interface SystemRoutesRequest {
 
 interface SystemRoutesApp {
   dataAccess: DatabaseAccess;
+  delete(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
   get(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
   patch(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
   post(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
@@ -267,5 +269,52 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     }
 
     return toChannelSummary(updatedChannel);
+  });
+
+  app.delete('/v1/admin/channels/:channelId', async (request) => {
+    await requireAdmin(app, request);
+    const params = request.params as { channelId?: string };
+    const channelId = params.channelId;
+    if (!channelId) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Channel id is required.');
+    }
+
+    return app.dataAccess.withTransaction(async (repositories) => {
+      const existingChannel = await repositories.channels.findById(channelId);
+      if (!existingChannel) {
+        throw new ApiError(404, 'NOT_FOUND', 'Channel not found.');
+      }
+
+      const siblingChannels = await repositories.channels.listByGuild(existingChannel.guildId);
+      const sameTypeChannels = siblingChannels.filter((channel) => channel.type === existingChannel.type);
+      if (sameTypeChannels.length <= 1) {
+        const message = existingChannel.type === 'text'
+          ? 'At least one text channel must remain.'
+          : 'At least one voice channel must remain.';
+        throw new ApiError(409, 'VALIDATION_ERROR', message);
+      }
+
+      const activeSessions = await repositories.streamSessions.listActiveByChannel(channelId);
+      if (activeSessions.length > 0) {
+        throw new ApiError(409, 'VALIDATION_ERROR', 'Stop active livestreams before deleting this voice channel.');
+      }
+
+      const deletedChannel = await repositories.channels.delete(channelId);
+      if (!deletedChannel) {
+        throw new ApiError(500, 'INTERNAL_SERVER_ERROR', 'Failed to delete channel.');
+      }
+
+      const remainingChannels = await repositories.channels.listByGuild(existingChannel.guildId);
+      await Promise.all(
+        remainingChannels.map((channel, index) => {
+          if (channel.position === index) {
+            return Promise.resolve(channel);
+          }
+          return repositories.channels.update(channel.id, { position: index });
+        }),
+      );
+
+      return AdminDeleteChannelResponseSchema.parse({ ok: true });
+    });
   });
 }

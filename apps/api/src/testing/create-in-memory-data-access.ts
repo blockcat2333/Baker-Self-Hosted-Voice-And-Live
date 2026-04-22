@@ -119,6 +119,28 @@ export function createInMemoryDataAccess(): DatabaseAccess {
         channels.set(channel.id, channel);
         return channel;
       },
+      async delete(channelId) {
+        const channel = channels.get(channelId);
+        if (!channel) {
+          return null;
+        }
+
+        channels.delete(channelId);
+
+        for (const [messageId, message] of messages.entries()) {
+          if (message.channelId === channelId) {
+            messages.delete(messageId);
+          }
+        }
+
+        for (const [sessionId, session] of streamSessions.entries()) {
+          if (session.channelId === channelId) {
+            streamSessions.delete(sessionId);
+          }
+        }
+
+        return channel;
+      },
       async findAccessibleById(channelId, userId) {
         const channel = channels.get(channelId);
         if (!channel) {

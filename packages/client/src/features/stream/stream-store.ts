@@ -21,8 +21,13 @@ import {
   buildCameraCaptureConstraints,
   buildScreenCaptureConstraints,
   clampStreamPlaybackVolume,
+  DEFAULT_CAMERA_SELECTION,
   DEFAULT_STREAM_CODEC_PREFERENCE,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
+  getCameraSelectionFromOptions,
+  listCameraOptions,
+  type CameraOption,
+  type CameraSelection,
   type StreamCodecPreference,
 } from './stream-media';
 
@@ -78,10 +83,17 @@ export interface OwnedStreamVideoStats {
 }
 
 interface StreamState {
+  cameraOptions: CameraOption[];
+  selectedCameraKey: string | null;
+  isRefreshingCameras: boolean;
+  isSwitchingCamera: boolean;
   ownedStream: OwnedPublishState | null;
   watchedStreamsById: Record<string, WatchedStreamState>;
   roomStateByChannel: Record<string, Record<string, StreamPublication>>;
   error: string | null;
+
+  refreshCameraOptions(): Promise<void>;
+  selectCamera(cameraKey: string): Promise<void>;
 
   startSharing(
     channelId: string,
@@ -232,11 +244,52 @@ function getMyUserId(): string | null {
   return useAuthStore.getState().user?.id ?? null;
 }
 
-function emptyState(): Pick<StreamState, 'error' | 'ownedStream' | 'roomStateByChannel' | 'watchedStreamsById'> {
+async function listAvailableCameraOptions(currentSelectionKey: string | null): Promise<CameraOption[]> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.mediaDevices ||
+    typeof navigator.mediaDevices.enumerateDevices !== 'function'
+  ) {
+    return listCameraOptions([], currentSelectionKey);
+  }
+
+  try {
+    return listCameraOptions(await navigator.mediaDevices.enumerateDevices(), currentSelectionKey);
+  } catch {
+    return listCameraOptions([], currentSelectionKey);
+  }
+}
+
+function resolveSelectedCameraSelection(state: Pick<StreamState, 'cameraOptions' | 'selectedCameraKey'>): CameraSelection {
+  return getCameraSelectionFromOptions(state.cameraOptions, state.selectedCameraKey);
+}
+
+function buildStreamFromTracks(tracks: readonly MediaStreamTrack[]): MediaStream {
+  const stream = new MediaStream();
+  for (const track of tracks) {
+    stream.addTrack(track);
+  }
+  return stream;
+}
+
+function stopTracks(tracks: readonly MediaStreamTrack[]) {
+  for (const track of tracks) {
+    track.stop();
+  }
+}
+
+function emptyState(): Pick<
+  StreamState,
+  'cameraOptions' | 'selectedCameraKey' | 'isRefreshingCameras' | 'isSwitchingCamera' | 'error' | 'ownedStream' | 'roomStateByChannel' | 'watchedStreamsById'
+> {
   return {
+    cameraOptions: [],
     error: null,
+    isRefreshingCameras: false,
+    isSwitchingCamera: false,
     ownedStream: null,
     roomStateByChannel: {},
+    selectedCameraKey: null,
     watchedStreamsById: {},
   };
 }
@@ -788,11 +841,18 @@ function ensureWatchedReceiverSync(streamId: string) {
   watchedReceiverSyncTimers.set(streamId, timer);
 }
 
-async function captureStream(sourceType: StreamSourceType, quality: StreamQualitySettings): Promise<MediaStream> {
+async function captureStream(
+  sourceType: StreamSourceType,
+  quality: StreamQualitySettings,
+  cameraSelection: CameraSelection = DEFAULT_CAMERA_SELECTION,
+  includeAudio = true,
+): Promise<MediaStream> {
   const stream =
     sourceType === 'screen'
       ? await navigator.mediaDevices.getDisplayMedia(buildScreenCaptureConstraints(quality))
-      : await navigator.mediaDevices.getUserMedia(buildCameraCaptureConstraints(quality));
+      : await navigator.mediaDevices.getUserMedia(
+        buildCameraCaptureConstraints(quality, cameraSelection, includeAudio),
+      );
 
   applyCaptureTrackPreferences(sourceType, stream);
   return stream;
@@ -1169,6 +1229,91 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
 export const useStreamStore = create<StreamState>((set, get) => ({
   ...emptyState(),
 
+  async refreshCameraOptions() {
+    set({ isRefreshingCameras: true });
+
+    const options = await listAvailableCameraOptions(get().selectedCameraKey);
+
+    set((state) => ({
+      cameraOptions: options,
+      isRefreshingCameras: false,
+      selectedCameraKey: options.some((option) => option.key === state.selectedCameraKey)
+        ? state.selectedCameraKey
+        : (options[0]?.key ?? null),
+    }));
+  },
+
+  async selectCamera(cameraKey) {
+    const state = get();
+    const selectedOption = state.cameraOptions.find((option) => option.key === cameraKey);
+    if (!selectedOption) {
+      return;
+    }
+
+    const previousCameraKey = state.selectedCameraKey;
+    if (previousCameraKey === cameraKey) {
+      return;
+    }
+
+    set({ error: null, selectedCameraKey: cameraKey });
+
+    if (!ownedRuntime || ownedRuntime.sourceType !== 'camera' || get().ownedStream?.sourceType !== 'camera') {
+      return;
+    }
+
+    const runtime = ownedRuntime;
+    set({ isSwitchingCamera: true });
+
+    let captured: MediaStream | null = null;
+    try {
+      captured = await captureStream('camera', runtime.quality, selectedOption.selection, false);
+      const nextVideoTrack = captured.getVideoTracks()[0];
+      if (!nextVideoTrack) {
+        throw new Error('Selected camera did not provide a video track.');
+      }
+
+      if (ownedRuntime !== runtime) {
+        stopTracks(captured.getTracks());
+        set({ isSwitchingCamera: false });
+        return;
+      }
+
+      await runtime.manager.replaceOutgoingVideoTrack(nextVideoTrack);
+
+      const previousStream = runtime.localStream;
+      const nextPreviewStream = buildStreamFromTracks([
+        ...previousStream.getAudioTracks(),
+        nextVideoTrack,
+      ]);
+
+      runtime.localStream = nextPreviewStream;
+
+      stopTracks(previousStream.getVideoTracks());
+      stopTracks(captured.getTracks().filter((track) => track.id !== nextVideoTrack.id));
+
+      set((current) => ({
+        error: null,
+        isSwitchingCamera: false,
+        ownedStream: current.ownedStream
+          ? {
+              ...current.ownedStream,
+              localPreviewStream: nextPreviewStream,
+            }
+          : null,
+        selectedCameraKey: cameraKey,
+      }));
+
+      void get().refreshCameraOptions();
+    } catch (err) {
+      stopTracks(captured?.getTracks() ?? []);
+      set({
+        error: err instanceof Error ? err.message : 'Camera switch failed.',
+        isSwitchingCamera: false,
+        selectedCameraKey: previousCameraKey,
+      });
+    }
+  },
+
   async startSharing(
     channelId,
     quality,
@@ -1180,6 +1325,10 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (ownedRuntime) {
       return;
     }
+
+    const cameraSelection = sourceType === 'camera'
+      ? resolveSelectedCameraSelection(get())
+      : DEFAULT_CAMERA_SELECTION;
 
     set({
       error: null,
@@ -1198,13 +1347,17 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
     let captured: MediaStream;
     try {
-      captured = await captureStream(sourceType, quality);
+      captured = await captureStream(sourceType, quality, cameraSelection);
     } catch {
       set({
         error: sourceType === 'screen' ? 'Screen share capture failed.' : 'Camera capture failed.',
         ownedStream: null,
       });
       return;
+    }
+
+    if (sourceType === 'camera') {
+      void get().refreshCameraOptions();
     }
 
     set((state) => ({

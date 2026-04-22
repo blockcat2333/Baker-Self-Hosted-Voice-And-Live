@@ -5,7 +5,9 @@ import {
   buildScreenCaptureConstraints,
   clampStreamPlaybackVolume,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
+  getCameraSelectionKey,
   isDisplayAudioSource,
+  listCameraOptions,
   startPopupStreamPlayback,
 } from './stream-media';
 
@@ -36,6 +38,34 @@ describe('stream-media helpers', () => {
         width: {
           ideal: 1280,
           max: 1280,
+        },
+      },
+    });
+  });
+
+  it('builds camera capture constraints for a selected camera device or facing mode', () => {
+    expect(
+      buildCameraCaptureConstraints(
+        { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+        { deviceId: 'camera-2', kind: 'device' },
+      ).video,
+    ).toMatchObject({
+      deviceId: {
+        exact: 'camera-2',
+      },
+    });
+
+    expect(
+      buildCameraCaptureConstraints(
+        { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+        { facingMode: 'environment', kind: 'facing' },
+        false,
+      ),
+    ).toMatchObject({
+      audio: false,
+      video: {
+        facingMode: {
+          ideal: 'environment',
         },
       },
     });
@@ -98,6 +128,54 @@ describe('stream-media helpers', () => {
         max: 2560,
       },
     });
+  });
+
+  it('builds fallback camera options when device labels are unavailable', () => {
+    expect(
+      listCameraOptions([
+        { deviceId: 'front-id', kind: 'videoinput', label: '' },
+        { deviceId: 'back-id', kind: 'videoinput', label: '' },
+      ]),
+    ).toEqual([
+      {
+        key: getCameraSelectionKey({ facingMode: 'user', kind: 'facing' }),
+        label: null,
+        selection: { facingMode: 'user', kind: 'facing' },
+      },
+      {
+        key: getCameraSelectionKey({ facingMode: 'environment', kind: 'facing' }),
+        label: null,
+        selection: { facingMode: 'environment', kind: 'facing' },
+      },
+    ]);
+  });
+
+  it('keeps a selected facing fallback option available after labeled devices appear', () => {
+    expect(
+      listCameraOptions(
+        [
+          { deviceId: 'front-id', kind: 'videoinput', label: 'Front Lens' },
+          { deviceId: 'back-id', kind: 'videoinput', label: 'Back Lens' },
+        ],
+        getCameraSelectionKey({ facingMode: 'environment', kind: 'facing' }),
+      ),
+    ).toEqual([
+      {
+        key: getCameraSelectionKey({ facingMode: 'environment', kind: 'facing' }),
+        label: null,
+        selection: { facingMode: 'environment', kind: 'facing' },
+      },
+      {
+        key: getCameraSelectionKey({ deviceId: 'front-id', kind: 'device' }),
+        label: 'Front Lens',
+        selection: { deviceId: 'front-id', kind: 'device' },
+      },
+      {
+        key: getCameraSelectionKey({ deviceId: 'back-id', kind: 'device' }),
+        label: 'Back Lens',
+        selection: { deviceId: 'back-id', kind: 'device' },
+      },
+    ]);
   });
 
   it('detects display-audio stream sources', () => {

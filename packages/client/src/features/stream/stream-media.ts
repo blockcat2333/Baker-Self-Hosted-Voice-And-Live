@@ -3,12 +3,25 @@ import type { StreamQualitySettings, StreamSourceType } from '@baker/protocol';
 export const DEFAULT_STREAM_PLAYBACK_VOLUME = 1;
 export type StreamCodecPreference = 'default' | 'h264' | 'vp8' | 'vp9' | 'av1';
 export type PopupPlaybackStartResult = 'playing' | 'audio_blocked' | 'blocked';
+export type CameraFacingMode = 'environment' | 'user';
+export type CameraSelection =
+  | { kind: 'default' }
+  | { deviceId: string; kind: 'device' }
+  | { facingMode: CameraFacingMode; kind: 'facing' };
+export interface CameraOption {
+  key: string;
+  label: string | null;
+  selection: CameraSelection;
+}
+type CameraDeviceLike = Pick<MediaDeviceInfo, 'deviceId' | 'kind' | 'label'>;
+
 export const DEFAULT_STREAM_CODEC_PREFERENCE: StreamCodecPreference = 'default';
 export const DEFAULT_STREAM_QUALITY: StreamQualitySettings = {
   bitrateKbps: 4000,
   frameRate: 30,
   resolution: '720p',
 };
+export const DEFAULT_CAMERA_SELECTION: CameraSelection = { kind: 'default' };
 
 export const STREAM_RESOLUTION_OPTIONS: StreamQualitySettings['resolution'][] = ['480p', '720p', '1080p', '1440p'];
 export const STREAM_FRAME_RATE_OPTIONS: StreamQualitySettings['frameRate'][] = [15, 30, 60];
@@ -40,6 +53,14 @@ function videoConstraintsForQuality(quality: StreamQualitySettings): MediaTrackC
   };
 }
 
+function audioCaptureConstraints(): MediaTrackConstraints {
+  return {
+    autoGainControl: true,
+    echoCancellation: true,
+    noiseSuppression: true,
+  };
+}
+
 export function clampStreamPlaybackVolume(volume: number): number {
   if (!Number.isFinite(volume)) {
     return DEFAULT_STREAM_PLAYBACK_VOLUME;
@@ -56,6 +77,69 @@ export function clampStreamPlaybackVolume(volume: number): number {
   return volume;
 }
 
+export function getCameraSelectionKey(selection: CameraSelection): string {
+  if (selection.kind === 'device') {
+    return `device:${selection.deviceId}`;
+  }
+
+  if (selection.kind === 'facing') {
+    return `facing:${selection.facingMode}`;
+  }
+
+  return 'default';
+}
+
+export function getFallbackCameraOptions(): CameraOption[] {
+  return [
+    {
+      key: getCameraSelectionKey({ facingMode: 'user', kind: 'facing' }),
+      label: null,
+      selection: { facingMode: 'user', kind: 'facing' },
+    },
+    {
+      key: getCameraSelectionKey({ facingMode: 'environment', kind: 'facing' }),
+      label: null,
+      selection: { facingMode: 'environment', kind: 'facing' },
+    },
+  ];
+}
+
+export function listCameraOptions(
+  devices: readonly CameraDeviceLike[],
+  currentSelectionKey: string | null = null,
+): CameraOption[] {
+  const videoDevices = devices.filter((device) => device.kind === 'videoinput');
+  const deviceOptions = videoDevices.map((device, index) => ({
+    key: getCameraSelectionKey({ deviceId: device.deviceId, kind: 'device' }),
+    label: device.label.trim() || `Camera ${index + 1}`,
+    selection: {
+      deviceId: device.deviceId,
+      kind: 'device' as const,
+    },
+  }));
+  const hasReadableLabel = videoDevices.some((device) => device.label.trim().length > 0);
+
+  if (deviceOptions.length === 0 || !hasReadableLabel) {
+    return getFallbackCameraOptions();
+  }
+
+  if (currentSelectionKey?.startsWith('facing:')) {
+    const currentFallbackOption = getFallbackCameraOptions().find((option) => option.key === currentSelectionKey);
+    if (currentFallbackOption) {
+      return [currentFallbackOption, ...deviceOptions];
+    }
+  }
+
+  return deviceOptions;
+}
+
+export function getCameraSelectionFromOptions(
+  options: readonly CameraOption[],
+  selectedKey: string | null,
+): CameraSelection {
+  return options.find((option) => option.key === selectedKey)?.selection ?? DEFAULT_CAMERA_SELECTION;
+}
+
 export function hasPlayableStreamAudioTrack(stream: Pick<MediaStream, 'getAudioTracks'> | null): boolean {
   if (!stream) {
     return false;
@@ -64,30 +148,34 @@ export function hasPlayableStreamAudioTrack(stream: Pick<MediaStream, 'getAudioT
   return stream.getAudioTracks().some((track) => track.readyState !== 'ended' && track.enabled !== false);
 }
 
-export function buildCameraCaptureConstraints(quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY): MediaStreamConstraints {
-  const audioConstraints: MediaTrackConstraints = {
-    autoGainControl: true,
-    echoCancellation: true,
-    noiseSuppression: true,
-  };
+export function buildCameraCaptureConstraints(
+  quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY,
+  selection: CameraSelection = DEFAULT_CAMERA_SELECTION,
+  includeAudio = true,
+): MediaStreamConstraints {
+  const videoConstraints = videoConstraintsForQuality(quality);
+
+  if (selection.kind === 'device') {
+    videoConstraints.deviceId = { exact: selection.deviceId };
+  }
+
+  if (selection.kind === 'facing') {
+    videoConstraints.facingMode = { ideal: selection.facingMode };
+  }
 
   return {
-    audio: audioConstraints,
-    video: videoConstraintsForQuality(quality),
+    audio: includeAudio ? audioCaptureConstraints() : false,
+    video: videoConstraints,
   };
 }
 
-export function buildScreenCaptureConstraints(quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY): DisplayMediaStreamOptions {
+export function buildScreenCaptureConstraints(
+  quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY,
+): DisplayMediaStreamOptions {
   // Chromium/Electron may treat local-playback suppression as an OS-level mute
   // for shared system audio on Windows, so keep only non-destructive audio hints.
-  const audioConstraints: MediaTrackConstraints = {
-    autoGainControl: true,
-    echoCancellation: true,
-    noiseSuppression: true,
-  };
-
   return {
-    audio: audioConstraints,
+    audio: audioCaptureConstraints(),
     video: videoConstraintsForQuality(quality),
   };
 }

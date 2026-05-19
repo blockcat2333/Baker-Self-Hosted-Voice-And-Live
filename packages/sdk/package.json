@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@baker/protocol": "workspace:*"
+    "@baker/protocol": "workspace:*",
+    "mediasoup-client": "^3.20.0"
   },
   "devDependencies": {
     "tsup": "^8.3.5"

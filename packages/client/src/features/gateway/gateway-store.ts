@@ -5,6 +5,8 @@ import { GatewayClient } from '@baker/sdk';
 import type { GatewayCommandName, VoiceParticipant } from '@baker/protocol';
 import {
   MediaSignalRelayEventDataSchema,
+  MediaModeUpdatedEventDataSchema,
+  MediaSfuProducerEventDataSchema,
   MessageCreatedEventDataSchema,
   PresenceUpdatedEventDataSchema,
   StreamStateUpdatedEventDataSchema,
@@ -335,6 +337,9 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
                 [result.data.channelId]: result.data.participants,
               },
             }));
+            if (useVoiceStore.getState().channelId === result.data.channelId) {
+              useVoiceStore.getState().handleVoiceStateUpdated(result.data);
+            }
           }
         }
 
@@ -375,6 +380,36 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
             } else {
               useStreamStore.getState().handleMediaSignal(result.data);
             }
+          }
+        }
+
+        if (envelope.event === 'media.sfu.producer.added') {
+          const result = MediaSfuProducerEventDataSchema.safeParse(envelope.data);
+          if (result.success) {
+            if (result.data.producer.source === 'voice') {
+              useVoiceStore.getState().handleSfuProducerAdded(result.data);
+            } else {
+              useStreamStore.getState().handleSfuProducerAdded(result.data);
+            }
+          }
+        }
+
+        if (envelope.event === 'media.sfu.producer.removed') {
+          const result = MediaSfuProducerEventDataSchema.safeParse(envelope.data);
+          if (result.success) {
+            if (result.data.producer.source === 'voice') {
+              useVoiceStore.getState().handleSfuProducerRemoved(result.data);
+            } else {
+              useStreamStore.getState().handleSfuProducerRemoved(result.data);
+            }
+          }
+        }
+
+        if (envelope.event === 'media.mode.updated') {
+          const result = MediaModeUpdatedEventDataSchema.safeParse(envelope.data);
+          if (result.success) {
+            void useVoiceStore.getState().handleMediaModeUpdated();
+            void useStreamStore.getState().handleMediaModeUpdated(sendCommandAwaitAck, sendRawCommand);
           }
         }
       }

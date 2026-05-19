@@ -5,6 +5,20 @@ const DEFAULT_JWT_ACCESS_SECRET = 'replace-me-for-local-access';
 const DEFAULT_JWT_REFRESH_SECRET = 'replace-me-for-local-refresh';
 const DEFAULT_MEDIA_INTERNAL_SECRET = 'replace-me-for-local-media-internal-secret';
 
+const EnvBooleanSchema = z.preprocess((value) => {
+  if (typeof value !== 'string') {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return value;
+}, z.boolean());
+
 const AppEnvSchema = z.object({
   ADMIN_PANEL_PASSWORD: z.string().min(1).default(DEFAULT_ADMIN_PANEL_PASSWORD),
   API_HOST: z.string().default('0.0.0.0'),
@@ -24,6 +38,10 @@ const AppEnvSchema = z.object({
   MEDIA_PORT: z.coerce.number().int().positive().default(3003),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   REDIS_URL: z.string().min(1).default('redis://127.0.0.1:6379'),
+  SFU_ANNOUNCED_IP: z.string().default(''),
+  SFU_ENABLE_TCP: EnvBooleanSchema.default(true),
+  SFU_RTC_MAX_PORT: z.coerce.number().int().positive().default(50100),
+  SFU_RTC_MIN_PORT: z.coerce.number().int().positive().default(50000),
   // Multiple STUN endpoints improve reliability across regions/networks (some are blocked).
   STUN_URLS: z.string().default('stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302'),
   TURN_PASSWORD: z.string().default(''),
@@ -55,6 +73,10 @@ export function parseAppEnv(source: Record<string, string | undefined> = process
         `Refusing to start with insecure default secrets in production: ${insecureDefaults.join(', ')}.`,
       );
     }
+  }
+
+  if (parsed.SFU_RTC_MIN_PORT > parsed.SFU_RTC_MAX_PORT) {
+    throw new Error('SFU_RTC_MIN_PORT must be less than or equal to SFU_RTC_MAX_PORT.');
   }
 
   // Default internal media URL to loopback + the resolved MEDIA_PORT.

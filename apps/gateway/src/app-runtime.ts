@@ -18,7 +18,26 @@
  */
 
 import { createEventEnvelope } from '@baker/protocol';
-import type { MediaSessionResponse, SessionMode } from '@baker/protocol';
+import {
+  MediaSfuConsumeAckDataSchema,
+  MediaSfuCreateTransportAckDataSchema,
+  MediaSfuProduceAckDataSchema,
+} from '@baker/protocol';
+import type {
+  MediaSfuCloseCommandData,
+  MediaSfuConnectTransportCommandData,
+  MediaSfuConsumeAckData,
+  MediaSfuConsumeCommandData,
+  MediaSfuCreateTransportAckData,
+  MediaSfuCreateTransportCommandData,
+  MediaSfuProduceAckData,
+  MediaSfuProduceCommandData,
+  MediaSfuResumeConsumerCommandData,
+  MediaSessionResponse,
+  MediaTransportMode,
+  SessionMode,
+  SfuProducer,
+} from '@baker/protocol';
 
 import { createLogger } from '@baker/shared';
 
@@ -37,6 +56,7 @@ const log = createLogger('gateway:runtime');
 // Redis channel pattern for message fanout.
 const MESSAGE_CHANNEL_PATTERN = 'bakr:channel:*:messages';
 const MESSAGE_CHANNEL_REGEX = /^bakr:channel:([0-9a-f-]+):messages$/;
+const MEDIA_MODE_CHANNEL = 'bakr:server:media-mode';
 
 const MEDIA_SESSION_TIMEOUT_MS = 5_000;
 
@@ -58,6 +78,7 @@ export class GatewayRuntime {
   readonly tokenVerifier: TokenVerifier;
   readonly db: DatabaseAccess;
   readonly fanoutEnabled: boolean;
+  mediaMode: MediaTransportMode = 'p2p';
 
   private readonly mediaBaseUrl: string;
   private readonly mediaInternalSecret: string;
@@ -96,7 +117,7 @@ export class GatewayRuntime {
 
     try {
       const response = await fetch(url, {
-        body: JSON.stringify(descriptor),
+        body: JSON.stringify({ ...descriptor, transportMode: this.mediaMode }),
         headers: {
           'Content-Type': 'application/json',
           'x-baker-internal-secret': this.mediaInternalSecret,
@@ -113,6 +134,78 @@ export class GatewayRuntime {
       // Validate with schema
       const { MediaSessionResponseSchema } = await import('@baker/protocol');
       return MediaSessionResponseSchema.parse(json);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async refreshMediaMode(): Promise<void> {
+    const settings = await this.db.serverSettings.findById('default');
+    this.mediaMode = settings?.mediaMode ?? 'p2p';
+  }
+
+  async createSfuTransport(data: MediaSfuCreateTransportCommandData): Promise<MediaSfuCreateTransportAckData> {
+    const json = await this.callMedia('/v1/internal/media/sfu/transports', data);
+    return MediaSfuCreateTransportAckDataSchema.parse(json);
+  }
+
+  async connectSfuTransport(data: MediaSfuConnectTransportCommandData): Promise<void> {
+    await this.callMedia('/v1/internal/media/sfu/transports/connect', data);
+  }
+
+  async produceSfu(data: MediaSfuProduceCommandData & { userId: string }): Promise<MediaSfuProduceAckData> {
+    const json = await this.callMedia('/v1/internal/media/sfu/producers', data);
+    const parsed = MediaSfuProduceAckDataSchema.parse(json);
+    this.broadcastSfuProducerAdded(parsed.producer);
+    return parsed;
+  }
+
+  async consumeSfu(data: MediaSfuConsumeCommandData): Promise<MediaSfuConsumeAckData> {
+    const json = await this.callMedia('/v1/internal/media/sfu/consumers', data);
+    return MediaSfuConsumeAckDataSchema.parse(json);
+  }
+
+  async resumeSfuConsumer(data: MediaSfuResumeConsumerCommandData): Promise<void> {
+    await this.callMedia('/v1/internal/media/sfu/consumers/resume', data);
+  }
+
+  async closeSfu(data: MediaSfuCloseCommandData): Promise<void> {
+    const json = await this.callMedia('/v1/internal/media/sfu/close', data);
+    const closedProducer = typeof json === 'object' && json !== null && 'closedProducer' in json
+      ? (json as { closedProducer?: unknown }).closedProducer
+      : undefined;
+    if (closedProducer) {
+      this.broadcastSfuProducerRemoved(closedProducer as SfuProducer);
+    }
+  }
+
+  async closeSfuSession(input: { channelId: string; mode: SessionMode; sessionId: string; streamId?: string }): Promise<void> {
+    await this.closeSfu(input).catch((err) => {
+      log.warn({ err, sessionId: input.sessionId }, 'Failed to close SFU session');
+    });
+  }
+
+  private async callMedia(path: string, body: unknown): Promise<unknown> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MEDIA_SESSION_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${this.mediaBaseUrl}${path}`, {
+        body: JSON.stringify(body),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-baker-internal-secret': this.mediaInternalSecret,
+        },
+        method: 'POST',
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Media request failed: HTTP ${response.status}${text ? ` ${text}` : ''}`);
+      }
+
+      return response.json();
     } finally {
       clearTimeout(timer);
     }
@@ -135,6 +228,12 @@ export class GatewayRuntime {
         return;
       }
       log.info({ pattern: MESSAGE_CHANNEL_PATTERN }, 'Subscribed to Redis message pattern');
+    });
+
+    this.subClient.subscribe(MEDIA_MODE_CHANNEL, (err) => {
+      if (err) {
+        log.warn({ err }, '[FANOUT_DISABLED] media mode subscription failed');
+      }
     });
 
     this.subClient.on('pmessage', (_pattern: string, channel: string, message: string) => {
@@ -164,6 +263,102 @@ export class GatewayRuntime {
         }
       }
     });
+
+    this.subClient.on('message', (channel: string, message: string) => {
+      if (channel !== MEDIA_MODE_CHANNEL) {
+        return;
+      }
+
+      let payload: unknown;
+      try {
+        payload = JSON.parse(message);
+      } catch {
+        return;
+      }
+
+      const mediaMode = typeof payload === 'object' && payload !== null && 'mediaMode' in payload
+        ? (payload as { mediaMode?: unknown }).mediaMode
+        : null;
+      if (mediaMode !== 'p2p' && mediaMode !== 'sfu') {
+        return;
+      }
+
+      void this.applyMediaMode(mediaMode, 'admin_changed');
+    });
+  }
+
+  async applyMediaMode(mediaMode: MediaTransportMode, reason: 'admin_changed'): Promise<void> {
+    if (this.mediaMode === mediaMode) {
+      return;
+    }
+
+    this.mediaMode = mediaMode;
+    const voiceChannelIds = this.voiceRoom.getActiveChannelIds();
+    const streamChanges = this.streamRoom.clearAll();
+    const affectedChannelIds = [...new Set([
+      ...voiceChannelIds,
+      ...streamChanges.map((change) => change.channelId),
+    ])];
+    const targetConnectionIds = new Set<string>();
+
+    for (const channelId of voiceChannelIds) {
+      for (const participant of this.voiceRoom.getParticipants(channelId)) {
+        targetConnectionIds.add(participant.connectionId);
+      }
+      this.voiceRoom.clearChannel(channelId);
+      await this.broadcastVoiceRosterUpdated(channelId);
+    }
+
+    for (const change of streamChanges) {
+      if (change.type === 'host_stopped') {
+        for (const connectionId of change.connectionIds) {
+          targetConnectionIds.add(connectionId);
+        }
+        void this.db.streamSessions.updateStatus(change.sessionId, 'idle', { endedAt: new Date() });
+      }
+    }
+
+    const data = {
+      affectedChannelIds,
+      mediaMode,
+      reason,
+    };
+
+    for (const connectionId of targetConnectionIds) {
+      const conn = this.connections.getById(connectionId);
+      if (!conn) continue;
+      try {
+        const envelope = createEventEnvelope(conn.nextSequence(), 'media.mode.updated', data);
+        conn.socket.send(JSON.stringify(envelope));
+      } catch (err) {
+        log.warn({ err, connectionId, mediaMode }, 'Failed to send media.mode.updated');
+      }
+    }
+  }
+
+  broadcastSfuProducerAdded(producer: SfuProducer): void {
+    this.broadcastSfuProducerEvent('media.sfu.producer.added', producer);
+  }
+
+  broadcastSfuProducerRemoved(producer: SfuProducer): void {
+    this.broadcastSfuProducerEvent('media.sfu.producer.removed', producer);
+  }
+
+  private broadcastSfuProducerEvent(event: 'media.sfu.producer.added' | 'media.sfu.producer.removed', producer: SfuProducer): void {
+    const connectionIds = producer.source === 'voice'
+      ? this.voiceRoom.getParticipants(producer.channelId).map((participant) => participant.connectionId)
+      : this.streamRoom.getAudienceConnectionIds(producer.channelId, producer.streamId);
+
+    for (const connectionId of connectionIds) {
+      const conn = this.connections.getById(connectionId);
+      if (!conn || conn.userId === producer.userId) continue;
+      try {
+        const envelope = createEventEnvelope(conn.nextSequence(), event, { producer });
+        conn.socket.send(JSON.stringify(envelope));
+      } catch (err) {
+        log.warn({ err, connectionId, producerId: producer.id }, `Failed to send ${event}`);
+      }
+    }
   }
 
   private getGuildMemberConnectionIds(guildId: string): string[] {

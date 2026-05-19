@@ -141,19 +141,40 @@ For public internet deployments, treat these as mandatory requirements, not opti
 
 When `TURN_ENABLED=true`, Baker now fails fast at startup if it cannot determine a public TURN relay address for clients. After restarting the container, confirm the media session logs show `turnConfigured:true` before testing cross-region voice or livestream playback.
 
+## Optional SFU Media Mode
+
+Baker defaults to P2P media. TURN helps P2P peers reach each other through strict NATs, but browsers still try to form peer connections between users. SFU mode sends voice and livestream tracks through the built-in media backend, which is often more stable for users on restrictive networks.
+
+To make SFU mode available, publish the RTC port range and set the public IP browsers can reach:
+
+```bash
+docker run -d \
+  --name baker \
+  -p 3000:80 \
+  -p 3001:8080 \
+  -p 50000-50100:50000-50100/udp \
+  -p 50000-50100:50000-50100/tcp \
+  -e SFU_ANNOUNCED_IP=203.0.113.10 \
+  -v baker-data:/var/lib/baker \
+  blockcat233/baker:1.0.2
+```
+
+Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.
+
 ## Deployment Notes
 
 - Public deployment is intentionally documented as a single-image path only: `blockcat233/baker`
 - For browser voice, microphone, camera, and screen sharing, serve Baker over HTTPS
 - TURN is optional for small/local setups but strongly recommended for public internet, mobile, VPN, or cross-region usage
 - When TURN is enabled for public deployment, you must expose the relay ports and provide either `TURN_EXTERNAL_IP` or explicit `TURN_URLS`
+- SFU mode requires `SFU_ANNOUNCED_IP` and the `50000-50100` TCP/UDP range to be reachable from browsers
 - `docker-compose.yml` remains in the repo for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment product
 
 ## Current Limits
 
-- `apps/media` is still a placeholder adapter boundary; there is no real SFU backend yet
+- SFU mode is single-node and does not include recording, transcoding, HLS, or simulcast yet
 - Voice and stream room runtime state is still in-memory
-- Voice and livestream are P2P and intended for small-room usage today
+- P2P remains the default and fallback deployment path
 - Desktop/Electron is present but not yet validated end-to-end
 
 ## Monorepo Layout

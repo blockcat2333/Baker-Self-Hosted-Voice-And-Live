@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "fast-uri": "^3.1.2",
+      "ws": "^8.20.1"
+    }
+  },
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel --filter=@baker/api --filter=@baker/gateway --filter=@baker/media --filter=@baker/web --filter=@baker/admin",

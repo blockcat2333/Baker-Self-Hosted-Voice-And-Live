@@ -48,6 +48,18 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-19 Server-Wide P2P / SFU Media Mode Switch
+
+- added the admin-controlled server media mode setting with `p2p` as the default and `sfu` as the built-in backend mode for both voice and livestream media
+- wired the gateway, media service, SDK helpers, web voice runtime, web stream runtime, and admin/public settings contracts through the same `mediaMode` protocol
+- added mediasoup-backed SFU session, transport, producer, consumer, and close flows under internal media routes protected by `MEDIA_INTERNAL_SECRET`
+- upgraded the Docker runtime base to Node 22 and exposed the SFU RTC port range for the all-in-one image path
+- validated with real Chrome smoke tests on 2026-05-19:
+  - admin panel switched the server from P2P to SFU and public config reflected `mediaMode: "sfu"`
+  - two signed-in browser users joined the same voice channel through SFU; both clients received router capabilities and used `media.sfu.*` commands without `media.signal.*` P2P signaling
+  - one browser published a camera livestream through SFU and another watched it successfully; publish/watch acks included SFU capabilities and the viewer consumed the stream producers
+- rebuilt and smoke-tested the all-in-one Docker image after the Node 22 / SFU runtime update; the image starts cleanly, serves web/admin health checks, and preserves `p2p` as the default public `mediaMode`
+
 ### 2026-04-20 Mobile Web Tabbed UI + Joined-Voice Usability
 
 - reworked phone-width web navigation into a bottom-tab shell with dedicated `Channels`, `Chat`, `Voice`, and `More` sections while keeping the desktop/tablet composition intact
@@ -494,12 +506,17 @@ Latest full validation run:
 
 - `pnpm typecheck` pass
 - `pnpm lint` pass
-- `pnpm test` pass (93 tests)
+- `pnpm test` pass (112 tests)
+- `pnpm turbo run build --filter=@baker/api --filter=@baker/gateway --filter=@baker/media --filter=@baker/web --filter=@baker/admin` pass
+- real Chrome SFU smoke validation pass:
+  - admin media mode switch to SFU
+  - two-user SFU voice join
+  - SFU camera stream publish/watch
 - `pnpm audit --prod` pass
-- Docker self-hosted smoke validation pass:
-  - `docker compose --env-file output/selfhost-smoke.env up -d --build`
-  - `docker compose --env-file output/selfhost-smoke.env ps`
-  - host checks passed for `http://127.0.0.1:18080/`, `http://127.0.0.1:18081/`, and proxied `/health`
+- Docker all-in-one image build and smoke validation pass:
+  - `docker build -t blockcat233/baker:1.0.2 -t blockcat233/baker:latest .`
+  - `docker run -e SFU_ANNOUNCED_IP=127.0.0.1 -p 18080:80 -p 18081:8080 blockcat233/baker:1.0.2`
+  - host checks passed for web `/health`, admin `/health`, and `/v1/meta/public-config` with default `mediaMode: "p2p"`
 - real browser validation pass:
   - web auth storage + logout behavior
   - admin password storage + logout behavior
@@ -514,13 +531,12 @@ Open-source publication prep validation:
 
 - workspace residue cleanup is complete except for the currently locked `output/dev` runtime files held open by active processes
 - the local private development history is still not suitable for direct publication because it contains personal author metadata; any future public-history refresh should continue to use a fresh initial commit
-- searchable Docker Desktop deployment is still pending Docker Hub credentials/secrets so `.github/workflows/publish-images.yml` can mirror the runtime images there
 
 ## Known Gaps
 
-- `apps/media` is still `NoopMediaAdapter`; there is no real SFU/media backend
+- SFU mode is built in, but remains single-node and does not include recording, transcoding, HLS, or simulcast
 - voice and stream rooms are in-memory only, so multi-instance support is deferred
-- room streaming is P2P and intentionally small-room only
+- P2P remains the default media mode and safest fallback deployment path
 - desktop/Electron is still not validated end-to-end
 - admin-configured web/app ports are persisted and surfaced through the API/control panel, but changing them does not hot-restart services automatically
 - channel `voiceQuality` is stored and manageable from the control panel, but it is not yet wired into actual voice media quality controls
@@ -530,7 +546,7 @@ Open-source publication prep validation:
 
 - admin-account / RBAC design to replace the current shared management password model
 - cookie-based refresh-token storage if/when the product is ready to tighten browser session handling further
-- TURN / media-adapter hardening beyond the current internal-secret gate
+- TURN / SFU media-adapter hardening beyond the current internal-secret gate
 - explicit guild/channel lifecycle beyond the current shared starter workspace
 - Desktop shell end-to-end validation
 
@@ -540,16 +556,16 @@ A Git snapshot is recommended after this bug-hunt pass.
 
 Recommended next work:
 
-1. Deployment finish: configure Docker Hub mirroring secrets and publish the self-contained runtime images so Baker becomes directly searchable in Docker Desktop
+1. Deployment hardening: keep Docker Hub publishing mirrored through CI so release images do not depend on a local workstation push
 2. Quick hardening: replace the shared admin password model with explicit admin identities / revocable sessions
 3. Medium feature work: move refresh-token handling toward `HttpOnly` cookies while keeping deployment simplicity
-4. Larger architecture/product work: TURN / real media-adapter hardening beyond the current internal-route secret gate
+4. Larger architecture/product work: TURN / SFU media-adapter hardening beyond the current internal-route secret gate
 
 ## Risk List
 
-- `apps/media` is still a placeholder boundary
+- SFU is currently single-node and depends on correctly advertised public RTC ports
 - room registries are in-memory only
-- stream and voice remain P2P instead of SFU-backed
+- stream and voice media mode is server-wide rather than per-channel
 - screen-share audio behavior still depends on browser-specific `getDisplayMedia` system-audio handling; local playback suppression is intentionally not requested because it muted Windows system output during livestream start
 - popup creation can still be blocked by browser popup policies if the watch action is not treated as a direct user gesture
 - temporary single-stream compatibility fallback still remains at the protocol/gateway boundary until old clients are no longer needed

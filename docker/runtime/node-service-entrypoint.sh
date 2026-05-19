@@ -22,6 +22,10 @@ preserve_env_override TURN_PORT
 preserve_env_override TURN_MIN_PORT
 preserve_env_override TURN_MAX_PORT
 preserve_env_override TURN_EXTERNAL_IP
+preserve_env_override SFU_ANNOUNCED_IP
+preserve_env_override SFU_RTC_MIN_PORT
+preserve_env_override SFU_RTC_MAX_PORT
+preserve_env_override SFU_ENABLE_TCP
 
 load_runtime_env
 
@@ -34,6 +38,10 @@ restore_env_override TURN_PORT
 restore_env_override TURN_MIN_PORT
 restore_env_override TURN_MAX_PORT
 restore_env_override TURN_EXTERNAL_IP
+restore_env_override SFU_ANNOUNCED_IP
+restore_env_override SFU_RTC_MIN_PORT
+restore_env_override SFU_RTC_MAX_PORT
+restore_env_override SFU_ENABLE_TCP
 
 : "${NODE_ENV:=production}"
 : "${WEB_PORT:=3000}"
@@ -51,6 +59,10 @@ restore_env_override TURN_EXTERNAL_IP
 : "${TURN_URLS:=}"
 : "${TURN_USERNAME:=}"
 : "${TURN_PASSWORD:=}"
+: "${SFU_ANNOUNCED_IP:=}"
+: "${SFU_RTC_MIN_PORT:=50000}"
+: "${SFU_RTC_MAX_PORT:=50100}"
+: "${SFU_ENABLE_TCP:=true}"
 
 export NODE_ENV
 export WEB_PORT
@@ -82,5 +94,9 @@ export TURN_PORT
 export TURN_MIN_PORT
 export TURN_MAX_PORT
 export TURN_EXTERNAL_IP
+export SFU_ANNOUNCED_IP
+export SFU_RTC_MIN_PORT
+export SFU_RTC_MAX_PORT
+export SFU_ENABLE_TCP
 
 exec "$@"

@@ -17,13 +17,16 @@ import type {
   GatewayCommandName,
   IceServer,
   MediaSignalRelayEventData,
+  MediaSfuProducerEventData,
+  MediaTransportMode,
+  SfuProducer,
   VoiceMemberUpdatedEventData,
   VoiceParticipant,
   VoiceSpeakingUpdatedEventData,
   VoiceStateUpdatedEventData,
 } from '@baker/protocol';
 import { VoiceJoinAckDataSchema } from '@baker/protocol';
-import { WebRtcManager } from '@baker/sdk';
+import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
@@ -44,6 +47,8 @@ const SPEAKING_THRESHOLD = 0.02;
 let localCaptureStream: MediaStream | null = null;
 let localSendStream: MediaStream | null = null;
 let webrtcManager: WebRtcManager | null = null;
+let sfuSession: SfuClientSession | null = null;
+let pendingSfuVoiceProducers: SfuProducer[] = [];
 
 let speakingAudioCtx: AudioContext | null = null;
 let analyserNode: AnalyserNode | null = null;
@@ -58,6 +63,7 @@ let savedChannelId: string | null = null;
 let savedMySessionId: string | null = null;
 let savedMyUserId: string | null = null;
 let savedIceServers: IceServer[] = [];
+let savedMediaMode: MediaTransportMode = 'p2p';
 let savedSendRawCommand: ((command: GatewayCommandName, data: unknown) => void) | null = null;
 let savedSendCommandAwaitAck:
   | ((command: GatewayCommandName, data: unknown, timeoutMs?: number) => Promise<unknown>)
@@ -140,6 +146,9 @@ export interface VoiceState {
   handleVoiceMemberUpdated(data: VoiceMemberUpdatedEventData): void;
   handleVoiceSpeakingUpdated(data: VoiceSpeakingUpdatedEventData): void;
   handleMediaSignal(data: MediaSignalRelayEventData): void;
+  handleSfuProducerAdded(data: MediaSfuProducerEventData): void;
+  handleSfuProducerRemoved(data: MediaSfuProducerEventData): void;
+  handleMediaModeUpdated(): Promise<void>;
   /** Called before the gateway store starts a reconnect loop (keep local media, rejoin later). */
   handleGatewayWillReconnect(): void;
   /** Called after the gateway reconnects/authenticates (attempt to rejoin the previous voice channel). */
@@ -203,6 +212,25 @@ function syncRemoteAudioElementVolumes() {
   for (const [userId] of remoteAudioElements) {
     applyRemoteAudioElementVolumeForUser(userId);
   }
+}
+
+function attachRemoteAudioTrack(fromUserId: string, track: MediaStreamTrack, streams: readonly MediaStream[] = []) {
+  if (track.kind !== 'audio') return;
+  peersWithRemoteAudio.add(fromUserId);
+  clearVoiceConnectionIssueTimer(fromUserId);
+  clearVoiceConnectionIssueIfResolved();
+  let audio = remoteAudioElements.get(fromUserId);
+  if (!audio) {
+    audio = new Audio();
+    audio.autoplay = true;
+    attachRemoteAudio(audio);
+    remoteAudioElements.set(fromUserId, audio);
+  }
+  audio.srcObject = streams[0] ?? new MediaStream([track]);
+  audio.volume = getEffectivePlaybackVolumeForUser(fromUserId);
+  audio.play().catch((err) => {
+    console.warn('[voice] remote audio play() blocked:', err);
+  });
 }
 
 function clearVoiceConnectionIssueTimer(userId: string) {
@@ -321,24 +349,7 @@ function createManager(): WebRtcManager {
       });
     },
     onRemoteTrack(fromUserId, track, streams) {
-      if (track.kind !== 'audio') return;
-      peersWithRemoteAudio.add(fromUserId);
-      clearVoiceConnectionIssueTimer(fromUserId);
-      clearVoiceConnectionIssueIfResolved();
-      let audio = remoteAudioElements.get(fromUserId);
-      if (!audio) {
-        audio = new Audio();
-        audio.autoplay = true;
-        // Attach to the DOM so Chrome's autoplay policy allows play() to succeed.
-        // Audio elements not in the document tree are often blocked by the browser.
-        attachRemoteAudio(audio);
-        remoteAudioElements.set(fromUserId, audio);
-      }
-      audio.srcObject = streams[0] ?? new MediaStream([track]);
-      audio.volume = getEffectivePlaybackVolumeForUser(fromUserId);
-      audio.play().catch((err) => {
-        console.warn('[voice] remote audio play() blocked:', err);
-      });
+      attachRemoteAudioTrack(fromUserId, track, streams);
     },
     onPeerConnectionStateChange(userId, state) {
       // Track connection state for diagnostics (shown in VoicePanel per-participant).
@@ -408,6 +419,89 @@ function createManager(): WebRtcManager {
       );
     },
   });
+}
+
+async function setupSfuVoiceSession(
+  ackData: ReturnType<typeof VoiceJoinAckDataSchema.parse>,
+  sendCommandAwaitAck: (command: GatewayCommandName, data: unknown, timeoutMs?: number) => Promise<unknown>,
+) {
+  if (!ackData.sfu || !localSendStream || !savedChannelId || !savedMySessionId) {
+    throw new Error('SFU voice session is missing setup data.');
+  }
+
+  sfuSession = new SfuClientSession(
+    {
+      channelId: savedChannelId,
+      mode: 'voice',
+      sessionId: savedMySessionId,
+    },
+    sendCommandAwaitAck,
+  );
+  await sfuSession.load(ackData.sfu);
+  await sfuSession.produceTracks(localSendStream.getAudioTracks());
+  const queuedProducers = pendingSfuVoiceProducers.splice(0, pendingSfuVoiceProducers.length);
+  const producersById = new Map<string, SfuProducer>();
+  for (const producer of [...ackData.sfu.producers, ...queuedProducers]) {
+    producersById.set(producer.id, producer);
+  }
+  await consumeSfuVoiceProducers([...producersById.values()]);
+}
+
+async function createP2pOffersForParticipants(
+  participants: VoiceParticipant[],
+  myUserId: string | null,
+  sendStream: MediaStream | null,
+  iceServers: IceServer[],
+) {
+  if (!webrtcManager || !myUserId || !sendStream) return;
+
+  const existingPeerIds = new Set(webrtcManager.getPeerIds());
+  for (const p of participants) {
+    if (p.userId === myUserId) continue;
+    if (myUserId > p.userId) continue;
+    if (existingPeerIds.has(p.userId)) continue;
+    try {
+      const offer = await webrtcManager.createOffer(p.userId, sendStream, iceServers);
+      existingPeerIds.add(p.userId);
+      sendSignal(p.userId, { type: 'offer', sdp: offer.sdp ?? '' });
+    } catch (err) {
+      console.warn('[voice] offer failed for', p.userId, err);
+    }
+  }
+}
+
+function getLatestJoinParticipants(channelId: string, ackParticipants: VoiceParticipant[]): VoiceParticipant[] {
+  const current = useVoiceStore.getState();
+  if (current.channelId !== channelId || current.participants.length === 0) {
+    return ackParticipants;
+  }
+
+  const currentUserIds = new Set(current.participants.map((participant) => participant.userId));
+  const currentIncludesAck = ackParticipants.every((participant) => currentUserIds.has(participant.userId));
+  return currentIncludesAck ? current.participants : ackParticipants;
+}
+
+async function consumeSfuVoiceProducers(producers: SfuProducer[]) {
+  const session = sfuSession;
+  const myUserId = savedMyUserId;
+  if (!session || !myUserId) {
+    return;
+  }
+
+  for (const producer of producers) {
+    if (producer.source !== 'voice' || producer.userId === myUserId) {
+      continue;
+    }
+
+    try {
+      const remote = await session.consumeProducer(producer);
+      if (remote) {
+        attachRemoteAudioTrack(producer.userId, remote.track);
+      }
+    } catch (err) {
+      console.warn('[voice] SFU consume failed for', producer.id, err);
+    }
+  }
 }
 
 function startSpeakingDetection() {
@@ -490,6 +584,9 @@ function teardown() {
     webrtcManager.closeAll();
     webrtcManager = null;
   }
+  sfuSession?.close();
+  sfuSession = null;
+  pendingSfuVoiceProducers = [];
 
   for (const [, audio] of remoteAudioElements) {
     detachRemoteAudio(audio);
@@ -513,6 +610,7 @@ function teardown() {
   savedMySessionId = null;
   savedMyUserId = null;
   savedIceServers = [];
+  savedMediaMode = 'p2p';
   savedSendRawCommand = null;
   savedSendCommandAwaitAck = null;
   peersWithRemoteAudio.clear();
@@ -527,6 +625,9 @@ function teardownPeersForReconnect() {
     webrtcManager.closeAll();
     webrtcManager = null;
   }
+  sfuSession?.close();
+  sfuSession = null;
+  pendingSfuVoiceProducers = [];
 
   for (const [, audio] of remoteAudioElements) {
     detachRemoteAudio(audio);
@@ -537,6 +638,7 @@ function teardownPeersForReconnect() {
   savedMySessionId = null;
   savedMyUserId = null;
   savedIceServers = [];
+  savedMediaMode = 'p2p';
   peersWithRemoteAudio.clear();
   clearAllVoiceConnectionIssueTimers();
 }
@@ -799,28 +901,41 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     savedMySessionId = ackData.sessionId;
     savedMyUserId = useAuthStore.getState().user?.id ?? null;
     savedIceServers = ackData.iceServers;
+    savedMediaMode = ackData.mediaMode;
     savedSendRawCommand = sendRawCommand;
     savedSendCommandAwaitAck = sendCommandAwaitAck;
 
-    webrtcManager = createManager();
     const myUserId = savedMyUserId;
     const sendStream = localSendStream;
+    set({ participants: ackData.participants, speakingUserIds: new Set() });
 
-    for (const p of ackData.participants) {
-      if (p.userId === myUserId) continue;
-      if (!myUserId || myUserId > p.userId || !sendStream) continue;
+    if (ackData.mediaMode === 'sfu') {
       try {
-        const offer = await webrtcManager.createOffer(p.userId, sendStream, ackData.iceServers);
-        sendSignal(p.userId, { type: 'offer', sdp: offer.sdp ?? '' });
+        await setupSfuVoiceSession(ackData, sendCommandAwaitAck);
       } catch (err) {
-        console.warn('[voice] offer failed for', p.userId, err);
+        teardown();
+        set({
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Failed to join SFU voice channel.',
+          connectionIssue: null,
+          channelId: null,
+        });
+        return;
       }
+    } else {
+      webrtcManager = createManager();
+      await createP2pOffersForParticipants(ackData.participants, myUserId, sendStream, ackData.iceServers);
+    }
+
+    const activeParticipants = getLatestJoinParticipants(channelId, ackData.participants);
+    if (ackData.mediaMode === 'p2p') {
+      await createP2pOffersForParticipants(activeParticipants, myUserId, sendStream, ackData.iceServers);
     }
 
     startSpeakingDetection();
     syncRemoteAudioElementVolumes();
 
-    if (networkStatsTimer === null) {
+    if (ackData.mediaMode === 'p2p' && networkStatsTimer === null) {
       // Only poll WebRTC stats in real browser environments. In unit tests, the
       // WebRtcManager is often mocked and may not implement stats APIs.
       if (typeof window !== 'undefined' && typeof RTCPeerConnection !== 'undefined') {
@@ -838,7 +953,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       connectionIssue: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,
-      participants: ackData.participants,
+      participants: activeParticipants,
       speakingUserIds: new Set(),
     });
     playVoiceSfx('self_join');
@@ -998,7 +1113,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
         playVoiceSfx('peer_join');
 
-        if (myUserId && myUserId < p.userId && sendStream && webrtcManager) {
+        if (savedMediaMode === 'p2p' && myUserId && myUserId < p.userId && sendStream && webrtcManager) {
           void webrtcManager
             .createOffer(p.userId, sendStream, savedIceServers)
             .then((offer) => {
@@ -1136,6 +1251,37 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     })();
   },
 
+  handleSfuProducerAdded(data) {
+    const { producer } = data;
+    if (savedMediaMode !== 'sfu') return;
+    if (producer.source !== 'voice') return;
+    if (producer.channelId !== get().channelId) return;
+    if (!sfuSession) {
+      if (!pendingSfuVoiceProducers.some((queued) => queued.id === producer.id)) {
+        pendingSfuVoiceProducers.push(producer);
+      }
+      return;
+    }
+    void consumeSfuVoiceProducers([producer]);
+  },
+
+  handleSfuProducerRemoved(data) {
+    const { producer } = data;
+    if (producer.source !== 'voice') return;
+    pendingSfuVoiceProducers = pendingSfuVoiceProducers.filter((queued) => queued.id !== producer.id);
+    const remoteAudio = remoteAudioElements.get(producer.userId);
+    if (remoteAudio) {
+      detachRemoteAudio(remoteAudio);
+      remoteAudioElements.delete(producer.userId);
+    }
+    peersWithRemoteAudio.delete(producer.userId);
+  },
+
+  async handleMediaModeUpdated() {
+    get().handleGatewayWillReconnect();
+    await get().handleGatewayReconnected();
+  },
+
   handleGatewayWillReconnect() {
     const { status, channelId } = get();
     if (status === 'idle' || status === 'error') return;
@@ -1197,26 +1343,38 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     savedMySessionId = ackData.sessionId;
     savedMyUserId = useAuthStore.getState().user?.id ?? null;
     savedIceServers = ackData.iceServers;
+    savedMediaMode = ackData.mediaMode;
 
-    webrtcManager = createManager();
     const myUserId = savedMyUserId;
     const sendStream = localSendStream;
+    set({ participants: ackData.participants, speakingUserIds: new Set() });
 
-    for (const p of ackData.participants) {
-      if (p.userId === myUserId) continue;
-      if (!myUserId || myUserId > p.userId || !sendStream) continue;
+    if (ackData.mediaMode === 'sfu') {
       try {
-        const offer = await webrtcManager.createOffer(p.userId, sendStream, ackData.iceServers);
-        sendSignal(p.userId, { type: 'offer', sdp: offer.sdp ?? '' });
+        await setupSfuVoiceSession(ackData, savedSendCommandAwaitAck);
       } catch (err) {
-        console.warn('[voice] offer failed for', p.userId, err);
+        set({
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Failed to rejoin SFU voice channel.',
+          connectionIssue: null,
+          channelId: null,
+        });
+        return;
       }
+    } else {
+      webrtcManager = createManager();
+      await createP2pOffersForParticipants(ackData.participants, myUserId, sendStream, ackData.iceServers);
+    }
+
+    const activeParticipants = getLatestJoinParticipants(channelId, ackData.participants);
+    if (ackData.mediaMode === 'p2p') {
+      await createP2pOffersForParticipants(activeParticipants, myUserId, sendStream, ackData.iceServers);
     }
 
     startSpeakingDetection();
     syncRemoteAudioElementVolumes();
 
-    if (networkStatsTimer === null) {
+    if (ackData.mediaMode === 'p2p' && networkStatsTimer === null) {
       if (typeof window !== 'undefined' && typeof RTCPeerConnection !== 'undefined') {
         networkStatsTimer = setInterval(() => {
           void pollPeerNetworkStats();
@@ -1232,7 +1390,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       connectionIssue: null,
       localMediaSelfLossPct: null,
       localMediaSelfUpdatedAt: null,
-      participants: ackData.participants,
+      participants: activeParticipants,
       speakingUserIds: new Set(),
     });
 

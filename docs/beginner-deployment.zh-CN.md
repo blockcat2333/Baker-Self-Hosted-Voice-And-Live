@@ -90,6 +90,26 @@ docker logs baker
 
 容器重启后，请检查日志，确认媒体服务显示 `turnConfigured:true`。
 
+## 可选：SFU 模式
+
+TURN 是让 P2P 媒体在 NAT 后面也能连通。SFU 模式不同：语音和直播轨道会先进入 Baker 的媒体后端，再由服务器转发给其他用户，适合有些用户所在网络会阻断或严重影响 P2P 的场景。
+
+如果要让管理后台可以切换到 SFU，请额外映射 SFU RTC 端口范围，并设置公网 IP：
+
+```bash
+docker run -d \
+  --name baker \
+  -p 3000:80 \
+  -p 3001:8080 \
+  -p 50000-50100:50000-50100/udp \
+  -p 50000-50100:50000-50100/tcp \
+  -e SFU_ANNOUNCED_IP=203.0.113.10 \
+  -v baker-data:/var/lib/baker \
+  blockcat233/baker:1.0.2
+```
+
+然后进入管理后台，把“服务器设置 -> 媒体模式”切到 `sfu`。当前语音和直播会立即按新模式重连，文字聊天连接会保持在线。
+
 ## 公网部署示例
 
 ```bash

@@ -90,6 +90,26 @@ Public deployment checklist:
 
 After the container restarts, check the logs and make sure the media service reports `turnConfigured:true`.
 
+## Optional SFU Mode
+
+TURN keeps P2P media working through NAT. SFU mode is different: voice and livestream tracks go through Baker's media backend, which is useful when some users are on networks that block or degrade direct P2P paths.
+
+To make SFU selectable in the admin panel, also publish the SFU RTC range and set the public IP:
+
+```bash
+docker run -d \
+  --name baker \
+  -p 3000:80 \
+  -p 3001:8080 \
+  -p 50000-50100:50000-50100/udp \
+  -p 50000-50100:50000-50100/tcp \
+  -e SFU_ANNOUNCED_IP=203.0.113.10 \
+  -v baker-data:/var/lib/baker \
+  blockcat233/baker:1.0.2
+```
+
+Then open the admin panel and change **Server settings -> Media mode** to `sfu`. Existing voice and livestream sessions reconnect immediately in the new mode, while text chat remains connected.
+
 ## Public Internet Example
 
 ```bash

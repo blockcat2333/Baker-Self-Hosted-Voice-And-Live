@@ -18,16 +18,36 @@ import Redis from 'ioredis';
 
 import { createLogger } from '@baker/shared';
 
-import type { MessageCreatedEventData } from '@baker/protocol';
+import type { MediaTransportMode, MessageCreatedEventData } from '@baker/protocol';
 
 const log = createLogger('api:redis-publisher');
 
 export interface RedisPublisher {
+  publishMediaModeChanged(mediaMode: MediaTransportMode): Promise<void>;
   publishMessageCreated(channelId: string, data: MessageCreatedEventData): Promise<void>;
 }
 
 export function createRedisPublisher(client: Redis | null): RedisPublisher {
   return {
+    async publishMediaModeChanged(mediaMode) {
+      if (!client) {
+        log.warn(
+          { mediaMode },
+          '[FANOUT_DISABLED] Redis client unavailable - media mode change not published',
+        );
+        return;
+      }
+
+      const channel = 'bakr:server:media-mode';
+      try {
+        await client.publish(channel, JSON.stringify({ mediaMode }));
+      } catch (err) {
+        log.warn(
+          { err, mediaMode, redisChannel: channel },
+          '[FANOUT_DISABLED] Failed to publish media mode change to Redis',
+        );
+      }
+    },
     async publishMessageCreated(channelId, data) {
       if (!client) {
         log.warn(

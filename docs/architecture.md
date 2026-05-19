@@ -42,8 +42,9 @@
 ### Media
 
 - media control-plane boundary
-- currently still a `NoopMediaAdapter`
-- intended future SFU integration point
+- defaults to P2P/TURN but can switch server-wide to the built-in mediasoup SFU
+- creates per-channel SFU routers for voice and livestream sessions when `media_mode=sfu`
+- requires `SFU_ANNOUNCED_IP` and reachable `50000-50100` RTC ports before SFU can be enabled from the admin panel
 - internal media routes are service-to-service only and now require `MEDIA_INTERNAL_SECRET`; they are not intended to be browser-accessible control-plane APIs
 
 ### Data
@@ -51,7 +52,7 @@
 - PostgreSQL for durable data through `packages/db`
 - Redis for presence/message fanout
 - `stream_sessions` stores publisher-owned room stream session history/status
-- `server_settings` stores singleton server-level configuration such as server name, public-registration flag, web/app ports, web-enabled flag, and the management-password hash
+- `server_settings` stores singleton server-level configuration such as server name, public-registration flag, media mode, web/app ports, web-enabled flag, and the management-password hash
 - `channels.voiceQuality` stores an admin-managed per-channel voice-quality setting
 
 ### Deployment Topology
@@ -73,6 +74,7 @@
 - the default host bindings are `:3000 -> :80` for Web and `:3001 -> :8080` for Admin so local Docker Desktop startup avoids common port-80 collisions
 - the image publish workflow now targets the single public `baker` image on Docker Hub
 - the all-in-one image keeps TURN disabled by default and only starts coturn when `TURN_ENABLED=true`
+- the all-in-one image exposes the default SFU RTC range `50000-50100/tcp` and `50000-50100/udp`
 - `docker-compose.yml` remains in the repo only for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment topology
 
 ## Protocol Design
@@ -93,9 +95,10 @@ This avoids duplicated front-end and back-end types.
 - WebRTC is the intended client media transport
 - Baker does not implement RTP / ICE / NAT traversal itself
 - STUN / TURN come from environment variables
+- SFU mode uses mediasoup WebRtcTransports behind `apps/media`; the gateway remains the auth, membership, and room-state boundary
 - production startup now rejects insecure default values for admin password, JWT secrets, and media internal secret
 - React components must not own gateway/API business logic
-- `apps/media` exists so future SFU work does not leak into the API or gateway
+- `apps/media` keeps SFU internals out of the API, gateway, and browser UI
 
 ## Request And Realtime Flow
 

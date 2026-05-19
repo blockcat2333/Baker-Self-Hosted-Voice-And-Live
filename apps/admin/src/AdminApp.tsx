@@ -51,6 +51,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [webEnabled, setWebEnabled] = useState(true);
   const [webPort, setWebPort] = useState('80');
   const [appPort, setAppPort] = useState('5174');
+  const [mediaMode, setMediaMode] = useState<'p2p' | 'sfu'>('p2p');
   const [newAdminPassword, setNewAdminPassword] = useState('');
 
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -130,6 +131,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setWebEnabled(nextSettings.webEnabled);
     setWebPort(String(nextSettings.webPort));
     setAppPort(String(nextSettings.appPort));
+    setMediaMode(nextSettings.mediaMode);
   }
 
   async function handleLogin(event: React.FormEvent) {
@@ -178,6 +180,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
             adminPassword: newAdminPassword || undefined,
             allowPublicRegistration,
             appPort: Number(appPort),
+            mediaMode,
             serverName,
             webEnabled,
             webPort: Number(webPort),
@@ -402,6 +405,16 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
               </label>
             </div>
             <label className="admin-field">
+              <span>{t('admin.media_mode')}</span>
+              <select value={mediaMode} onChange={(event) => setMediaMode(event.target.value as 'p2p' | 'sfu')}>
+                <option value="p2p">{t('admin.media_mode_p2p')}</option>
+                <option value="sfu">{t('admin.media_mode_sfu')}</option>
+              </select>
+            </label>
+            {mediaMode === 'sfu' ? (
+              <p className="admin-channel-hint">{t('admin.media_mode_sfu_hint')}</p>
+            ) : null}
+            <label className="admin-field">
               <span>{t('admin.new_management_password')}</span>
               <input
                 type="password"
@@ -419,6 +432,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
             <div className="admin-meta">
               <span>{t('admin.current_web_port', { port: String(settings.webPort) })}</span>
               <span>{t('admin.current_app_port', { port: String(settings.appPort) })}</span>
+              <span>{t('admin.current_media_mode', { mode: settings.mediaMode.toUpperCase() })}</span>
             </div>
           ) : null}
         </section>

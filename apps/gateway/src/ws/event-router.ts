@@ -36,6 +36,12 @@ import {
   ChannelUnsubscribeCommandDataSchema,
   GatewayCommandEnvelopeSchema,
   GatewayHeartbeatEnvelopeSchema,
+  MediaSfuCloseCommandDataSchema,
+  MediaSfuConnectTransportCommandDataSchema,
+  MediaSfuConsumeCommandDataSchema,
+  MediaSfuCreateTransportCommandDataSchema,
+  MediaSfuProduceCommandDataSchema,
+  MediaSfuResumeConsumerCommandDataSchema,
   MediaSignalCommandDataSchema,
   StreamStartAckDataSchema,
   StreamStartCommandDataSchema,
@@ -56,6 +62,7 @@ import {
   createEventEnvelope,
   createHeartbeatEnvelope,
 } from '@baker/protocol';
+import type { MediaSessionResponse } from '@baker/protocol';
 
 import { createLogger } from '@baker/shared';
 
@@ -178,6 +185,24 @@ export async function routeGatewayMessage(
     case 'media.signal.restart_ice':
     case 'media.signal.end':
       return handleMediaSignalRelay(connection, reqId, data, runtime);
+
+    case 'media.sfu.create_transport':
+      return handleSfuCreateTransport(connection, reqId, data, runtime);
+
+    case 'media.sfu.connect_transport':
+      return handleSfuConnectTransport(connection, reqId, data, runtime);
+
+    case 'media.sfu.produce':
+      return handleSfuProduce(connection, reqId, data, runtime);
+
+    case 'media.sfu.consume':
+      return handleSfuConsume(connection, reqId, data, runtime);
+
+    case 'media.sfu.resume_consumer':
+      return handleSfuResumeConsumer(connection, reqId, data, runtime);
+
+    case 'media.sfu.close':
+      return handleSfuClose(connection, reqId, data, runtime);
 
     default:
       // All other recognised command names are acked without action for now.
@@ -377,7 +402,7 @@ async function handleVoiceJoin(
 
   // Create media session to get sessionId + ICE servers.
   // Use a temporary sessionId for the media call; the real UUID comes back from media.
-  let mediaSession: { iceServers: unknown[]; sessionId: string };
+  let mediaSession: MediaSessionResponse;
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
@@ -424,8 +449,10 @@ async function handleVoiceJoin(
   const ackData = VoiceJoinAckDataSchema.parse({
     channelId,
     iceServers: mediaSession.iceServers,
+    mediaMode: runtime.mediaMode,
     participants: snapshot.map((p) => ({ isMuted: p.isMuted, sessionId: p.sessionId, userId: p.userId })),
     sessionId: mediaSession.sessionId,
+    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
   });
 
   try {
@@ -467,6 +494,7 @@ async function handleVoiceLeave(
 
   const { channelId } = parsed.data;
   const userId = connection.userId as string;
+  const existingParticipant = runtime.voiceRoom.getParticipant(channelId, userId);
 
   const remaining = runtime.voiceRoom.leave(channelId, userId);
   if (remaining === null) {
@@ -479,6 +507,13 @@ async function handleVoiceLeave(
   }
 
   connection.voiceChannelId = null;
+  if (runtime.mediaMode === 'sfu' && existingParticipant) {
+    await runtime.closeSfuSession({
+      channelId,
+      mode: 'voice',
+      sessionId: existingParticipant.sessionId,
+    });
+  }
 
   // Broadcast updated snapshot to remaining participants.
   if (remaining.length > 0) {
@@ -496,9 +531,25 @@ async function handleVoiceLeave(
         ...voiceConnectionIds,
       ]);
       await runtime.db.streamSessions.updateStatus(change.sessionId, 'idle', { endedAt: new Date() });
+      if (runtime.mediaMode === 'sfu') {
+        await runtime.closeSfuSession({
+          channelId: change.channelId,
+          mode: 'stream_publish',
+          sessionId: change.sessionId,
+          streamId: change.streamId,
+        });
+      }
       continue;
     }
 
+    if (runtime.mediaMode === 'sfu') {
+      await runtime.closeSfuSession({
+        channelId: change.channelId,
+        mode: 'stream_watch',
+        sessionId: change.sessionId,
+        streamId: change.streamId,
+      });
+    }
     runtime.streamRoom.broadcastStateUpdated(change.channelId, voiceConnectionIds);
   }
 
@@ -640,7 +691,7 @@ async function handleStreamStart(
 
   const streamId = randomUUID();
 
-  let mediaSession: { iceServers: unknown[]; sessionId: string };
+  let mediaSession: MediaSessionResponse;
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
@@ -707,7 +758,9 @@ async function handleStreamStart(
   return createAckEnvelope(reqId, StreamStartAckDataSchema.parse({
     channelId,
     iceServers: mediaSession.iceServers,
+    mediaMode: runtime.mediaMode,
     sessionId: mediaSession.sessionId,
+    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
     streamId,
   }));
 }
@@ -765,6 +818,14 @@ async function handleStreamStop(
   }
 
   await runtime.db.streamSessions.updateStatus(stopped.sessionId, 'idle', { endedAt: new Date() });
+  if (runtime.mediaMode === 'sfu') {
+    await runtime.closeSfuSession({
+      channelId,
+      mode: 'stream_publish',
+      sessionId: stopped.sessionId,
+      streamId: stopped.streamId,
+    });
+  }
   runtime.streamRoom.broadcastStateCleared(channelId, [
     ...stopped.connectionIds,
     ...getVoiceConnectionIds(runtime, channelId),
@@ -860,12 +921,13 @@ async function handleStreamWatch(
       hostSessionId: publication.host.sessionId,
       hostUserId: publication.host.userId,
       iceServers: [],
+      mediaMode: runtime.mediaMode,
       sessionId: existingViewer.sessionId,
       streamId: publication.streamId,
     }));
   }
 
-  let mediaSession: { iceServers: unknown[]; sessionId: string };
+  let mediaSession: MediaSessionResponse;
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
@@ -907,17 +969,19 @@ async function handleStreamWatch(
     hostSessionId: watch.publication.host.sessionId,
     hostUserId: watch.publication.host.userId,
     iceServers: mediaSession.iceServers,
+    mediaMode: runtime.mediaMode,
     sessionId: watch.viewerSessionId,
+    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
     streamId: watch.publication.streamId,
   }));
 }
 
-function handleStreamUnwatch(
+async function handleStreamUnwatch(
   connection: GatewayConnection,
   reqId: string,
   data: unknown,
   runtime: GatewayRuntime,
-): RouterReply {
+): Promise<RouterReply> {
   const parsed = StreamUnwatchCommandDataSchema.safeParse(data);
   if (!parsed.success) {
     return createErrorEnvelope({
@@ -946,11 +1010,20 @@ function handleStreamUnwatch(
     targetStreamId = watchedPublications[0]?.streamId;
   }
 
+  const viewer = targetStreamId ? runtime.streamRoom.getViewer(channelId, targetStreamId, userId) : null;
   const removed = targetStreamId
     ? runtime.streamRoom.removeViewer(channelId, targetStreamId, userId)
     : false;
 
   if (removed) {
+    if (runtime.mediaMode === 'sfu' && viewer) {
+      await runtime.closeSfuSession({
+        channelId,
+        mode: 'stream_watch',
+        sessionId: viewer.sessionId,
+        streamId: targetStreamId,
+      });
+    }
     runtime.streamRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
   }
 
@@ -1033,4 +1106,234 @@ function handleMediaSignalRelay(
   }
 
   return createAckEnvelope(reqId, { relayed: true, targetUserId });
+}
+
+function validateSfuAccess(
+  connection: GatewayConnection,
+  runtime: GatewayRuntime,
+  descriptor: { channelId: string; mode: 'stream_publish' | 'stream_watch' | 'voice'; sessionId: string; streamId?: string },
+): boolean {
+  const userId = connection.userId as string;
+
+  if (runtime.mediaMode !== 'sfu') {
+    return false;
+  }
+
+  if (descriptor.mode === 'voice') {
+    const participant = runtime.voiceRoom.getParticipant(descriptor.channelId, userId);
+    return Boolean(participant && participant.connectionId === connection.id && participant.sessionId === descriptor.sessionId);
+  }
+
+  if (!descriptor.streamId) {
+    return false;
+  }
+
+  const publication = runtime.streamRoom.getPublication(descriptor.channelId, descriptor.streamId);
+  if (!publication) {
+    return false;
+  }
+
+  if (descriptor.mode === 'stream_publish') {
+    return publication.host.userId === userId && publication.host.sessionId === descriptor.sessionId;
+  }
+
+  const viewer = publication.viewers.get(userId);
+  return Boolean(viewer && viewer.connectionId === connection.id && viewer.sessionId === descriptor.sessionId);
+}
+
+function createSfuForbidden(reqId: string): RouterReply {
+  return createErrorEnvelope({
+    code: 'FORBIDDEN',
+    message: 'SFU operation is not allowed for this active media session.',
+    reqId,
+    retryable: false,
+  });
+}
+
+async function handleSfuCreateTransport(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSfuCreateTransportCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.sfu.create_transport requires a valid SFU session descriptor and direction.',
+      reqId,
+      retryable: false,
+    });
+  }
+  if (!validateSfuAccess(connection, runtime, parsed.data)) {
+    return createSfuForbidden(reqId);
+  }
+
+  try {
+    return createAckEnvelope(reqId, await runtime.createSfuTransport(parsed.data));
+  } catch (err) {
+    log.warn({ err, connectionId: connection.id }, 'SFU create transport failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to create SFU transport.',
+      reqId,
+      retryable: true,
+    });
+  }
+}
+
+async function handleSfuConnectTransport(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSfuConnectTransportCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.sfu.connect_transport requires a valid transport id and DTLS parameters.',
+      reqId,
+      retryable: false,
+    });
+  }
+  if (!validateSfuAccess(connection, runtime, parsed.data)) {
+    return createSfuForbidden(reqId);
+  }
+
+  try {
+    await runtime.connectSfuTransport(parsed.data);
+    return createAckEnvelope(reqId, { connected: true });
+  } catch (err) {
+    log.warn({ err, connectionId: connection.id }, 'SFU connect transport failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to connect SFU transport.',
+      reqId,
+      retryable: true,
+    });
+  }
+}
+
+async function handleSfuProduce(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSfuProduceCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.sfu.produce requires a valid transport id, kind, and RTP parameters.',
+      reqId,
+      retryable: false,
+    });
+  }
+  if (!validateSfuAccess(connection, runtime, parsed.data)) {
+    return createSfuForbidden(reqId);
+  }
+
+  try {
+    return createAckEnvelope(reqId, await runtime.produceSfu({
+      ...parsed.data,
+      userId: connection.userId as string,
+    }));
+  } catch (err) {
+    log.warn({ err, connectionId: connection.id }, 'SFU produce failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to publish SFU media.',
+      reqId,
+      retryable: true,
+    });
+  }
+}
+
+async function handleSfuConsume(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSfuConsumeCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.sfu.consume requires a valid producer id and RTP capabilities.',
+      reqId,
+      retryable: false,
+    });
+  }
+  if (!validateSfuAccess(connection, runtime, parsed.data)) {
+    return createSfuForbidden(reqId);
+  }
+
+  try {
+    return createAckEnvelope(reqId, await runtime.consumeSfu(parsed.data));
+  } catch (err) {
+    log.warn({ err, connectionId: connection.id }, 'SFU consume failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to subscribe to SFU media.',
+      reqId,
+      retryable: true,
+    });
+  }
+}
+
+async function handleSfuResumeConsumer(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSfuResumeConsumerCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.sfu.resume_consumer requires a valid consumer id.',
+      reqId,
+      retryable: false,
+    });
+  }
+  if (!validateSfuAccess(connection, runtime, parsed.data)) {
+    return createSfuForbidden(reqId);
+  }
+
+  try {
+    await runtime.resumeSfuConsumer(parsed.data);
+    return createAckEnvelope(reqId, { resumed: true });
+  } catch (err) {
+    log.warn({ err, connectionId: connection.id }, 'SFU resume consumer failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to resume SFU consumer.',
+      reqId,
+      retryable: true,
+    });
+  }
+}
+
+async function handleSfuClose(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSfuCloseCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.sfu.close requires a valid SFU session descriptor.',
+      reqId,
+      retryable: false,
+    });
+  }
+  if (!validateSfuAccess(connection, runtime, parsed.data)) {
+    return createSfuForbidden(reqId);
+  }
+
+  await runtime.closeSfu(parsed.data);
+  return createAckEnvelope(reqId, { closed: true });
 }

@@ -10,9 +10,11 @@ import {
   AdminVerifyPasswordResponseSchema,
   AdminWorkspaceStateSchema,
   AuthUserSchema,
+  MediaCapabilitiesSchema,
   PublicServerConfigSchema,
 } from '@baker/protocol';
 import type { DatabaseAccess } from '@baker/db';
+import { parseAppEnv } from '@baker/shared';
 
 import { ApiError } from '../lib/api-error';
 import { DEFAULT_WORKSPACE_SLUG, ensureNewUserJoinsDefaultWorkspace } from '../lib/default-workspace';
@@ -109,6 +111,38 @@ interface SystemRoutesApp {
   get(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
   patch(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
   post(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
+  publisher: {
+    publishMediaModeChanged(mediaMode: 'p2p' | 'sfu'): Promise<void>;
+  };
+}
+
+async function assertSfuAvailable() {
+  const env = parseAppEnv();
+  let response: Response;
+  try {
+    response = await fetch(`${env.MEDIA_INTERNAL_URL}/v1/internal/media/capabilities`, {
+      headers: {
+        'x-baker-internal-secret': env.MEDIA_INTERNAL_SECRET,
+      },
+      method: 'GET',
+    });
+  } catch (err) {
+    throw new ApiError(409, 'VALIDATION_ERROR', 'SFU media backend is not reachable.', {
+      cause: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  if (!response.ok) {
+    throw new ApiError(409, 'VALIDATION_ERROR', `SFU media backend check failed with HTTP ${response.status}.`);
+  }
+
+  const capabilities = MediaCapabilitiesSchema.parse(await response.json());
+  if (!capabilities.sfu?.available) {
+    throw new ApiError(409, 'VALIDATION_ERROR', 'This media service build does not support SFU mode.');
+  }
+  if (!capabilities.sfu.configured) {
+    throw new ApiError(409, 'VALIDATION_ERROR', 'SFU mode requires SFU_ANNOUNCED_IP and the SFU RTC port range to be configured.');
+  }
 }
 
 export function registerSystemRoutes(app: SystemRoutesApp) {
@@ -117,6 +151,7 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     return PublicServerConfigSchema.parse({
       allowPublicRegistration: settings.allowPublicRegistration,
       appPort: settings.appPort,
+      mediaMode: settings.mediaMode,
       serverName: settings.serverName,
       webEnabled: settings.webEnabled,
       webPort: settings.webPort,
@@ -138,6 +173,7 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     return AdminServerSettingsSchema.parse({
       allowPublicRegistration: settings.allowPublicRegistration,
       appPort: settings.appPort,
+      mediaMode: settings.mediaMode,
       serverName: settings.serverName,
       webEnabled: settings.webEnabled,
       webPort: settings.webPort,
@@ -158,6 +194,12 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     }
     if (input.appPort !== undefined) {
       nextInput['appPort'] = input.appPort;
+    }
+    if (input.mediaMode !== undefined) {
+      if (input.mediaMode === 'sfu') {
+        await assertSfuAvailable();
+      }
+      nextInput['mediaMode'] = input.mediaMode;
     }
     if (input.serverName !== undefined) {
       nextInput['serverName'] = input.serverName;
@@ -181,10 +223,14 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     if (input.serverName) {
       await syncWorkspaceServerName(app.dataAccess, input.serverName);
     }
+    if (input.mediaMode !== undefined && input.mediaMode !== currentSettings.mediaMode) {
+      await app.publisher.publishMediaModeChanged(input.mediaMode);
+    }
 
     return AdminServerSettingsSchema.parse({
       allowPublicRegistration: nextSettings.allowPublicRegistration,
       appPort: nextSettings.appPort,
+      mediaMode: nextSettings.mediaMode,
       serverName: nextSettings.serverName,
       webEnabled: nextSettings.webEnabled,
       webPort: nextSettings.webPort,

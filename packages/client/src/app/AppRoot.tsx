@@ -85,6 +85,7 @@ function AppRootContent({
     const fallbackConfig: PublicServerConfig = {
       allowPublicRegistration: true,
       appPort: 5174,
+      mediaMode: 'p2p',
       serverName: 'Baker',
       webEnabled: true,
       webPort: 80,

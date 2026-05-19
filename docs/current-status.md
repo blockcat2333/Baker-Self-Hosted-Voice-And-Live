@@ -514,8 +514,8 @@ Latest full validation run:
   - SFU camera stream publish/watch
 - `pnpm audit --prod` pass
 - Docker all-in-one image build and smoke validation pass:
-  - `docker build -t blockcat233/baker:1.0.2 -t blockcat233/baker:latest .`
-  - `docker run -e SFU_ANNOUNCED_IP=127.0.0.1 -p 18080:80 -p 18081:8080 blockcat233/baker:1.0.2`
+  - `docker build -t blockcat233/baker:1.0.3 -t blockcat233/baker:latest .`
+  - `docker run -e SFU_ANNOUNCED_IP=127.0.0.1 -p 18080:80 -p 18081:8080 blockcat233/baker:1.0.3`
   - host checks passed for web `/health`, admin `/health`, and `/v1/meta/public-config` with default `mediaMode: "p2p"`
 - real browser validation pass:
   - web auth storage + logout behavior

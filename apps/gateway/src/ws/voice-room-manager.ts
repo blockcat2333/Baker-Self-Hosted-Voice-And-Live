@@ -98,8 +98,16 @@ export class VoiceRoomManager {
     return room ? [...room.values()] : [];
   }
 
+  getActiveChannelIds(): string[] {
+    return [...this.rooms.keys()];
+  }
+
   getParticipant(channelId: string, userId: string): VoiceParticipantRecord | null {
     return this.rooms.get(channelId)?.get(userId) ?? null;
+  }
+
+  clearChannel(channelId: string): void {
+    this.rooms.delete(channelId);
   }
 
   /**
@@ -116,13 +124,14 @@ export class VoiceRoomManager {
    * Remove a user from all voice rooms they are in (used on disconnect).
    * Returns affected rooms: [{ channelId, remaining }]
    */
-  leaveAllChannels(userId: string): Array<{ channelId: string; remaining: VoiceParticipantRecord[] }> {
-    const affected: Array<{ channelId: string; remaining: VoiceParticipantRecord[] }> = [];
+  leaveAllChannels(userId: string): Array<{ channelId: string; left: VoiceParticipantRecord; remaining: VoiceParticipantRecord[] }> {
+    const affected: Array<{ channelId: string; left: VoiceParticipantRecord; remaining: VoiceParticipantRecord[] }> = [];
     for (const [channelId, room] of this.rooms) {
-      if (room.has(userId)) {
+      const left = room.get(userId);
+      if (left) {
         room.delete(userId);
         if (room.size === 0) this.rooms.delete(channelId);
-        affected.push({ channelId, remaining: room.size > 0 ? [...room.values()] : [] });
+        affected.push({ channelId, left, remaining: room.size > 0 ? [...room.values()] : [] });
       }
     }
     if (affected.length > 0) {

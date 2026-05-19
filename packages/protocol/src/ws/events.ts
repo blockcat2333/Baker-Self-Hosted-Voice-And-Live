@@ -1,6 +1,18 @@
 import { z } from 'zod';
 
-import { IceServerSchema } from '../media/signaling';
+import {
+  IceServerSchema,
+  MediaTransportModeSchema,
+  SfuSessionInfoSchema,
+} from '../media/signaling';
+import type {
+  MediaSfuCloseCommandDataSchema,
+  MediaSfuConnectTransportCommandDataSchema,
+  MediaSfuConsumeCommandDataSchema,
+  MediaSfuCreateTransportCommandDataSchema,
+  MediaSfuProduceCommandDataSchema,
+  MediaSfuResumeConsumerCommandDataSchema,
+} from '../media/signaling';
 
 export const ConnectionStateSchema = z.enum(['closed', 'connected', 'connecting', 'failed', 'reconnecting']);
 export const RoomRuntimeStateSchema = z.enum(['closing', 'idle', 'recovering', 'stream_live', 'stream_preparing', 'voice_active']);
@@ -10,6 +22,9 @@ export const GatewayEventNameSchema = z.enum([
   'guild.member.updated',
   /** Single relay event for all media.signal.* types; signal.type discriminates. */
   'media.signal',
+  'media.mode.updated',
+  'media.sfu.producer.added',
+  'media.sfu.producer.removed',
   'presence.updated',
   'stream.session.updated',
   'stream.state.updated',
@@ -33,6 +48,12 @@ export const GatewayCommandNameSchema = z.enum([
   'media.signal.ice_candidate',
   'media.signal.offer',
   'media.signal.restart_ice',
+  'media.sfu.close',
+  'media.sfu.connect_transport',
+  'media.sfu.consume',
+  'media.sfu.create_transport',
+  'media.sfu.produce',
+  'media.sfu.resume_consumer',
   'presence.subscribe',
   'stream.start',
   'stream.stop',
@@ -138,7 +159,9 @@ export const StreamUnwatchCommandDataSchema = z.object({
 export const StreamStartAckDataSchema = z.object({
   channelId: z.string().uuid(),
   iceServers: z.array(IceServerSchema),
+  mediaMode: MediaTransportModeSchema.default('p2p'),
   sessionId: z.string().uuid(),
+  sfu: SfuSessionInfoSchema.optional(),
   streamId: z.string().uuid().optional(),
 });
 
@@ -147,7 +170,9 @@ export const StreamWatchAckDataSchema = z.object({
   hostSessionId: z.string().uuid(),
   hostUserId: z.string().uuid(),
   iceServers: z.array(IceServerSchema),
+  mediaMode: MediaTransportModeSchema.default('p2p'),
   sessionId: z.string().uuid(),
+  sfu: SfuSessionInfoSchema.optional(),
   streamId: z.string().uuid().optional(),
 });
 
@@ -320,8 +345,10 @@ export const VoiceNetworkSelfReportCommandDataSchema = z.object({
 export const VoiceJoinAckDataSchema = z.object({
   channelId: z.string().uuid(),
   iceServers: z.array(IceServerSchema),
+  mediaMode: MediaTransportModeSchema.default('p2p'),
   participants: z.array(VoiceParticipantSchema),
   sessionId: z.string().uuid(),
+  sfu: SfuSessionInfoSchema.optional(),
 });
 
 /**
@@ -351,6 +378,12 @@ export type ConnectionState = z.infer<typeof ConnectionStateSchema>;
 export type GatewayCommandName = z.infer<typeof GatewayCommandNameSchema>;
 export type GatewayEventName = z.infer<typeof GatewayEventNameSchema>;
 export type MessageCreatedEventData = z.infer<typeof MessageCreatedEventDataSchema>;
+export type MediaSfuCloseCommandData = z.infer<typeof MediaSfuCloseCommandDataSchema>;
+export type MediaSfuConnectTransportCommandData = z.infer<typeof MediaSfuConnectTransportCommandDataSchema>;
+export type MediaSfuConsumeCommandData = z.infer<typeof MediaSfuConsumeCommandDataSchema>;
+export type MediaSfuCreateTransportCommandData = z.infer<typeof MediaSfuCreateTransportCommandDataSchema>;
+export type MediaSfuProduceCommandData = z.infer<typeof MediaSfuProduceCommandDataSchema>;
+export type MediaSfuResumeConsumerCommandData = z.infer<typeof MediaSfuResumeConsumerCommandDataSchema>;
 export type PresenceUpdatedEventData = z.infer<typeof PresenceUpdatedEventDataSchema>;
 export type RoomRuntimeState = z.infer<typeof RoomRuntimeStateSchema>;
 export type StreamStartAckData = z.infer<typeof StreamStartAckDataSchema>;

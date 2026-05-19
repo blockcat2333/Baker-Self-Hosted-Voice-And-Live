@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { MediaSessionDescriptorSchema, MediaSessionResponseSchema } from '@baker/protocol';
@@ -74,12 +73,25 @@ export function registerSessionsRoute(app: SessionRouteRegistrar, adapter: Media
     const descriptor = bodyParsed.data;
     await adapter.createSession(descriptor);
 
-    const sessionId = randomUUID();
+    let sfu: Awaited<ReturnType<MediaAdapter['getSfuSessionInfo']>> | undefined;
+    if (descriptor.transportMode === 'sfu') {
+      try {
+        sfu = await adapter.getSfuSessionInfo(descriptor);
+      } catch (err) {
+        log.warn({ err, channelId: descriptor.channelId, sessionId: descriptor.sessionId }, 'SFU session info failed');
+        await adapter.closeSfu(descriptor).catch(() => undefined);
+        return reply.status(503).send({
+          code: 'SFU_UNAVAILABLE',
+          message: 'Failed to prepare SFU media session.',
+        });
+      }
+    }
 
     return reply.send(
       MediaSessionResponseSchema.parse({
         iceServers: buildIceServers(),
-        sessionId,
+        sessionId: descriptor.sessionId,
+        ...(sfu ? { sfu } : {}),
       }),
     );
   });

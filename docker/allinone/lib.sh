@@ -32,6 +32,10 @@ capture_turn_runtime_overrides() {
   capture_env_override TURN_MIN_PORT
   capture_env_override TURN_MAX_PORT
   capture_env_override TURN_EXTERNAL_IP
+  capture_env_override SFU_ANNOUNCED_IP
+  capture_env_override SFU_RTC_MIN_PORT
+  capture_env_override SFU_RTC_MAX_PORT
+  capture_env_override SFU_ENABLE_TCP
 }
 
 apply_turn_runtime_overrides() {
@@ -44,6 +48,10 @@ apply_turn_runtime_overrides() {
   apply_env_override TURN_MIN_PORT
   apply_env_override TURN_MAX_PORT
   apply_env_override TURN_EXTERNAL_IP
+  apply_env_override SFU_ANNOUNCED_IP
+  apply_env_override SFU_RTC_MIN_PORT
+  apply_env_override SFU_RTC_MAX_PORT
+  apply_env_override SFU_ENABLE_TCP
 }
 
 default_turn_urls_if_needed() {

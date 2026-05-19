@@ -61,7 +61,7 @@ Current validated state:
 
 - `apps/api`: durable HTTP API boundary
 - `apps/gateway`: realtime WebSocket boundary
-- `apps/media`: media control-plane placeholder and adapter boundary
+- `apps/media`: media control-plane boundary with P2P/TURN config and built-in mediasoup SFU mode
 - `apps/web`: end-user browser app
 - `apps/admin`: server control panel browser app
 - `apps/desktop`: Electron shell
@@ -79,7 +79,7 @@ Current validated state:
 - REST handles durable CRUD, public config, and admin control-plane APIs.
 - WebSocket handles realtime events, room state fanout, and signaling relay.
 - Browser capture and WebRTC peer logic live in the client/sdk layer.
-- Media adapter and future SFU work stay behind `apps/media`.
+- Media adapter and SFU work stay behind `apps/media`.
 - The admin panel manages durable server/workspace settings, not realtime room orchestration.
 - the primary self-hosted path is the published all-in-one `baker` image, which bundles the current service topology into one container with one data root at `/var/lib/baker`
 - `docker-compose.yml` is now only a development-support file for local Postgres/Redis/TURN infra
@@ -125,15 +125,16 @@ Implemented today:
 - dev startup now performs Docker engine readiness checks (best-effort Docker Desktop auto-start + wait), and if Docker backend is stuck in `starting` it performs one automatic recovery attempt (`restart Docker Desktop + wsl --shutdown`) before failing
 - dev startup now reports Docker daemon last-error details and exits early when Docker backend is stuck in `starting`, with explicit `wsl --shutdown` recovery guidance
 - TURN startup now enforces public relay IP correctness for public domains (resolves from `TurnHost` DNS and rejects private `TURN_EXTERNAL_IP`), preventing "signaling works but media path fails" regressions for internet clients
+- server-wide media mode can switch from default P2P to built-in SFU after `SFU_ANNOUNCED_IP` and the RTC port range are configured
 - Baker now ships as a validated all-in-one Docker image for the simplest public self-hosted path: one container, one data root (`/var/lib/baker`), bundled Postgres/Redis/Caddy, and optional bundled TURN
 - the shipped container serves the user app on container port `:80` and the admin panel on container port `:8080`, while the recommended host bindings are `:3000` (Web) and `:3001` (Admin)
 - the all-in-one image can bundle coturn behind `TURN_ENABLED=true` for harder NAT / internet voice-stream deployments
 
 Still placeholders or deferred:
 
-- real media backend / SFU
 - recording / replay
 - CDN/HLS stream distribution
+- multi-node SFU routing, transcoding, and simulcast
 - deeper mobile-specific media polish
 - complex permissions / RBAC
 - automatic process restart/orchestration after admin port changes

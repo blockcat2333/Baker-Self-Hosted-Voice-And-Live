@@ -33,6 +33,10 @@ if [ ! -f "$RUNTIME_ENV" ]; then
   : "${TURN_MIN_PORT:=49160}"
   : "${TURN_MAX_PORT:=49200}"
   : "${TURN_EXTERNAL_IP:=}"
+  : "${SFU_ANNOUNCED_IP:=}"
+  : "${SFU_RTC_MIN_PORT:=50000}"
+  : "${SFU_RTC_MAX_PORT:=50100}"
+  : "${SFU_ENABLE_TCP:=true}"
 
   tmp_env="${RUNTIME_ENV}.tmp"
   {
@@ -58,6 +62,10 @@ if [ ! -f "$RUNTIME_ENV" ]; then
     write_runtime_kv TURN_MIN_PORT "$TURN_MIN_PORT"
     write_runtime_kv TURN_MAX_PORT "$TURN_MAX_PORT"
     write_runtime_kv TURN_EXTERNAL_IP "$TURN_EXTERNAL_IP"
+    write_runtime_kv SFU_ANNOUNCED_IP "$SFU_ANNOUNCED_IP"
+    write_runtime_kv SFU_RTC_MIN_PORT "$SFU_RTC_MIN_PORT"
+    write_runtime_kv SFU_RTC_MAX_PORT "$SFU_RTC_MAX_PORT"
+    write_runtime_kv SFU_ENABLE_TCP "$SFU_ENABLE_TCP"
   } >"$tmp_env"
   mv "$tmp_env" "$RUNTIME_ENV"
 fi

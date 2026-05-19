@@ -1,6 +1,6 @@
 {
   "name": "@baker/sdk",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@baker/protocol": "workspace:*"
+    "@baker/protocol": "workspace:*",
+    "mediasoup-client": "^3.20.0"
   },
   "devDependencies": {
     "tsup": "^8.3.5"

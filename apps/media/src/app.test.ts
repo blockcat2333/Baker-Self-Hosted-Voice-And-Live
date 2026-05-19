@@ -55,6 +55,29 @@ describe('media app internal auth', () => {
     await app.close();
   });
 
+  it('reports sfu capability configuration from the media backend', async () => {
+    vi.stubEnv('SFU_ANNOUNCED_IP', '203.0.113.10');
+
+    const app = buildMediaApp();
+
+    const response = await app.inject({
+      headers: {
+        'x-baker-internal-secret': 'replace-me-for-local-media-internal-secret',
+      },
+      method: 'GET',
+      url: '/v1/internal/media/capabilities',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().sfu).toMatchObject({
+      available: true,
+      configured: true,
+      requiredAnnouncedIp: true,
+    });
+
+    await app.close();
+  });
+
   it('includes TURN servers in media sessions when relay env is configured', async () => {
     vi.stubEnv('TURN_URLS', 'turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp');
     vi.stubEnv('TURN_USERNAME', 'baker');

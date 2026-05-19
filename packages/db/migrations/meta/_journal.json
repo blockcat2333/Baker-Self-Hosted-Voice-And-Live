@@ -15,6 +15,13 @@
       "when": 1776191892216,
       "tag": "0001_rainy_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778945517504,
+      "tag": "0002_plain_pete_wisdom",
+      "breakpoints": true
     }
   ]
 }

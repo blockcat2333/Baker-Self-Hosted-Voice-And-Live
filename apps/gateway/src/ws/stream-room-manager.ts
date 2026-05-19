@@ -42,7 +42,7 @@ export interface StreamSnapshot {
 
 export type StreamDisconnectResult =
   | { channelId: string; connectionIds: string[]; sessionId: string; streamId: string; type: 'host_stopped' }
-  | { channelId: string; streamId: string; type: 'viewer_left' };
+  | { channelId: string; sessionId: string; streamId: string; type: 'viewer_left' };
 
 export class StreamRoomManager {
   private readonly rooms = new Map<string, Map<string, StreamPublicationRecord>>();
@@ -95,11 +95,18 @@ export class StreamRoomManager {
     };
   }
 
-  private getAudienceConnectionIds(publication: StreamPublicationRecord): string[] {
+  private getPublicationAudienceConnectionIds(publication: StreamPublicationRecord): string[] {
     return [
       publication.host.connectionId,
       ...[...publication.viewers.values()].map((viewer) => viewer.connectionId),
     ];
+  }
+
+  getAudienceConnectionIds(channelId: string, streamId?: string): string[] {
+    const publications = streamId
+      ? [this.getPublication(channelId, streamId)].filter((value): value is StreamPublicationRecord => value !== null)
+      : this.getPublications(channelId);
+    return [...new Set(publications.flatMap((publication) => this.getPublicationAudienceConnectionIds(publication)))];
   }
 
   private getBroadcastConnectionIds(channelId: string, extraConnectionIds: string[] = []): string[] {
@@ -108,7 +115,7 @@ export class StreamRoomManager {
 
     if (room) {
       for (const publication of room.values()) {
-        for (const connectionId of this.getAudienceConnectionIds(publication)) {
+        for (const connectionId of this.getPublicationAudienceConnectionIds(publication)) {
           connectionIds.add(connectionId);
         }
       }
@@ -129,7 +136,7 @@ export class StreamRoomManager {
         room.delete(streamId);
         results.push({
           channelId,
-          connectionIds: this.getAudienceConnectionIds(publication),
+          connectionIds: this.getPublicationAudienceConnectionIds(publication),
           sessionId: publication.host.sessionId,
           streamId,
           type: 'host_stopped',
@@ -137,8 +144,10 @@ export class StreamRoomManager {
         continue;
       }
 
-      if (publication.viewers.delete(userId)) {
-        results.push({ channelId, streamId, type: 'viewer_left' });
+      const viewer = publication.viewers.get(userId);
+      if (viewer) {
+        publication.viewers.delete(userId);
+        results.push({ channelId, sessionId: viewer.sessionId, streamId, type: 'viewer_left' });
       }
     }
 
@@ -194,7 +203,7 @@ export class StreamRoomManager {
     log.info({ channelId, streamId, userId }, 'User stopped stream');
 
     return {
-      connectionIds: this.getAudienceConnectionIds(publication),
+      connectionIds: this.getPublicationAudienceConnectionIds(publication),
       sessionId: publication.host.sessionId,
       streamId,
     };
@@ -397,6 +406,25 @@ export class StreamRoomManager {
       results.push(...this.leaveRoomForUser(channelId, room, userId));
     }
 
+    return results;
+  }
+
+  clearAll(): StreamDisconnectResult[] {
+    const results: StreamDisconnectResult[] = [];
+
+    for (const [channelId, room] of this.rooms) {
+      for (const [streamId, publication] of room) {
+        results.push({
+          channelId,
+          connectionIds: this.getPublicationAudienceConnectionIds(publication),
+          sessionId: publication.host.sessionId,
+          streamId,
+          type: 'host_stopped',
+        });
+      }
+    }
+
+    this.rooms.clear();
     return results;
   }
 }

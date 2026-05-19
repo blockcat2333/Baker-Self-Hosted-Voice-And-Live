@@ -574,6 +574,65 @@ describe('routeGatewayMessage', () => {
     expect(conn.voiceChannelId).toBe(channelId);
   });
 
+  it('includes sfu session info in voice.join ack when media mode is sfu', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000180';
+    const guildId = '00000000-0000-0000-0000-000000000181';
+    const userId = '00000000-0000-0000-0000-000000000182';
+
+    const sharedConnections = new ConnectionManager();
+    const successRuntime = makeRuntime({
+      connections: sharedConnections,
+      createMediaSession: vi.fn().mockResolvedValue({
+        iceServers: [],
+        sessionId: '00000000-0000-0000-0000-000000000199',
+        sfu: {
+          producers: [],
+          routerRtpCapabilities: { codecs: [] },
+        },
+      }),
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            id === channelId
+              ? { id: channelId, guildId, name: 'SFU Voice', type: 'voice', position: 0, topic: null, createdAt: new Date() }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && uId === userId
+              ? { guildId, userId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+      mediaMode: 'sfu',
+      presence: new PresenceManager(sharedConnections, null),
+      voiceRoom: new VoiceRoomManager(sharedConnections),
+    });
+
+    const conn = sharedConnections.attach({ close() {}, send() {} });
+    conn.userId = userId;
+
+    const reply = await routeGatewayMessage(
+      conn,
+      JSON.stringify({
+        command: 'voice.join',
+        data: { channelId },
+        op: 'command',
+        reqId: 'req-vj-sfu',
+        ts: ts(),
+        v: 1,
+      }),
+      successRuntime,
+    );
+
+    expect(reply.op).toBe('ack');
+    if (reply.op === 'ack') {
+      const data = reply.data as { mediaMode?: string; sfu?: { routerRtpCapabilities?: unknown } };
+      expect(data.mediaMode).toBe('sfu');
+      expect(data.sfu?.routerRtpCapabilities).toEqual({ codecs: [] });
+    }
+  });
+
   it('returns VOICE_ALREADY_JOINED when user tries to join the same voice channel twice', async () => {
     const channelId = '00000000-0000-0000-0000-000000000090';
     const guildId = '00000000-0000-0000-0000-000000000091';

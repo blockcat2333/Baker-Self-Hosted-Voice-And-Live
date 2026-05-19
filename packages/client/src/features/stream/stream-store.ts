@@ -3,7 +3,10 @@ import { create } from 'zustand';
 import type {
   GatewayCommandName,
   IceServer,
+  MediaSfuProducerEventData,
   MediaSignalRelayEventData,
+  MediaTransportMode,
+  SfuProducer,
   StreamPublication,
   StreamQualitySettings,
   StreamSourceType,
@@ -14,7 +17,7 @@ import {
   StreamStartAckDataSchema,
   StreamWatchAckDataSchema,
 } from '@baker/protocol';
-import { WebRtcManager } from '@baker/sdk';
+import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
 import {
@@ -124,6 +127,12 @@ interface StreamState {
 
   handleStreamStateUpdated(data: StreamStateUpdatedEventData): void;
   handleMediaSignal(data: MediaSignalRelayEventData): void;
+  handleSfuProducerAdded(data: MediaSfuProducerEventData): void;
+  handleSfuProducerRemoved(data: MediaSfuProducerEventData): void;
+  handleMediaModeUpdated(
+    sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>,
+    sendRawCommand: (command: GatewayCommandName, data: unknown) => void,
+  ): Promise<void>;
   handleGatewayWillReconnect(): void;
   handleGatewayReconnected(
     sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>,
@@ -138,10 +147,12 @@ interface OwnedPublishRuntime {
   codecPreference: StreamCodecPreference;
   iceServers: IceServer[];
   localStream: MediaStream;
-  manager: WebRtcManager;
+  manager: WebRtcManager | null;
+  mediaMode: MediaTransportMode;
   quality: StreamQualitySettings;
   sendRawCommand: (command: GatewayCommandName, data: unknown) => void;
   sessionId: string;
+  sfuSession: SfuClientSession | null;
   sourceType: StreamSourceType;
   streamId: string;
   userId: string;
@@ -153,10 +164,12 @@ interface WatchedStreamRuntime {
   hostSessionId: string;
   hostUserId: string;
   iceServers: IceServer[];
-  manager: WebRtcManager;
+  manager: WebRtcManager | null;
+  mediaMode: MediaTransportMode;
   remoteStream: MediaStream | null;
   sendRawCommand: (command: GatewayCommandName, data: unknown) => void;
   sessionId: string;
+  sfuSession: SfuClientSession | null;
   streamId: string;
   userId: string;
 }
@@ -168,6 +181,7 @@ const cancelledWatchRequests = new Set<string>();
 const pendingWatchedSignals = new Map<string, MediaSignalRelayEventData[]>();
 const pendingOwnedIceCandidates = new Map<string, RTCIceCandidateInit[]>();
 const pendingWatchedIceCandidates = new Map<string, RTCIceCandidateInit[]>();
+const sfuWatchedTracks = new Map<string, { streamId: string; track: MediaStreamTrack }>();
 const WATCHED_RECEIVER_SYNC_INTERVAL_MS = 500;
 const lastWatchedIceRestartRequestAt = new Map<string, number>();
 const pendingWatchedIceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -350,6 +364,41 @@ function updateWatchedStreamState(streamId: string, updater: (state: WatchedStre
       },
     };
   });
+}
+
+async function consumeSfuStreamProducers(streamId: string, producers: SfuProducer[]) {
+  const runtime = watchedRuntimes.get(streamId);
+  if (!runtime?.sfuSession) {
+    return;
+  }
+
+  for (const producer of producers) {
+    if (producer.source !== 'stream' || producer.streamId !== streamId || producer.userId === runtime.userId) {
+      continue;
+    }
+
+    try {
+      const remote = await runtime.sfuSession.consumeProducer(producer);
+      if (!remote) {
+        continue;
+      }
+      if (!runtime.remoteStream) {
+        runtime.remoteStream = new MediaStream();
+      }
+      runtime.remoteStream.addTrack(remote.track);
+      runtime.hasRemoteMedia = true;
+      sfuWatchedTracks.set(producer.id, { streamId, track: remote.track });
+      updateWatchedStreamState(streamId, (watched) => ({
+        ...watched,
+        connectionError: null,
+        connectionState: 'connected',
+        remoteStream: runtime.remoteStream,
+        status: 'watching',
+      }));
+    } catch (err) {
+      console.warn('[stream] SFU consume failed for', producer.id, err);
+    }
+  }
 }
 
 function clearWatchedConnectionIssueTimer(streamId: string) {
@@ -537,7 +586,8 @@ function teardownOwnedRuntime() {
     return;
   }
 
-  ownedRuntime.manager.closeAll();
+  ownedRuntime.manager?.closeAll();
+  ownedRuntime.sfuSession?.close();
   lastOwnedVideoStatsSample.bytesSent = null;
   lastOwnedVideoStatsSample.framesEncoded = null;
   lastOwnedVideoStatsSample.timestampMs = null;
@@ -574,9 +624,15 @@ function teardownWatchedRuntime(streamId: string) {
     return;
   }
 
-  runtime.manager.closeAll();
+  runtime.manager?.closeAll();
+  runtime.sfuSession?.close();
   for (const track of runtime.remoteStream?.getTracks() ?? []) {
     track.stop();
+  }
+  for (const [producerId, record] of sfuWatchedTracks) {
+    if (record.streamId === streamId) {
+      sfuWatchedTracks.delete(producerId);
+    }
   }
 
   watchedRuntimes.delete(streamId);
@@ -682,7 +738,7 @@ function syncWatchedRuntimeRemoteTracks(streamId: string) {
     return;
   }
 
-  const receiverTracks = runtime.manager.getRemoteTracks(runtime.hostUserId);
+  const receiverTracks = runtime.manager?.getRemoteTracks(runtime.hostUserId) ?? [];
   if (receiverTracks.length === 0) {
     return;
   }
@@ -881,13 +937,13 @@ function reconcileOwnedPublication(channelId: string, streamsById: Record<string
 
   for (const viewerId of previousViewerIds) {
     if (!nextViewerIds.has(viewerId)) {
-      ownedRuntime.manager.closePeer(viewerId);
+      ownedRuntime.manager?.closePeer(viewerId);
       pendingOwnedIceCandidates.delete(viewerId);
     }
   }
 
   for (const viewer of publication.viewers) {
-    if (!previousViewerIds.has(viewer.userId)) {
+    if (ownedRuntime.mediaMode === 'p2p' && !previousViewerIds.has(viewer.userId) && ownedRuntime.manager) {
       void ownedRuntime.manager
         .createOffer(viewer.userId, ownedRuntime.localStream, ownedRuntime.iceServers, {
           degradationPreference: 'balanced',
@@ -1017,6 +1073,7 @@ async function processWatchedSignal(data: MediaSignalRelayEventData) {
       }
 
       try {
+        if (!runtime.manager) return;
         const answer = await runtime.manager.handleRecvOnlyOffer(
           fromUserId,
           { type: 'offer', sdp: signal.sdp },
@@ -1044,7 +1101,7 @@ async function processWatchedSignal(data: MediaSignalRelayEventData) {
       if (!signal.candidate) {
         return;
       }
-      if (!runtime.manager.getPeerIds().includes(fromUserId)) {
+      if (!runtime.manager || !runtime.manager.getPeerIds().includes(fromUserId)) {
         queuePendingWatchedIceCandidate(runtime.streamId, fromUserId, signal.candidate);
         return;
       }
@@ -1059,6 +1116,7 @@ async function processWatchedSignal(data: MediaSignalRelayEventData) {
       return;
     }
     case 'restart_ice': {
+      if (!runtime.manager) return;
       const offer = await runtime.manager.restartIce(fromUserId);
       if (offer) {
         sendWatchSignal(runtime.streamId, fromUserId, { type: 'offer', sdp: offer.sdp ?? '' });
@@ -1066,7 +1124,7 @@ async function processWatchedSignal(data: MediaSignalRelayEventData) {
       return;
     }
     case 'end': {
-      runtime.manager.closePeer(fromUserId);
+      runtime.manager?.closePeer(fromUserId);
       runtime.hasRemoteMedia = false;
       clearWatchedConnectionIssueTimer(runtime.streamId);
       runtime.remoteStream = null;
@@ -1097,6 +1155,7 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
     return null;
   }
 
+  if (!runtime.manager) return null;
   const sample = await runtime.manager.getPeerVideoReceiveSample(runtime.hostUserId);
   if (!sample) {
     return null;
@@ -1163,6 +1222,7 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
     return null;
   }
 
+  if (!ownedRuntime.manager) return null;
   const sample = await ownedRuntime.manager.getAggregatePeerVideoSendSample();
   if (!sample) {
     return {
@@ -1278,7 +1338,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         return;
       }
 
-      await runtime.manager.replaceOutgoingVideoTrack(nextVideoTrack);
+      await runtime.manager?.replaceOutgoingVideoTrack(nextVideoTrack);
 
       const previousStream = runtime.localStream;
       const nextPreviewStream = buildStreamFromTracks([
@@ -1404,14 +1464,43 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       codecPreference,
       iceServers: ackData.iceServers,
       localStream: captured,
-      manager: createOwnedManager(),
+      manager: ackData.mediaMode === 'p2p' ? createOwnedManager() : null,
+      mediaMode: ackData.mediaMode,
       quality,
       sendRawCommand,
       sessionId: ackData.sessionId,
+      sfuSession: null,
       sourceType,
       streamId,
       userId,
     };
+
+    if (ackData.mediaMode === 'sfu') {
+      try {
+        if (!ackData.sfu) throw new Error('SFU stream session is missing setup data.');
+        const sfuSession = new SfuClientSession(
+          {
+            channelId,
+            mode: 'stream_publish',
+            sessionId: ackData.sessionId,
+            streamId,
+          },
+          sendCommandAwaitAck,
+        );
+        await sfuSession.load(ackData.sfu);
+        await sfuSession.produceTracks(captured.getTracks());
+        if (ownedRuntime) {
+          ownedRuntime.sfuSession = sfuSession;
+        }
+      } catch (err) {
+        teardownOwnedRuntime();
+        set({
+          error: err instanceof Error ? err.message : 'Failed to start SFU stream.',
+          ownedStream: null,
+        });
+        return;
+      }
+    }
 
     set({
       error: null,
@@ -1444,7 +1533,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         : null,
     }));
 
-    for (const peerId of runtime.manager.getPeerIds()) {
+    for (const peerId of runtime.manager?.getPeerIds() ?? []) {
       sendOwnedSignal(peerId, { type: 'end' });
     }
 
@@ -1529,21 +1618,49 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       return;
     }
 
-    const manager = createWatchedManager(resolvedStreamId);
+    const manager = ackData.mediaMode === 'p2p' ? createWatchedManager(resolvedStreamId) : null;
+    const remoteStream = ackData.mediaMode === 'sfu' ? new MediaStream() : null;
     watchedRuntimes.set(resolvedStreamId, {
       channelId,
-      hasRemoteMedia: false,
+      hasRemoteMedia: ackData.mediaMode === 'sfu',
       hostSessionId: ackData.hostSessionId,
       hostUserId: ackData.hostUserId,
       iceServers: ackData.iceServers,
       manager,
-      remoteStream: null,
+      mediaMode: ackData.mediaMode,
+      remoteStream,
       sendRawCommand,
       sessionId: ackData.sessionId,
+      sfuSession: null,
       streamId: resolvedStreamId,
       userId,
     });
-    ensureWatchedReceiverSync(resolvedStreamId);
+    if (ackData.mediaMode === 'p2p') {
+      ensureWatchedReceiverSync(resolvedStreamId);
+    } else if (ackData.sfu) {
+      const runtime = watchedRuntimes.get(resolvedStreamId);
+      if (runtime) {
+        try {
+          const sfuSession = new SfuClientSession(
+            {
+              channelId,
+              mode: 'stream_watch',
+              sessionId: ackData.sessionId,
+              streamId: resolvedStreamId,
+            },
+            sendCommandAwaitAck,
+          );
+          await sfuSession.load(ackData.sfu);
+          runtime.sfuSession = sfuSession;
+          await consumeSfuStreamProducers(resolvedStreamId, ackData.sfu.producers);
+        } catch (err) {
+          teardownWatchedRuntime(resolvedStreamId);
+          removeWatchedStreamState(resolvedStreamId);
+          set({ error: err instanceof Error ? err.message : 'Failed to watch SFU stream.' });
+          throw err;
+        }
+      }
+    }
 
     const confirmedPublication = getConfirmedWatchedPublication(
       channelId,
@@ -1566,7 +1683,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         hostSessionId: ackData.hostSessionId,
         hostUserId: ackData.hostUserId,
         playbackVolume: state.watchedStreamsById[resolvedStreamId]?.playbackVolume ?? DEFAULT_STREAM_PLAYBACK_VOLUME,
-        remoteStream: null,
+        remoteStream,
         sessionId: ackData.sessionId,
         sourceType: confirmedPublication?.sourceType ?? state.roomStateByChannel[channelId]?.[resolvedStreamId]?.sourceType ?? null,
         status: confirmedPublication ? 'watching' : 'starting',
@@ -1662,6 +1779,30 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     reconcileWatchedPublications(data.channelId, streamsById);
   },
 
+  handleSfuProducerAdded(data) {
+    const { producer } = data;
+    if (producer.source !== 'stream' || !producer.streamId) {
+      return;
+    }
+    void consumeSfuStreamProducers(producer.streamId, [producer]);
+  },
+
+  handleSfuProducerRemoved(data) {
+    const { producer } = data;
+    const record = sfuWatchedTracks.get(producer.id);
+    if (!record) {
+      return;
+    }
+    const runtime = watchedRuntimes.get(record.streamId);
+    runtime?.remoteStream?.removeTrack(record.track);
+    record.track.stop();
+    sfuWatchedTracks.delete(producer.id);
+    updateWatchedStreamState(record.streamId, (watched) => ({
+      ...watched,
+      remoteStream: runtime?.remoteStream ?? watched.remoteStream,
+    }));
+  },
+
   handleMediaSignal(data) {
     const { fromUserId, signal } = data;
 
@@ -1689,12 +1830,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           if (!signal.sdp) {
             return;
           }
-          await ownedRuntime?.manager.handleAnswer(fromUserId, { type: 'answer', sdp: signal.sdp });
+          await ownedRuntime?.manager?.handleAnswer(fromUserId, { type: 'answer', sdp: signal.sdp });
 
           const pendingCandidates = takePendingOwnedIceCandidates(fromUserId);
           for (const candidate of pendingCandidates) {
             try {
-              await ownedRuntime?.manager.addIceCandidate(fromUserId, candidate);
+              await ownedRuntime?.manager?.addIceCandidate(fromUserId, candidate);
             } catch (err) {
               queuePendingOwnedIceCandidate(fromUserId, candidate);
               console.warn('[stream] publish queued ICE flush failed for', fromUserId, err);
@@ -1707,13 +1848,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           if (!signal.candidate) {
             return;
           }
-          if (!ownedRuntime?.manager.getPeerIds().includes(fromUserId)) {
+          if (!ownedRuntime?.manager?.getPeerIds().includes(fromUserId)) {
             queuePendingOwnedIceCandidate(fromUserId, signal.candidate);
             break;
           }
 
           try {
-            await ownedRuntime?.manager.addIceCandidate(fromUserId, signal.candidate);
+            await ownedRuntime?.manager?.addIceCandidate(fromUserId, signal.candidate);
           } catch (err) {
             queuePendingOwnedIceCandidate(fromUserId, signal.candidate);
             console.warn('[stream] publish ICE add failed from', fromUserId, err);
@@ -1721,20 +1862,165 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           break;
         }
         case 'restart_ice': {
-          const offer = await ownedRuntime?.manager.restartIce(fromUserId);
+          const offer = await ownedRuntime?.manager?.restartIce(fromUserId);
           if (offer) {
             sendOwnedSignal(fromUserId, { type: 'offer', sdp: offer.sdp ?? '' });
           }
           break;
         }
         case 'end': {
-          ownedRuntime?.manager.closePeer(fromUserId);
+          ownedRuntime?.manager?.closePeer(fromUserId);
           break;
         }
         case 'offer':
           break;
       }
     })();
+  },
+
+  async handleMediaModeUpdated(sendCommandAwaitAck, sendRawCommand) {
+    const watchedEntries = Object.values(get().watchedStreamsById).filter((watched) => watched.status !== 'ended');
+    const owned = ownedRuntime
+      ? {
+          channelId: ownedRuntime.channelId,
+          codecPreference: ownedRuntime.codecPreference,
+          localStream: ownedRuntime.localStream,
+          quality: ownedRuntime.quality,
+          sourceType: ownedRuntime.sourceType,
+        }
+      : null;
+    const canReuseOwned = Boolean(owned?.localStream.getTracks().some((track) => track.readyState === 'live'));
+
+    if (ownedRuntime) {
+      ownedRuntime.manager?.closeAll();
+      ownedRuntime.sfuSession?.close();
+      ownedRuntime = null;
+    }
+    for (const streamId of [...watchedRuntimes.keys()]) {
+      teardownWatchedRuntime(streamId);
+    }
+
+    set((state) => {
+      const nextWatched: Record<string, WatchedStreamState> = {};
+      for (const [streamId, watched] of Object.entries(state.watchedStreamsById)) {
+        nextWatched[streamId] = watched.status === 'ended'
+          ? watched
+          : {
+              ...watched,
+              connectionError: null,
+              connectionState: null,
+              remoteStream: null,
+              status: 'reconnecting',
+              viewers: [],
+            };
+      }
+      return {
+        error: null,
+        ownedStream: canReuseOwned && owned
+          ? {
+              channelId: owned.channelId,
+              codecPreference: owned.codecPreference,
+              localPreviewStream: owned.localStream,
+              quality: owned.quality,
+              sessionId: null,
+              sourceType: owned.sourceType,
+              status: 'starting',
+              streamId: null,
+              viewers: [],
+            }
+          : null,
+        watchedStreamsById: nextWatched,
+      };
+    });
+
+    if (canReuseOwned && owned) {
+      let ackData: ReturnType<typeof StreamStartAckDataSchema.parse>;
+      try {
+        const raw = await sendCommandAwaitAck('stream.start', {
+          channelId: owned.channelId,
+          quality: owned.quality,
+          sourceType: owned.sourceType,
+        });
+        ackData = StreamStartAckDataSchema.parse(raw);
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to restart stream.', ownedStream: null });
+        stopTracks(owned.localStream.getTracks());
+        return;
+      }
+
+      const streamId = ackData.streamId ?? ackData.sessionId;
+      const userId = getMyUserId();
+      if (!userId) {
+        set({ error: 'Authenticated user required to restart a stream.', ownedStream: null });
+        stopTracks(owned.localStream.getTracks());
+        return;
+      }
+
+      ownedRuntime = {
+        channelId: owned.channelId,
+        codecPreference: owned.codecPreference,
+        iceServers: ackData.iceServers,
+        localStream: owned.localStream,
+        manager: ackData.mediaMode === 'p2p' ? createOwnedManager() : null,
+        mediaMode: ackData.mediaMode,
+        quality: owned.quality,
+        sendRawCommand,
+        sessionId: ackData.sessionId,
+        sfuSession: null,
+        sourceType: owned.sourceType,
+        streamId,
+        userId,
+      };
+
+      if (ackData.mediaMode === 'sfu') {
+        try {
+          if (!ackData.sfu) throw new Error('SFU stream session is missing setup data.');
+          const sfuSession = new SfuClientSession(
+            {
+              channelId: owned.channelId,
+              mode: 'stream_publish',
+              sessionId: ackData.sessionId,
+              streamId,
+            },
+            sendCommandAwaitAck,
+          );
+          await sfuSession.load(ackData.sfu);
+          await sfuSession.produceTracks(owned.localStream.getTracks());
+          if (ownedRuntime) {
+            ownedRuntime.sfuSession = sfuSession;
+          }
+        } catch (err) {
+          teardownOwnedRuntime();
+          set({ error: err instanceof Error ? err.message : 'Failed to restart SFU stream.', ownedStream: null });
+          return;
+        }
+      }
+
+      set({
+        ownedStream: {
+          channelId: owned.channelId,
+          codecPreference: owned.codecPreference,
+          localPreviewStream: owned.localStream,
+          quality: owned.quality,
+          sessionId: ackData.sessionId,
+          sourceType: owned.sourceType,
+          status: 'live',
+          streamId,
+          viewers: [],
+        },
+      });
+    }
+
+    for (const entry of watchedEntries) {
+      const desiredVolume = entry.playbackVolume;
+      removeWatchedStreamState(entry.streamId);
+      try {
+        await get().watchStream(entry.channelId, entry.streamId, sendCommandAwaitAck, sendRawCommand);
+        get().setPlaybackVolume(entry.streamId, desiredVolume);
+      } catch {
+        // Best effort after an admin-triggered media mode switch.
+      }
+    }
   },
 
   handleGatewayWillReconnect() {

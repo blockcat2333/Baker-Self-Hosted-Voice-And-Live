@@ -1,6 +1,6 @@
 {
   "name": "@baker/gateway",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,7 +20,7 @@
     "fastify": "^5.8.5",
     "ioredis": "^5.4.2",
     "jose": "^5.9.6",
-    "ws": "^8.18.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

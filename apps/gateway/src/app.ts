@@ -50,6 +50,7 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
     tokenVerifier,
   });
 
+  await runtime.refreshMediaMode();
   runtime.startFanout();
 
   const app = Fastify({ loggerInstance: log });
@@ -119,9 +120,16 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
 
           // Remove the user from all voice rooms and notify remaining participants.
           const affected = runtime.voiceRoom.leaveAllChannels(userId);
-          for (const { channelId, remaining } of affected) {
+          for (const { channelId, left, remaining } of affected) {
             if (remaining.length > 0) {
               runtime.voiceRoom.broadcastStateUpdated(channelId, remaining);
+            }
+            if (runtime.mediaMode === 'sfu') {
+              void runtime.closeSfuSession({
+                channelId,
+                mode: 'voice',
+                sessionId: left.sessionId,
+              });
             }
             void runtime.broadcastVoiceRosterUpdated(channelId);
             void runtime.broadcastVoiceNetworkUpdated(channelId);
@@ -137,8 +145,24 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
                 ...change.connectionIds,
                 ...voiceConnectionIds,
               ]);
+              if (runtime.mediaMode === 'sfu') {
+                void runtime.closeSfuSession({
+                  channelId: change.channelId,
+                  mode: 'stream_publish',
+                  sessionId: change.sessionId,
+                  streamId: change.streamId,
+                });
+              }
               void runtime.db.streamSessions.updateStatus(change.sessionId, 'idle', { endedAt: new Date() });
             } else {
+              if (runtime.mediaMode === 'sfu') {
+                void runtime.closeSfuSession({
+                  channelId: change.channelId,
+                  mode: 'stream_watch',
+                  sessionId: change.sessionId,
+                  streamId: change.streamId,
+                });
+              }
               runtime.streamRoom.broadcastStateUpdated(change.channelId, voiceConnectionIds);
             }
           }

@@ -34,6 +34,7 @@ export async function getOrCreateServerSettings(
     allowPublicRegistration: true,
     appPort: 5174,
     id: SERVER_SETTINGS_ID,
+    mediaMode: 'p2p',
     serverName: 'Baker',
     webEnabled: true,
     webPort: env.WEB_PORT,

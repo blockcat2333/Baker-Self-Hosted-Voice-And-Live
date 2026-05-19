@@ -301,7 +301,7 @@ Community and release metadata:
 - gateway roster fanout now uses cached per-connection guild visibility instead of per-update membership lookups on the hot voice path
 - `stream.state.updated` is the authoritative room stream snapshot and now supports multi-stream `streams[]`
 - media relay validation is enforced for active voice or `streamId`-scoped stream sessions
-- media runtime is still a placeholder bootstrap boundary, but its internal routes now require the shared `MEDIA_INTERNAL_SECRET`
+- media runtime now supports default P2P/TURN setup plus a built-in mediasoup SFU path behind internal routes protected by `MEDIA_INTERNAL_SECRET`
 - web client stream runtime now supports owned publish + watched-by-`streamId` state, with watched playback rendered into popup windows owned by the main client runtime
 - web client stream capture now requests camera audio and uses browser echo/noise/gain constraints for stream-audio hardening without forcing local-playback suppression
 - web client publish flow now supports selecting livestream resolution and frame rate before capture, and the requested quality is persisted as stream-session metadata

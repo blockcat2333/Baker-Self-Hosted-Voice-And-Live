@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApiApp } from './app';
 import { createInMemoryDataAccess } from './testing/create-in-memory-data-access';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('api app', () => {
   it('serves health and service manifest', async () => {
@@ -327,6 +331,89 @@ describe('api app', () => {
     expect(
       manifestResponse.json().services.find((service: { name: string }) => service.name === 'web')?.url,
     ).toBe('http://localhost:8080');
+
+    await app.close();
+  });
+
+  it('validates and publishes admin media mode changes', async () => {
+    const publishMediaModeChanged = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({
+        deviceSwitch: true,
+        metrics: true,
+        sfu: {
+          available: true,
+          configured: true,
+          requiredAnnouncedIp: true,
+        },
+        simulcast: false,
+        speakerSelection: true,
+      }),
+      ok: true,
+    }));
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+      publisher: {
+        publishMediaModeChanged,
+        publishMessageCreated: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    const updateSettingsResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'PATCH',
+      payload: {
+        mediaMode: 'sfu',
+      },
+      url: '/v1/admin/settings',
+    });
+
+    expect(updateSettingsResponse.statusCode).toBe(200);
+    expect(updateSettingsResponse.json().mediaMode).toBe('sfu');
+    expect(publishMediaModeChanged).toHaveBeenCalledWith('sfu');
+
+    const publicConfigResponse = await app.inject({
+      method: 'GET',
+      url: '/v1/meta/public-config',
+    });
+
+    expect(publicConfigResponse.json().mediaMode).toBe('sfu');
+
+    await app.close();
+  });
+
+  it('rejects sfu media mode when media capabilities are not configured', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: async () => ({
+        deviceSwitch: true,
+        metrics: true,
+        sfu: {
+          available: true,
+          configured: false,
+          requiredAnnouncedIp: true,
+        },
+        simulcast: false,
+        speakerSelection: true,
+      }),
+      ok: true,
+    }));
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    const updateSettingsResponse = await app.inject({
+      headers: { 'x-admin-password': 'admin' },
+      method: 'PATCH',
+      payload: {
+        mediaMode: 'sfu',
+      },
+      url: '/v1/admin/settings',
+    });
+
+    expect(updateSettingsResponse.statusCode).toBe(409);
+    expect(updateSettingsResponse.json().message).toContain('SFU');
 
     await app.close();
   });

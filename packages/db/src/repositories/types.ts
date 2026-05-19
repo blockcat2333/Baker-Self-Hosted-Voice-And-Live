@@ -31,11 +31,11 @@ export interface CreateStreamSessionInput {
 }
 export type CreateServerSettingsInput = Pick<
   InferInsertModel<typeof serverSettings>,
-  'adminPasswordHash' | 'allowPublicRegistration' | 'appPort' | 'id' | 'serverName' | 'webEnabled' | 'webPort'
+  'adminPasswordHash' | 'allowPublicRegistration' | 'appPort' | 'id' | 'mediaMode' | 'serverName' | 'webEnabled' | 'webPort'
 >;
 export type UpdateServerSettingsInput = Partial<Pick<
   InferInsertModel<typeof serverSettings>,
-  'adminPasswordHash' | 'allowPublicRegistration' | 'appPort' | 'serverName' | 'webEnabled' | 'webPort'
+  'adminPasswordHash' | 'allowPublicRegistration' | 'appPort' | 'mediaMode' | 'serverName' | 'webEnabled' | 'webPort'
 >>;
 export type CreateUserInput = Pick<InferInsertModel<typeof users>, 'email' | 'passwordHash' | 'username'>;
 export type UpdateUserInput = Pick<InferInsertModel<typeof users>, 'username'>;

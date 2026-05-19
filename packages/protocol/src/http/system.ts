@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { AdminCreateUserRequestSchema, AuthUserSchema } from './auth';
 import { ChannelSummarySchema } from './guild';
+import { MediaTransportModeSchema } from '../media/signaling';
 
 export const ServiceNameSchema = z.enum(['api', 'gateway', 'media', 'web', 'desktop']);
 
@@ -26,6 +27,7 @@ export const ServiceManifestSchema = z.object({
 export const PublicServerConfigSchema = z.object({
   allowPublicRegistration: z.boolean(),
   appPort: z.number().int().min(1).max(65535),
+  mediaMode: MediaTransportModeSchema.default('p2p'),
   serverName: z.string().min(1).max(100),
   webEnabled: z.boolean(),
   webPort: z.number().int().min(1).max(65535),
@@ -55,6 +57,7 @@ export const AdminUpdateSettingsRequestSchema = z.object({
   adminPassword: z.string().min(1).max(128).optional(),
   allowPublicRegistration: z.boolean().optional(),
   appPort: z.number().int().min(1).max(65535).optional(),
+  mediaMode: MediaTransportModeSchema.optional(),
   serverName: z.string().min(1).max(100).optional(),
   webEnabled: z.boolean().optional(),
   webPort: z.number().int().min(1).max(65535).optional(),

@@ -25,7 +25,7 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 当前状态
 
-- 当前发布线：`1.0.2`
+- 当前发布线：`1.0.3`
 - 当前已经完成并验证到 Milestone 5 的稳定性与部署加固阶段
 - 单仓库包含 Web、桌面壳层、管理后台、API、Gateway 和 Media 边界服务
 - 已实现认证、聊天、在线状态、语音、直播信令、弹窗观看和服务端设置
@@ -54,7 +54,7 @@ docker run -d \
   -p 3000:80 \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.2
+  blockcat233/baker:1.0.3
 
 docker logs baker
 ```
@@ -66,13 +66,13 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
-如果你想始终跟随最新滚动版本，也可以把 `1.0.2` 换成 `latest`。
+如果你想始终跟随最新滚动版本，也可以把 `1.0.3` 换成 `latest`。
 
 ### Docker Desktop 图形界面填写示例
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
 
-- 镜像：`blockcat233/baker:1.0.2`
+- 镜像：`blockcat233/baker:1.0.3`
 - 容器名：`baker` 或 `baker-test`
 - 端口：
   - 宿主机 `3000` -> 容器 `80/tcp`
@@ -129,7 +129,7 @@ docker run -d \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.2
+  blockcat233/baker:1.0.3
 ```
 
 如果没有显式设置 `TURN_URLS`，Baker 会根据 `TURN_EXTERNAL_IP` 和 `TURN_PORT` 自动生成；如果你希望客户端拿到固定域名形式的 TURN 地址，也可以自己显式设置 `TURN_URLS`。
@@ -142,19 +142,40 @@ docker run -d \
 
 现在只要 `TURN_ENABLED=true`，Baker 就会在无法确定客户端可用的公网 TURN relay 地址时直接启动失败，而不会再静默进入“看起来开了 TURN、实际上客户端拿不到 relay”的状态。容器重启后，建议先确认日志里出现 `turnConfigured:true`，再做跨地区语音或直播观看测试。
 
+## 可选：启用 SFU 媒体模式
+
+Baker 默认仍使用 P2P。TURN 解决的是 P2P 在复杂 NAT 下的穿透和中继问题，但浏览器之间仍会尝试互相建立媒体连接。SFU 模式则会把语音和直播轨道转发到内置媒体后端，再由服务器分发给其他用户，对网络苛刻的用户通常更稳定。
+
+如果要让管理后台可以切换到 SFU，请映射 RTC 端口范围，并设置浏览器可以访问到的公网 IP：
+
+```bash
+docker run -d \
+  --name baker \
+  -p 3000:80 \
+  -p 3001:8080 \
+  -p 50000-50100:50000-50100/udp \
+  -p 50000-50100:50000-50100/tcp \
+  -e SFU_ANNOUNCED_IP=203.0.113.10 \
+  -v baker-data:/var/lib/baker \
+  blockcat233/baker:1.0.3
+```
+
+然后进入管理后台，在“服务器设置 -> 媒体模式”里从 `p2p` 切换到 `sfu`。切换会立即重建当前语音和直播媒体会话，但不会断开文字聊天 WebSocket。如果 SFU 公网 IP 或端口范围没有配置好，管理 API 会明确拒绝切换，而不是静默退回 P2P。
+
 ## 部署说明
 
 - 对外公开部署只保留 `blockcat233/baker` 这一种单镜像方案
 - 浏览器里的语音、麦克风、摄像头和屏幕共享需要 HTTPS 才能正常工作
 - 对于公网、移动网络、VPN 或跨地区使用场景，建议额外启用 TURN
 - 一旦在公网部署里启用 TURN，就必须暴露中继端口，并提供 `TURN_EXTERNAL_IP` 或显式 `TURN_URLS`
+- SFU 模式需要设置 `SFU_ANNOUNCED_IP`，并让浏览器可以访问 `50000-50100` 的 TCP/UDP 端口范围
 - 仓库里的 `docker-compose.yml` 现在只保留给本地开发基础设施使用（`postgres`、`redis`、可选 `turn`），不再作为第二套公开部署产品
 
 ## 当前限制
 
-- `apps/media` 目前仍是占位型适配边界，还没有真正的 SFU 后端
+- SFU 模式目前是单节点，不包含录制、转码、HLS 或 simulcast
 - 语音和直播房间运行时状态目前仍以内存态为主
-- 当前语音与直播仍是 P2P 方案，更适合小房间场景
+- P2P 仍然是默认和回退部署路径
 - 桌面端 Electron 已接入，但尚未完成完整的端到端验证
 
 ## Monorepo 结构

@@ -360,6 +360,7 @@ export function createInMemoryDataAccess(): DatabaseAccess {
           appPort: input.appPort ?? 5174,
           createdAt: new Date(),
           id: input.id,
+          mediaMode: input.mediaMode ?? 'p2p',
           serverName: input.serverName ?? 'Baker',
           updatedAt: new Date(),
           webEnabled: input.webEnabled ?? true,

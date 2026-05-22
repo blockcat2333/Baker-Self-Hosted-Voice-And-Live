@@ -410,6 +410,15 @@ export class WebRtcManager {
     }
   }
 
+  async replaceOutgoingAudioTrack(track: MediaStreamTrack | null): Promise<void> {
+    for (const pc of this.peers.values()) {
+      const audioSenders = pc.getSenders().filter((sender) => sender.track?.kind === 'audio');
+      for (const sender of audioSenders) {
+        await sender.replaceTrack(track);
+      }
+    }
+  }
+
   /**
    * Close and remove the connection to a specific peer.
    */

@@ -31,6 +31,10 @@ import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import {
+  applyPreferredAudioOutputDevice,
+  buildPreferredAudioInputConstraints,
+} from '../media/audio-device-store';
+import {
   clampVoiceInputVolume,
   clampVoicePlaybackVolume,
   computeEffectiveParticipantPlaybackVolume,
@@ -137,6 +141,7 @@ export interface VoiceState {
   ): Promise<void>;
 
   toggleMute(sendRawCommand: (command: GatewayCommandName, data: unknown) => void): void;
+  switchAudioInputDevice(): Promise<void>;
   setInputVolume(volume: number): void;
   setPlaybackVolume(volume: number): void;
   setParticipantPlaybackVolume(userId: string, volume: number): void;
@@ -214,6 +219,14 @@ function syncRemoteAudioElementVolumes() {
   }
 }
 
+export function syncVoiceAudioOutputDevice() {
+  for (const [, audio] of remoteAudioElements) {
+    void applyPreferredAudioOutputDevice(audio).catch((err) => {
+      console.warn('[voice] audio output selection failed:', err);
+    });
+  }
+}
+
 function attachRemoteAudioTrack(fromUserId: string, track: MediaStreamTrack, streams: readonly MediaStream[] = []) {
   if (track.kind !== 'audio') return;
   peersWithRemoteAudio.add(fromUserId);
@@ -228,6 +241,9 @@ function attachRemoteAudioTrack(fromUserId: string, track: MediaStreamTrack, str
   }
   audio.srcObject = streams[0] ?? new MediaStream([track]);
   audio.volume = getEffectivePlaybackVolumeForUser(fromUserId);
+  void applyPreferredAudioOutputDevice(audio).catch((err) => {
+    console.warn('[voice] audio output selection failed:', err);
+  });
   audio.play().catch((err) => {
     console.warn('[voice] remote audio play() blocked:', err);
   });
@@ -690,6 +706,18 @@ function applyLocalMuteToTracks(isMuted: boolean) {
   }
 }
 
+function stopUniqueStreamTracks(...streams: Array<MediaStream | null>) {
+  const tracksToStop = new Map<string, MediaStreamTrack>();
+  for (const stream of streams) {
+    for (const track of stream?.getTracks() ?? []) {
+      tracksToStop.set(track.id, track);
+    }
+  }
+  for (const [, track] of tracksToStop) {
+    track.stop();
+  }
+}
+
 async function pollPeerNetworkStats() {
   const manager = webrtcManager;
   if (!manager) return;
@@ -861,7 +889,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: buildPreferredAudioInputConstraints(),
+        video: false,
+      });
     } catch (err) {
       const isPermissionDenied =
         err instanceof DOMException &&
@@ -1023,6 +1054,62 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       isMuted: newMuted,
       isSpeaking: !newMuted && isSpeakingLocal,
     });
+  },
+
+  async switchAudioInputDevice() {
+    const { inputVolume, isMuted, status } = get();
+    if (status !== 'active' || !localCaptureStream || !localSendStream) {
+      return;
+    }
+
+    const unavailableReason = getMicUnavailableReason();
+    if (unavailableReason) {
+      throw new Error(unavailableReason);
+    }
+
+    const previousCaptureStream = localCaptureStream;
+    const previousSendStream = localSendStream;
+    const previousMicProcessingCtx = micProcessingCtx;
+    const previousMicGainNode = micGainNode;
+
+    const nextCaptureStream = await navigator.mediaDevices.getUserMedia({
+      audio: buildPreferredAudioInputConstraints(),
+      video: false,
+    });
+    const nextSendStream = createLocalSendStream(nextCaptureStream, inputVolume);
+    const nextAudioTrack = nextSendStream.getAudioTracks()[0] ?? null;
+
+    if (!nextAudioTrack) {
+      stopUniqueStreamTracks(nextCaptureStream, nextSendStream);
+      throw new Error('Selected microphone did not provide an audio track.');
+    }
+
+    nextAudioTrack.enabled = !isMuted;
+
+    try {
+      await webrtcManager?.replaceOutgoingAudioTrack(nextAudioTrack);
+      await sfuSession?.replaceProducedTrack('audio', nextAudioTrack);
+    } catch (err) {
+      const createdMicProcessingCtx = micProcessingCtx;
+      stopUniqueStreamTracks(nextCaptureStream, nextSendStream);
+      if (createdMicProcessingCtx && createdMicProcessingCtx !== previousMicProcessingCtx) {
+        void createdMicProcessingCtx.close();
+      }
+      micProcessingCtx = previousMicProcessingCtx;
+      micGainNode = previousMicGainNode;
+      throw err;
+    }
+
+    stopSpeakingDetection();
+    localCaptureStream = nextCaptureStream;
+    localSendStream = nextSendStream;
+    applyLocalMuteToTracks(isMuted);
+
+    if (previousMicProcessingCtx && previousMicProcessingCtx !== micProcessingCtx) {
+      void previousMicProcessingCtx.close();
+    }
+    stopUniqueStreamTracks(previousCaptureStream, previousSendStream);
+    startSpeakingDetection();
   },
 
   setInputVolume(volume) {

@@ -19,8 +19,45 @@ export function createBrowserPlatformApi(): PlatformApi {
 declare global {
   interface Window {
     bakerDesktop?: {
+      checkForUpdate(serverVersion: string): Promise<{ feedUrl: string }>;
+      clearSavedServer(): Promise<void>;
+      downloadUpdate(): Promise<void>;
+      getAppInfo(): Promise<{ logsDirectory: string; platform: string; version: string }>;
+      getSavedServer(): Promise<{
+        apiBaseUrl: string;
+        gatewayUrl: string;
+        input: string;
+        savedAt: string;
+        serverVersion: string;
+      } | null>;
+      installUpdate(): Promise<void>;
+      logError(payload: { message: string; scope: string; stack?: string }): Promise<void>;
+      onUpdateEvent(
+        callback: (payload: {
+          error?: string;
+          feedUrl?: string;
+          percent?: number;
+          serverVersion?: string;
+          state: 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error';
+          version?: string;
+        }) => void,
+      ): () => void;
       openExternal(url: string): Promise<void>;
+      openLogs(): Promise<void>;
       platform: 'desktop';
+      saveServer(config: {
+        apiBaseUrl: string;
+        gatewayUrl: string;
+        input: string;
+        savedAt: string;
+        serverVersion: string;
+      }): Promise<{
+        apiBaseUrl: string;
+        gatewayUrl: string;
+        input: string;
+        savedAt: string;
+        serverVersion: string;
+      }>;
       selectScreenSource(): Promise<string | null>;
     };
   }

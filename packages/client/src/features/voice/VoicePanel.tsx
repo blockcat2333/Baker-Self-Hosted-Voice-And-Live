@@ -1,14 +1,113 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAuthStore } from '../auth/auth-store';
 import { sendCommandAwaitAck, sendRawCommand, useGatewayStore } from '../gateway/gateway-store';
+import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useStreamStore } from '../stream/stream-store';
 import {
   DEFAULT_VOICE_PARTICIPANT_VOLUME,
   toVoiceVolumePercent,
 } from './voice-audio';
-import { useVoiceStore } from './voice-store';
+import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
+
+export function VoiceAudioDeviceControls() {
+  const { t } = useTranslation();
+  const audioInputDevices = useAudioDeviceStore((s) => s.audioInputDevices);
+  const audioOutputDevices = useAudioDeviceStore((s) => s.audioOutputDevices);
+  const deviceError = useAudioDeviceStore((s) => s.error);
+  const isRefreshing = useAudioDeviceStore((s) => s.isRefreshing);
+  const selectedAudioInputId = useAudioDeviceStore((s) => s.selectedAudioInputId);
+  const selectedAudioOutputId = useAudioDeviceStore((s) => s.selectedAudioOutputId);
+  const refreshDevices = useAudioDeviceStore((s) => s.refreshDevices);
+  const setSelectedAudioInputId = useAudioDeviceStore((s) => s.setSelectedAudioInputId);
+  const setSelectedAudioOutputId = useAudioDeviceStore((s) => s.setSelectedAudioOutputId);
+  const switchAudioInputDevice = useVoiceStore((s) => s.switchAudioInputDevice);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void refreshDevices();
+
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.addEventListener !== 'function'
+    ) {
+      return;
+    }
+
+    const handleDeviceChange = () => {
+      void refreshDevices();
+    };
+
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [refreshDevices]);
+
+  async function handleAudioInputChange(deviceId: string) {
+    setSwitchError(null);
+    setSelectedAudioInputId(deviceId || null);
+
+    try {
+      await switchAudioInputDevice();
+      await refreshDevices();
+    } catch (err) {
+      setSwitchError(err instanceof Error ? err.message : t('voice.device_switch_error'));
+    }
+  }
+
+  function handleAudioOutputChange(deviceId: string) {
+    setSwitchError(null);
+    setSelectedAudioOutputId(deviceId || null);
+    syncVoiceAudioOutputDevice();
+  }
+
+  return (
+    <div className="voice-device-controls">
+      <label className="voice-device-field">
+        <span className="voice-device-label">{t('voice.input_device')}</span>
+        <select
+          className="voice-device-select"
+          value={selectedAudioInputId ?? ''}
+          disabled={isRefreshing}
+          onChange={(event) => {
+            void handleAudioInputChange(event.target.value);
+          }}
+        >
+          <option value="">{t('voice.system_default_device')}</option>
+          {audioInputDevices.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="voice-device-field">
+        <span className="voice-device-label">{t('voice.output_device')}</span>
+        <select
+          className="voice-device-select"
+          value={selectedAudioOutputId ?? ''}
+          disabled={isRefreshing}
+          onChange={(event) => handleAudioOutputChange(event.target.value)}
+        >
+          <option value="">{t('voice.system_default_device')}</option>
+          {audioOutputDevices.map((device) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {deviceError || switchError ? (
+        <p className="voice-device-error">{switchError ?? deviceError}</p>
+      ) : null}
+    </div>
+  );
+}
 
 export function VoicePanel() {
   const { t } = useTranslation();
@@ -69,6 +168,7 @@ export function VoicePanel() {
           <span className="voice-panel-label voice-panel-label--error">{t('voice.error_title')}</span>
         </div>
         <p className="voice-panel-error-msg">{errorMessage}</p>
+        <VoiceAudioDeviceControls />
         <button
           type="button"
           className="btn-ghost voice-panel-dismiss-btn"
@@ -110,6 +210,8 @@ export function VoicePanel() {
           {t('voice.error_connection_issue')}
         </p>
       ) : null}
+
+      <VoiceAudioDeviceControls />
 
       <div className="voice-audio-controls">
         <label className="voice-audio-control">

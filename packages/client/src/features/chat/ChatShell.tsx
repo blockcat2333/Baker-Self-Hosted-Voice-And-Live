@@ -10,7 +10,7 @@ import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
-import { VoicePanel } from '../voice/VoicePanel';
+import { VoiceAudioDeviceControls, VoicePanel } from '../voice/VoicePanel';
 import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
 import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
@@ -23,10 +23,12 @@ import { PresenceBar } from './PresenceBar';
 export interface ChatShellProps {
   api: ApiClient;
   gatewayUrl: string;
+  onChangeServer?: () => void;
   serverName: string;
+  versionWarning?: string | null;
 }
 
-export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
+export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, versionWarning }: ChatShellProps) {
   const { t } = useTranslation();
   const logout = useAuthStore((s) => s.logout);
   const activeGuildId = useChatStore((s) => s.activeGuildId);
@@ -132,7 +134,10 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
           {showVoicePanel ? (
             <VoicePanel />
           ) : (
-            <p className="sidebar-voice-empty">{t('chat.voice_section_idle')}</p>
+            <div className="sidebar-voice-idle">
+              <p className="sidebar-voice-empty">{t('chat.voice_section_idle')}</p>
+              <VoiceAudioDeviceControls />
+            </div>
           )}
         </div>
 
@@ -142,6 +147,11 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
             <AccountPanel api={api} />
             <div className="sidebar-footer-actions">
               <LanguageSwitcher className="language-switcher" />
+              {onChangeServer ? (
+                <button type="button" className="btn-ghost sidebar-footer-server" onClick={onChangeServer}>
+                  {t('app.change_server')}
+                </button>
+              ) : null}
               <button type="button" className="btn-ghost sidebar-footer-signout" onClick={() => void logout(api)}>
                 {t('common.sign_out')}
               </button>
@@ -169,6 +179,12 @@ export function ChatShell({ api, gatewayUrl, serverName }: ChatShellProps) {
             )}
           </div>
         )}
+
+        {versionWarning ? (
+          <div className="gateway-banner gateway-banner--warn" data-on-mobile="chat voice more">
+            <span>{versionWarning}</span>
+          </div>
+        ) : null}
 
         {/* Chat-layer error (HTTP errors) */}
         {chatError && <div className="chat-error" data-on-mobile="chat">{chatError}</div>}

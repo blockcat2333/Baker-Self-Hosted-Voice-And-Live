@@ -25,6 +25,7 @@ export const en = {
   app: {
     loading_server: 'Loading server…',
     web_access_disabled: 'Web access is disabled by the server administrator.',
+    change_server: 'Switch server',
   },
   auth: {
     sign_in: 'Sign in',
@@ -69,6 +70,10 @@ export const en = {
     status_connected: 'Voice Connected',
     mic_input: 'Mic Input',
     playback: 'Playback',
+    input_device: 'Microphone',
+    output_device: 'Speaker',
+    system_default_device: 'System Default',
+    device_switch_error: 'Audio device switch failed.',
     net_stats: 'RTT {{rtt}} · Loss {{loss}}',
     server_rtt: 'Server RTT {{rtt}}',
     badge_muted: 'MUTED',

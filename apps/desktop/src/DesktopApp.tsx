@@ -6,6 +6,7 @@ import {
   type DesktopServerConfig,
   isVersionGreater,
   normalizeServerInput,
+  probeGateway,
   readServerHealth,
 } from './server-config';
 
@@ -170,6 +171,7 @@ export function DesktopApp() {
 
     try {
       const health = await readServerHealth(config.apiBaseUrl);
+      await probeGateway(config.gatewayUrl);
       const nextConfig = {
         ...config,
         savedAt: new Date().toISOString(),
@@ -358,6 +360,7 @@ export function DesktopApp() {
               placeholder="example.com or 192.168.1.10"
               autoFocus
             />
+            <small>Include the port when your server uses one, for example https://ark.kkdy.space:3323</small>
           </label>
           {bootError ? <p className="desktop-boot-error">{bootError}</p> : null}
           <div className="desktop-boot-actions">

@@ -139,6 +139,12 @@ body {
   outline: none;
 }
 
+.desktop-server-field small {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .desktop-boot-error,
 .desktop-update-status strong {
   color: var(--red-0);

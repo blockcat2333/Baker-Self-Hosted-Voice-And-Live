@@ -6,6 +6,7 @@ const handleOffer = vi.fn();
 const handleAnswer = vi.fn();
 const addIceCandidate = vi.fn();
 const restartIce = vi.fn();
+const replaceOutgoingAudioTrack = vi.fn();
 const closePeer = vi.fn();
 const closeAll = vi.fn();
 const getPeerIds = vi.fn((): string[] => []);
@@ -98,6 +99,7 @@ vi.mock('@baker/sdk', () => {
     handleAnswer = handleAnswer;
     addIceCandidate = addIceCandidate;
     restartIce = restartIce;
+    replaceOutgoingAudioTrack = replaceOutgoingAudioTrack;
     closePeer = closePeer;
     closeAll = closeAll;
     getPeerIds = getPeerIds;
@@ -114,6 +116,7 @@ vi.mock('./voice-sfx', () => ({
 
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
+import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useVoiceStore } from './voice-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
@@ -136,6 +139,8 @@ beforeEach(() => {
   addIceCandidate.mockResolvedValue(undefined);
   restartIce.mockReset();
   restartIce.mockResolvedValue(null);
+  replaceOutgoingAudioTrack.mockReset();
+  replaceOutgoingAudioTrack.mockResolvedValue(undefined);
   closePeer.mockReset();
   closeAll.mockReset();
   getPeerIds.mockReset();
@@ -182,6 +187,15 @@ beforeEach(() => {
     peerNetwork: {},
     speakingUserIds: new Set(),
     status: 'idle',
+  });
+
+  useAudioDeviceStore.setState({
+    audioInputDevices: [],
+    audioOutputDevices: [],
+    error: null,
+    isRefreshing: false,
+    selectedAudioInputId: null,
+    selectedAudioOutputId: null,
   });
 
   useGatewayStore.setState({
@@ -360,6 +374,66 @@ describe('voice mute behavior', () => {
       isMuted: true,
       isSpeaking: false,
     });
+  });
+});
+
+describe('voice audio device selection', () => {
+  it('uses the selected microphone when joining a voice channel', async () => {
+    useAudioDeviceStore.getState().setSelectedAudioInputId('desk-mic');
+
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [{ isMuted: false, sessionId, userId }],
+        sessionId,
+      }),
+      vi.fn(),
+    );
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        autoGainControl: true,
+        deviceId: { exact: 'desk-mic' },
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+      video: false,
+    });
+  });
+
+  it('replaces the active outgoing audio track when the microphone changes', async () => {
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [
+          { isMuted: false, sessionId, userId },
+          { isMuted: false, sessionId: peerSessionId, userId: '77777777-7777-4777-8777-777777777777' },
+        ],
+        sessionId,
+      }),
+      vi.fn(),
+    );
+
+    useAudioDeviceStore.getState().setSelectedAudioInputId('headset-mic');
+    await useVoiceStore.getState().switchAudioInputDevice();
+
+    expect(getUserMedia).toHaveBeenLastCalledWith({
+      audio: {
+        autoGainControl: true,
+        deviceId: { exact: 'headset-mic' },
+        echoCancellation: true,
+        noiseSuppression: true,
+      },
+      video: false,
+    });
+    expect(replaceOutgoingAudioTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'send-audio-track', kind: 'audio' }),
+    );
+    expect(useVoiceStore.getState().status).toBe('active');
   });
 });
 

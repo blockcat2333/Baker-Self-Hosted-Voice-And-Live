@@ -8,6 +8,7 @@ import './stream-ui.css';
 import { useAuthStore } from '../auth/auth-store';
 import { sendCommandAwaitAck } from '../gateway/gateway-store';
 import { useGatewayStore } from '../gateway/gateway-store';
+import { applyAudioOutputDevice, useAudioDeviceStore } from '../media/audio-device-store';
 import {
   DEFAULT_STREAM_PLAYBACK_VOLUME,
   hasPlayableStreamAudioTrack,
@@ -117,6 +118,7 @@ function StreamPopupVideo({
 }) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const selectedAudioOutputId = useAudioDeviceStore((s) => s.selectedAudioOutputId);
   const [playbackState, setPlaybackState] = useState<'idle' | 'waiting' | 'playing' | 'blocked'>('idle');
   const attachedStreamRef = useRef<MediaStream | null>(null);
 
@@ -216,6 +218,17 @@ function StreamPopupVideo({
     }
     mediaElement.volume = playbackVolume;
   }, [playbackVolume]);
+
+  useEffect(() => {
+    const mediaElement = videoRef.current;
+    if (!mediaElement) {
+      return;
+    }
+
+    void applyAudioOutputDevice(mediaElement, selectedAudioOutputId).catch((err) => {
+      console.warn('[stream] audio output selection failed:', err);
+    });
+  }, [selectedAudioOutputId]);
 
   async function handleManualPlaybackStart() {
     const mediaElement = videoRef.current;

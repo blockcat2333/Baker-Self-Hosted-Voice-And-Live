@@ -67,6 +67,13 @@ export class SfuClientSession {
     }
   }
 
+  async replaceProducedTrack(kind: MediaStreamTrack['kind'], track: MediaStreamTrack | null): Promise<void> {
+    const producers = [...this.producers.values()].filter((producer) => producer.kind === kind);
+    for (const producer of producers) {
+      await producer.replaceTrack({ track });
+    }
+  }
+
   async consumeProducer(producer: SfuProducer): Promise<SfuRemoteTrack | null> {
     if (this.consumedProducerIds.has(producer.id)) {
       return null;

@@ -15,9 +15,29 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        vite: {
+          build: {
+            outDir: 'dist/main',
+            rollupOptions: {
+              output: {
+                entryFileNames: 'main.js',
+              },
+            },
+          },
+        },
       },
       preload: {
         input: 'electron/preload.ts',
+        vite: {
+          build: {
+            outDir: 'dist/main',
+            rollupOptions: {
+              output: {
+                entryFileNames: 'preload.cjs',
+              },
+            },
+          },
+        },
       },
       renderer: {},
     }) as unknown as PluginOption,

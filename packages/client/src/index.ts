@@ -10,6 +10,7 @@ export * from './features/chat/MessagePanel';
 export * from './features/chat/PresenceBar';
 export * from './features/chat/SendBox';
 export * from './features/gateway/gateway-store';
+export * from './features/media/audio-device-store';
 export * from './features/session/session-store';
 export * from './features/stream/StreamPanel';
 export * from './features/stream/stream-media';

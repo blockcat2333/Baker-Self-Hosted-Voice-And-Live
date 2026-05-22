@@ -22,7 +22,7 @@ import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 import { useAuthStore } from '../auth/auth-store';
 import {
   buildCameraCaptureConstraints,
-  buildScreenCaptureConstraints,
+  captureScreenStream,
   clampStreamPlaybackVolume,
   DEFAULT_CAMERA_SELECTION,
   DEFAULT_STREAM_CODEC_PREFERENCE,
@@ -905,7 +905,7 @@ async function captureStream(
 ): Promise<MediaStream> {
   const stream =
     sourceType === 'screen'
-      ? await navigator.mediaDevices.getDisplayMedia(buildScreenCaptureConstraints(quality))
+      ? await captureScreenStream(quality)
       : await navigator.mediaDevices.getUserMedia(
         buildCameraCaptureConstraints(quality, cameraSelection, includeAudio),
       );
@@ -1408,9 +1408,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     let captured: MediaStream;
     try {
       captured = await captureStream(sourceType, quality, cameraSelection);
-    } catch {
+    } catch (err) {
       set({
-        error: sourceType === 'screen' ? 'Screen share capture failed.' : 'Camera capture failed.',
+        error: err instanceof Error && err.message
+          ? err.message
+          : sourceType === 'screen' ? 'Screen share capture failed.' : 'Camera capture failed.',
         ownedStream: null,
       });
       return;

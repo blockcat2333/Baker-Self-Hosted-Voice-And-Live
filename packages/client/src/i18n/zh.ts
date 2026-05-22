@@ -25,6 +25,7 @@ export const zh = {
   app: {
     loading_server: '正在加载服务器…',
     web_access_disabled: '服务器管理员已禁用 Web 访问。',
+    change_server: '切换服务器',
   },
   auth: {
     sign_in: '登录',
@@ -69,6 +70,10 @@ export const zh = {
     status_connected: '语音已连接',
     mic_input: '麦克风输入',
     playback: '播放',
+    input_device: '麦克风',
+    output_device: '扬声器',
+    system_default_device: '系统默认',
+    device_switch_error: '音频设备切换失败。',
     net_stats: '延迟 {{rtt}} · 丢包 {{loss}}',
     server_rtt: '服务器延迟 {{rtt}}',
     badge_muted: '静音',

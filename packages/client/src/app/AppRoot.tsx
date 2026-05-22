@@ -17,7 +17,9 @@ export interface AppRootProps {
   apiBaseUrl?: string;
   gatewayUrl?: string;
   mediaBaseUrl?: string;
+  onChangeServer?: () => void;
   platformApi: PlatformApi;
+  versionWarning?: string | null;
 }
 
 export function AppRoot(props: AppRootProps) {
@@ -31,7 +33,9 @@ export function AppRoot(props: AppRootProps) {
 function AppRootContent({
   apiBaseUrl,
   gatewayUrl,
+  onChangeServer,
   platformApi: _platformApi,
+  versionWarning,
 }: AppRootProps) {
   const { t } = useTranslation();
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -162,5 +166,13 @@ function AppRootContent({
     );
   }
 
-  return <ChatShell api={api} gatewayUrl={resolvedGatewayUrl} serverName={publicConfig.serverName} />;
+  return (
+    <ChatShell
+      api={api}
+      gatewayUrl={resolvedGatewayUrl}
+      onChangeServer={onChangeServer}
+      serverName={publicConfig.serverName}
+      versionWarning={versionWarning}
+    />
+  );
 }

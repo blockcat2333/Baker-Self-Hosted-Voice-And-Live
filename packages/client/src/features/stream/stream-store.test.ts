@@ -131,6 +131,7 @@ beforeEach(() => {
   enumerateDevices.mockReset();
   replaceOutgoingVideoTrack.mockReset();
   replaceOutgoingVideoTrack.mockResolvedValue(undefined);
+  localPreviewTrack.contentHint = '';
   getDisplayMedia.mockResolvedValue(new MockMediaStream([localPreviewTrack]));
   getUserMedia.mockResolvedValue(new MockMediaStream([localPreviewTrack]));
   enumerateDevices.mockResolvedValue([
@@ -163,6 +164,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   globalThis.MediaStream = OriginalMediaStream;
   useStreamStore.getState().reset();
   useAuthStore.setState({
@@ -226,6 +228,80 @@ describe('stream store watch startup', () => {
       codecPreference: 'default',
       quality: { bitrateKbps: 10000, frameRate: 60, resolution: '1080p' },
       sessionId: hostSessionId,
+      sourceType: 'screen',
+      status: 'live',
+      streamId,
+    });
+  });
+
+  it('captures Electron desktop screen sources through the selected source id', async () => {
+    const selectScreenSource = vi.fn().mockResolvedValue('screen:1:0');
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      iceServers: [],
+      sessionId: hostSessionId,
+      streamId,
+    });
+    const sendRawCommand = vi.fn();
+
+    vi.stubGlobal('window', {
+      bakerDesktop: {
+        selectScreenSource,
+      },
+    });
+    getUserMedia
+      .mockRejectedValueOnce(new Error('System audio capture unavailable.'))
+      .mockResolvedValueOnce(new MockMediaStream([localPreviewTrack]));
+
+    await useStreamStore
+      .getState()
+      .startSharing(
+        channelId,
+        { bitrateKbps: 10000, frameRate: 60, resolution: '1080p' },
+        'screen',
+        sendCommandAwaitAck,
+        sendRawCommand,
+      );
+
+    const electronVideoConstraints = {
+      frameRate: {
+        ideal: 60,
+        max: 60,
+      },
+      height: {
+        ideal: 1080,
+        max: 1080,
+      },
+      mandatory: {
+        chromeMediaSource: 'desktop',
+        chromeMediaSourceId: 'screen:1:0',
+        maxFrameRate: 60,
+        maxHeight: 1080,
+        maxWidth: 1920,
+        minFrameRate: 15,
+      },
+      width: {
+        ideal: 1920,
+        max: 1920,
+      },
+    };
+
+    expect(selectScreenSource).toHaveBeenCalledTimes(1);
+    expect(getDisplayMedia).not.toHaveBeenCalled();
+    expect(getUserMedia).toHaveBeenNthCalledWith(1, {
+      audio: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: 'screen:1:0',
+        },
+      },
+      video: electronVideoConstraints,
+    });
+    expect(getUserMedia).toHaveBeenNthCalledWith(2, {
+      audio: false,
+      video: electronVideoConstraints,
+    });
+    expect(useStreamStore.getState().ownedStream).toMatchObject({
       sourceType: 'screen',
       status: 'live',
       streamId,

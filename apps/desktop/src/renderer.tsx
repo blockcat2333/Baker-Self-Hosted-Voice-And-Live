@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import '@baker/client/app/app.css';
-import { AppRoot, createDesktopPlatformApi } from '@baker/client';
+import { DesktopApp } from './DesktopApp';
 
 const rootElement = document.getElementById('root');
 
@@ -12,6 +12,6 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <AppRoot platformApi={createDesktopPlatformApi()} />
+    <DesktopApp />
   </StrictMode>,
 );

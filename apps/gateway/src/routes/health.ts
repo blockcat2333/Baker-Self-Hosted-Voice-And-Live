@@ -1,4 +1,5 @@
 import { HealthResponseSchema } from '@baker/protocol';
+import { BAKER_VERSION } from '@baker/shared';
 
 interface HealthRouteRegistrar {
   get(path: string, handler: () => Promise<unknown>): unknown;
@@ -10,7 +11,7 @@ export function registerHealthRoute(app: HealthRouteRegistrar) {
       service: 'gateway',
       status: 'ok',
       timestamp: new Date().toISOString(),
-      version: '0.1.0',
+      version: BAKER_VERSION,
     }),
   );
 }

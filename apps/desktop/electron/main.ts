@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell } from 'electron';
 import { NsisUpdater } from 'electron-updater';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -147,6 +147,61 @@ function configurePermissions() {
   );
 }
 
+function getScreenSourceLabel(source: Electron.DesktopCapturerSource, index: number) {
+  const kind = source.id.startsWith('screen:') ? 'Screen' : 'Window';
+  const name = source.name.trim() || source.id;
+  const label = `${kind} ${index + 1}: ${name}`;
+  return label.length > 72 ? `${label.slice(0, 69)}...` : label;
+}
+
+async function showScreenSourcePicker(
+  owner: BrowserWindow | null,
+  sources: Electron.DesktopCapturerSource[],
+) {
+  if (process.env.BAKER_DESKTOP_AUTO_SELECT_SCREEN_SOURCE === '1') {
+    return sources[0]?.id ?? null;
+  }
+
+  const visibleSources = sources.slice(0, 12);
+  const buttons = [...visibleSources.map(getScreenSourceLabel), 'Cancel'];
+  const options = {
+    buttons,
+    cancelId: buttons.length - 1,
+    defaultId: 0,
+    detail:
+      sources.length > visibleSources.length
+        ? `Showing the first ${visibleSources.length} of ${sources.length} available sources. Close unused windows if the source is not listed.`
+        : 'Select a screen or window to share in the livestream.',
+    message: 'Choose what to share',
+    noLink: true,
+    title: 'Baker Screen Share',
+    type: 'question' as const,
+  };
+  const result = owner
+    ? await dialog.showMessageBox(owner, options)
+    : await dialog.showMessageBox(options);
+
+  if (result.response < 0 || result.response >= visibleSources.length) {
+    return null;
+  }
+
+  return visibleSources[result.response]?.id ?? null;
+}
+
+async function selectScreenSource(owner: BrowserWindow | null) {
+  const sources = await desktopCapturer.getSources({
+    fetchWindowIcons: true,
+    thumbnailSize: { height: 180, width: 320 },
+    types: ['screen', 'window'],
+  });
+
+  if (sources.length === 0) {
+    throw new Error('No screen or window source is available.');
+  }
+
+  return showScreenSourcePicker(owner, sources);
+}
+
 async function createWindow() {
   const window = new BrowserWindow({
     height: 900,
@@ -194,7 +249,15 @@ app.whenReady().then(async () => {
     await shell.openExternal(parsed.toString());
   });
 
-  ipcMain.handle('desktop:select-screen-source', async () => null);
+  ipcMain.handle('desktop:select-screen-source', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    try {
+      return await selectScreenSource(owner);
+    } catch (error) {
+      await writeLog('screen-capture', 'Screen source selection failed.', error);
+      throw error;
+    }
+  });
 
   ipcMain.handle('desktop:get-app-info', async () => ({
     logsDirectory: app.getPath('logs'),

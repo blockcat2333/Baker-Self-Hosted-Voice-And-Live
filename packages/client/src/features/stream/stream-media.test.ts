@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildCameraCaptureConstraints,
+  buildElectronScreenCaptureConstraints,
   buildScreenCaptureConstraints,
   clampStreamPlaybackVolume,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
@@ -126,6 +127,44 @@ describe('stream-media helpers', () => {
       width: {
         ideal: 2560,
         max: 2560,
+      },
+    });
+  });
+
+  it('builds Electron desktop capture constraints with a selected source id', () => {
+    expect(
+      buildElectronScreenCaptureConstraints(
+        { bitrateKbps: 10000, frameRate: 60, resolution: '1080p' },
+        'screen:1:0',
+      ),
+    ).toEqual({
+      audio: {
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: 'screen:1:0',
+        },
+      },
+      video: {
+        frameRate: {
+          ideal: 60,
+          max: 60,
+        },
+        height: {
+          ideal: 1080,
+          max: 1080,
+        },
+        mandatory: {
+          chromeMediaSource: 'desktop',
+          chromeMediaSourceId: 'screen:1:0',
+          maxFrameRate: 60,
+          maxHeight: 1080,
+          maxWidth: 1920,
+          minFrameRate: 15,
+        },
+        width: {
+          ideal: 1920,
+          max: 1920,
+        },
       },
     });
   });

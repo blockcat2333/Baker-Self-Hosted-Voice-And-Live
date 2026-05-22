@@ -14,6 +14,15 @@ export interface CameraOption {
   selection: CameraSelection;
 }
 type CameraDeviceLike = Pick<MediaDeviceInfo, 'deviceId' | 'kind' | 'label'>;
+type DesktopScreenSelector = {
+  selectScreenSource(): Promise<string | null>;
+};
+type DesktopWindowLike = {
+  bakerDesktop?: DesktopScreenSelector;
+};
+type ElectronMediaTrackConstraints = MediaTrackConstraints & {
+  mandatory: Record<string, number | string>;
+};
 
 export const DEFAULT_STREAM_CODEC_PREFERENCE: StreamCodecPreference = 'default';
 export const DEFAULT_STREAM_QUALITY: StreamQualitySettings = {
@@ -28,14 +37,19 @@ export const STREAM_FRAME_RATE_OPTIONS: StreamQualitySettings['frameRate'][] = [
 export const STREAM_BITRATE_OPTIONS: StreamQualitySettings['bitrateKbps'][] = [2000, 4000, 6000, 10000, 16000];
 export const STREAM_CODEC_OPTIONS: StreamCodecPreference[] = ['default', 'h264', 'vp8', 'vp9', 'av1'];
 
+const dimensionsByResolution: Record<StreamQualitySettings['resolution'], { height: number; width: number }> = {
+  '480p': { height: 480, width: 854 },
+  '720p': { height: 720, width: 1280 },
+  '1080p': { height: 1080, width: 1920 },
+  '1440p': { height: 1440, width: 2560 },
+};
+
+function getVideoDimensions(quality: StreamQualitySettings) {
+  return dimensionsByResolution[quality.resolution];
+}
+
 function videoConstraintsForQuality(quality: StreamQualitySettings): MediaTrackConstraints {
-  const dimensionsByResolution: Record<StreamQualitySettings['resolution'], { height: number; width: number }> = {
-    '480p': { height: 480, width: 854 },
-    '720p': { height: 720, width: 1280 },
-    '1080p': { height: 1080, width: 1920 },
-    '1440p': { height: 1440, width: 2560 },
-  };
-  const dimensions = dimensionsByResolution[quality.resolution];
+  const dimensions = getVideoDimensions(quality);
 
   return {
     frameRate: {
@@ -59,6 +73,14 @@ function audioCaptureConstraints(): MediaTrackConstraints {
     echoCancellation: true,
     noiseSuppression: true,
   };
+}
+
+function getDesktopScreenSelector(): DesktopScreenSelector | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return (window as DesktopWindowLike).bakerDesktop ?? null;
 }
 
 export function clampStreamPlaybackVolume(volume: number): number {
@@ -178,6 +200,61 @@ export function buildScreenCaptureConstraints(
     audio: audioCaptureConstraints(),
     video: videoConstraintsForQuality(quality),
   };
+}
+
+export function buildElectronScreenCaptureConstraints(
+  quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY,
+  sourceId: string,
+  includeAudio = true,
+): MediaStreamConstraints {
+  const dimensions = getVideoDimensions(quality);
+  const video: ElectronMediaTrackConstraints = {
+    ...videoConstraintsForQuality(quality),
+    mandatory: {
+      chromeMediaSource: 'desktop',
+      chromeMediaSourceId: sourceId,
+      maxFrameRate: quality.frameRate,
+      maxHeight: dimensions.height,
+      maxWidth: dimensions.width,
+      minFrameRate: Math.min(15, quality.frameRate),
+    },
+  };
+
+  return {
+    audio: includeAudio
+      ? ({
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: sourceId,
+          },
+        } as ElectronMediaTrackConstraints)
+      : false,
+    video,
+  };
+}
+
+export async function captureScreenStream(
+  quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY,
+): Promise<MediaStream> {
+  const desktopScreenSelector = getDesktopScreenSelector();
+  if (!desktopScreenSelector) {
+    return navigator.mediaDevices.getDisplayMedia(buildScreenCaptureConstraints(quality));
+  }
+
+  const sourceId = await desktopScreenSelector.selectScreenSource();
+  if (!sourceId) {
+    throw new Error('Screen share selection was canceled.');
+  }
+
+  try {
+    return await navigator.mediaDevices.getUserMedia(
+      buildElectronScreenCaptureConstraints(quality, sourceId, true),
+    );
+  } catch {
+    return navigator.mediaDevices.getUserMedia(
+      buildElectronScreenCaptureConstraints(quality, sourceId, false),
+    );
+  }
 }
 
 export function isDisplayAudioSource(sourceType: StreamSourceType): boolean {

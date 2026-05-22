@@ -9,27 +9,33 @@ const ACCESS_TOKEN_KEY = 'baker_access_token';
 const REFRESH_TOKEN_KEY = 'baker_refresh_token';
 const USER_KEY = 'baker_auth_user';
 
-function getSessionStorage() {
-  return sessionStorage;
+function getPersistentStorage() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return window.localStorage;
 }
 
 function loadStoredSession(): { accessToken: string; refreshToken: string; user: AuthUser | null } | null {
   try {
-    const storage = getSessionStorage();
+    const storage = getPersistentStorage();
+    if (!storage) return null;
     const access = storage.getItem(ACCESS_TOKEN_KEY);
     const refresh = storage.getItem(REFRESH_TOKEN_KEY);
     const rawUser = storage.getItem(USER_KEY);
     const user = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
     if (access && refresh) return { accessToken: access, refreshToken: refresh, user };
   } catch {
-    // sessionStorage unavailable (SSR / test env)
+    // Persistent storage unavailable (SSR / test env)
   }
   return null;
 }
 
 function saveSession(accessToken: string, refreshToken: string, user: AuthUser) {
   try {
-    const storage = getSessionStorage();
+    const storage = getPersistentStorage();
+    if (!storage) return;
     storage.setItem(ACCESS_TOKEN_KEY, accessToken);
     storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     storage.setItem(USER_KEY, JSON.stringify(user));
@@ -40,7 +46,8 @@ function saveSession(accessToken: string, refreshToken: string, user: AuthUser) 
 
 function clearTokens() {
   try {
-    const storage = getSessionStorage();
+    const storage = getPersistentStorage();
+    if (!storage) return;
     storage.removeItem(ACCESS_TOKEN_KEY);
     storage.removeItem(REFRESH_TOKEN_KEY);
     storage.removeItem(USER_KEY);

@@ -33,7 +33,7 @@ export default defineConfig({
             outDir: 'dist/main',
             rollupOptions: {
               output: {
-                entryFileNames: 'preload.js',
+                entryFileNames: 'preload.cjs',
               },
             },
           },

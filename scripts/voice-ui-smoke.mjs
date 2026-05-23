@@ -59,6 +59,7 @@ async function run() {
 
   await page.locator('form.login-form button[type="submit"]').click();
   await page.waitForSelector('.chat-shell', { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector('.gateway-banner') === null, null, { timeout: 20000 });
 
   // Join the first voice channel.
   const voiceButton = page.locator('button.channel-btn--voice').first();

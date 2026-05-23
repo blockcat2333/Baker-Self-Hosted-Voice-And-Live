@@ -168,7 +168,6 @@ export function VoicePanel() {
           <span className="voice-panel-label voice-panel-label--error">{t('voice.error_title')}</span>
         </div>
         <p className="voice-panel-error-msg">{errorMessage}</p>
-        <VoiceAudioDeviceControls />
         <button
           type="button"
           className="btn-ghost voice-panel-dismiss-btn"
@@ -210,8 +209,6 @@ export function VoicePanel() {
           {t('voice.error_connection_issue')}
         </p>
       ) : null}
-
-      <VoiceAudioDeviceControls />
 
       <div className="voice-audio-controls">
         <label className="voice-audio-control">

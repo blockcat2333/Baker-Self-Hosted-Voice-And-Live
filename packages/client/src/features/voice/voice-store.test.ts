@@ -17,6 +17,7 @@ const { playVoiceSfx } = vi.hoisted(() => ({
 let analyserAmplitude = 0;
 const OriginalMediaStream = globalThis.MediaStream;
 const OriginalAudioContext = globalThis.AudioContext;
+const OriginalNavigator = globalThis.navigator;
 
 class MockTrack {
   enabled = true;
@@ -150,6 +151,10 @@ beforeEach(() => {
 
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
   globalThis.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: globalThis.navigator ?? {},
+  });
   Object.defineProperty(globalThis.navigator, 'mediaDevices', {
     configurable: true,
     value: {
@@ -217,6 +222,10 @@ afterEach(async () => {
   vi.useRealTimers();
   globalThis.MediaStream = OriginalMediaStream;
   globalThis.AudioContext = OriginalAudioContext;
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: OriginalNavigator,
+  });
 });
 
 describe('voice channel switch', () => {

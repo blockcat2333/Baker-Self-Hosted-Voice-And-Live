@@ -27,6 +27,16 @@ export const en = {
     web_access_disabled: 'Web access is disabled by the server administrator.',
     change_server: 'Switch server',
   },
+  settings: {
+    open: 'Settings',
+    title: 'Settings',
+    preferences: 'Preferences',
+    audio: 'Audio devices',
+    language: 'Language',
+    server: 'Server',
+    session: 'Session',
+    close: 'Close',
+  },
   auth: {
     sign_in: 'Sign in',
     create_account: 'Create account',

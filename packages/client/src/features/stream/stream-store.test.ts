@@ -17,6 +17,7 @@ const enumerateDevices = vi.fn();
 const replaceOutgoingVideoTrack = vi.fn();
 let latestCallbacks: WebRtcManagerCallbacks | null = null;
 const OriginalMediaStream = globalThis.MediaStream;
+const OriginalNavigator = globalThis.navigator;
 
 class MockMediaStream {
   private readonly tracks: MediaStreamTrack[];
@@ -110,6 +111,10 @@ function flushPromises() {
 
 beforeEach(() => {
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: globalThis.navigator ?? {},
+  });
   handleRecvOnlyOffer.mockReset();
   handleRecvOnlyOffer.mockResolvedValue({ type: 'answer', sdp: 'viewer-answer' });
   addIceCandidate.mockReset();
@@ -166,6 +171,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   globalThis.MediaStream = OriginalMediaStream;
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: OriginalNavigator,
+  });
   useStreamStore.getState().reset();
   useAuthStore.setState({
     accessToken: null,

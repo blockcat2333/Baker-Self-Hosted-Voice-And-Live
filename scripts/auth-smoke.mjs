@@ -85,8 +85,10 @@ async function run() {
   await assertNoFetchFailure(page);
   await page.waitForSelector('.chat-shell', { timeout: 20000 });
 
-  // Logout back to login screen.
-  await page.locator('button.sidebar-footer-signout').click();
+  // Logout back to login screen through the settings dialog.
+  await page.locator('button.sidebar-footer-settings').click();
+  await page.locator('.settings-dialog').waitFor({ timeout: 10000 });
+  await page.locator('button.settings-dialog-action').last().click();
   await page.waitForSelector('.login-card', { timeout: 20000 });
 
   // Login with the newly registered account.

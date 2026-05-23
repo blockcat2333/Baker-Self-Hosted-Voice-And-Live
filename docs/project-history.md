@@ -1,5 +1,33 @@
 # Project History
 
+## 2026-05-23
+
+### Baker Desktop settings dialog migration
+
+What changed:
+
+- replaced the desktop/sidebar footer language-switch position with a single Settings entry point
+- added a shared settings dialog that contains:
+  - microphone device selector
+  - speaker device selector
+  - language switcher
+  - desktop server switching
+  - sign-out
+- removed the audio device dropdowns from the idle sidebar voice block and joined/error voice panel surfaces, while keeping the active voice input/playback volume sliders in place
+- preserved the existing device and language persistence keys:
+  - `baker_language`
+  - `baker_audio_input_device_id`
+  - `baker_audio_output_device_id`
+- kept desktop server switching on the existing `onChangeServer` path, so it still clears the saved server and logs out before returning to the connection screen
+- updated auth/mobile/voice smoke scripts to open Settings for logout and to measure the new footer entry point
+
+Why:
+
+- the desktop sidebar bottom had grown into a mixed utility area; moving account/session/server/audio/language controls into one settings dialog keeps the main chat/voice surfaces focused
+- microphone and speaker selection are preferences, while voice input/playback volume sliders are active-call controls, so they now live in separate places that match how users use them
+- the migration is intentionally client-only: no HTTP, WebSocket, database, protocol, or Electron IPC contract changes were needed
+- validation included the real Electron desktop app against local Baker services, plus the updated Playwright auth, mobile, and voice smoke scripts
+
 ## 2026-04-20
 
 ### Mobile web tabbed UI + joined-voice usability

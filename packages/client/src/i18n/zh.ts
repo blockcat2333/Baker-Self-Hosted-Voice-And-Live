@@ -27,6 +27,16 @@ export const zh = {
     web_access_disabled: '服务器管理员已禁用 Web 访问。',
     change_server: '切换服务器',
   },
+  settings: {
+    open: '设置',
+    title: '设置',
+    preferences: '偏好设置',
+    audio: '音频设备',
+    language: '语言',
+    server: '服务器',
+    session: '会话',
+    close: '关闭',
+  },
   auth: {
     sign_in: '登录',
     create_account: '创建账户',

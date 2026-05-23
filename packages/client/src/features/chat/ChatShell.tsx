@@ -4,14 +4,12 @@ import { useTranslation } from 'react-i18next';
 import type { ApiClient } from '@baker/sdk';
 
 import { AccountPanel } from '../auth/AccountPanel';
-import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
-import { VoiceAudioDeviceControls, VoicePanel } from '../voice/VoicePanel';
-import { LanguageSwitcher } from '../../i18n/LanguageSwitcher';
+import { VoicePanel } from '../voice/VoicePanel';
 import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
 import { GuildList } from './GuildList';
@@ -19,6 +17,7 @@ import { ChannelList } from './ChannelList';
 import { MessagePanel } from './MessagePanel';
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { PresenceBar } from './PresenceBar';
+import { SettingsDialog } from './SettingsDialog';
 
 export interface ChatShellProps {
   api: ApiClient;
@@ -30,7 +29,6 @@ export interface ChatShellProps {
 
 export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, versionWarning }: ChatShellProps) {
   const { t } = useTranslation();
-  const logout = useAuthStore((s) => s.logout);
   const activeGuildId = useChatStore((s) => s.activeGuildId);
   const loadGuilds = useChatStore((s) => s.loadGuilds);
   const loadChannels = useChatStore((s) => s.loadChannels);
@@ -51,6 +49,7 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
   const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const previousActiveChannelIdRef = useRef<string | null>(null);
 
   // Load guilds once on mount
@@ -136,7 +135,6 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
           ) : (
             <div className="sidebar-voice-idle">
               <p className="sidebar-voice-empty">{t('chat.voice_section_idle')}</p>
-              <VoiceAudioDeviceControls />
             </div>
           )}
         </div>
@@ -146,14 +144,12 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
           <div className="sidebar-footer">
             <AccountPanel api={api} />
             <div className="sidebar-footer-actions">
-              <LanguageSwitcher className="language-switcher" />
-              {onChangeServer ? (
-                <button type="button" className="btn-ghost sidebar-footer-server" onClick={onChangeServer}>
-                  {t('app.change_server')}
-                </button>
-              ) : null}
-              <button type="button" className="btn-ghost sidebar-footer-signout" onClick={() => void logout(api)}>
-                {t('common.sign_out')}
+              <button
+                type="button"
+                className="btn-ghost sidebar-footer-settings"
+                onClick={() => setIsSettingsOpen(true)}
+              >
+                {t('settings.open')}
               </button>
             </div>
           </div>
@@ -208,6 +204,10 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
       />
 
       <StreamPopupHost />
+
+      {isSettingsOpen ? (
+        <SettingsDialog api={api} onChangeServer={onChangeServer} onClose={() => setIsSettingsOpen(false)} />
+      ) : null}
     </div>
   );
 }

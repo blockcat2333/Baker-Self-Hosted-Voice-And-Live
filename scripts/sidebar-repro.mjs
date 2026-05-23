@@ -10,8 +10,9 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_URL = 'http://localhost:3233';
-const API_URL = 'http://localhost:3001';
+const webPort = process.env.WEB_PORT ?? '80';
+const BASE_URL = process.env.BASE_URL ?? (webPort === '80' ? 'http://localhost' : `http://localhost:${webPort}`);
+const API_URL = process.env.API_URL ?? `http://localhost:${process.env.API_PORT ?? '3001'}`;
 const OUT_DIR = join(__dirname, '..', 'scripts', 'sidebar-screenshots');
 mkdirSync(OUT_DIR, { recursive: true });
 
@@ -81,8 +82,7 @@ async function measureSidebarFooter(page) {
     const accountPanel = document.querySelector('.account-panel');
     const editBtn = document.querySelector('.account-panel-edit-btn');
     const footerActions = document.querySelector('.sidebar-footer-actions');
-    const signout = document.querySelector('.sidebar-footer-signout');
-    const langSwitcher = document.querySelector('.language-switcher');
+    const settingsButton = document.querySelector('.sidebar-footer-settings');
 
     function getRect(el) {
       if (!el) return null;
@@ -95,8 +95,7 @@ async function measureSidebarFooter(page) {
     results.accountPanel = getRect(accountPanel);
     results.editBtn = getRect(editBtn);
     results.footerActions = getRect(footerActions);
-    results.signout = getRect(signout);
-    results.langSwitcher = getRect(langSwitcher);
+    results.settingsButton = getRect(settingsButton);
 
     // Check overflows
     if (sidebar && accountPanel) {
@@ -116,6 +115,11 @@ async function measureSidebarFooter(page) {
       const sidebarRight = sidebar.getBoundingClientRect().right;
       const actionsRight = footerActions.getBoundingClientRect().right;
       results.footerActionsOverflows = actionsRight > sidebarRight + 1;
+    }
+    if (sidebar && settingsButton) {
+      const sidebarRight = sidebar.getBoundingClientRect().right;
+      const settingsRight = settingsButton.getBoundingClientRect().right;
+      results.settingsButtonOverflows = settingsRight > sidebarRight + 1;
     }
 
     // Check computed styles
@@ -143,6 +147,32 @@ async function measureSidebarFooter(page) {
 
     return results;
   });
+}
+
+async function measureSettingsDialog(page) {
+  await page.locator('button.sidebar-footer-settings').click();
+  await page.locator('.settings-dialog').waitFor({ timeout: 10000 });
+  const rect = await page.locator('.settings-dialog').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+      width: Math.round(r.width),
+      height: Math.round(r.height),
+      right: Math.round(r.right),
+      bottom: Math.round(r.bottom),
+    };
+  });
+  const viewport = page.viewportSize();
+  await page.keyboard.press('Escape');
+  await page.locator('.settings-dialog').waitFor({ state: 'detached', timeout: 10000 });
+
+  return {
+    rect,
+    overflowsViewport:
+      Boolean(viewport) &&
+      (rect.x < -1 || rect.y < -1 || rect.right > viewport.width + 1 || rect.bottom > viewport.height + 1),
+  };
 }
 
 async function run() {
@@ -210,14 +240,18 @@ async function run() {
       if (measurements.editBtnOverflows) console.log('    ⚠ Edit button overflows sidebar');
       if (measurements.editBtnOutsidePanel) console.log('    ⚠ Edit button outside account panel bounds');
       if (measurements.footerActionsOverflows) console.log('    ⚠ Footer actions overflow sidebar');
+      if (measurements.settingsButtonOverflows) console.log('    Settings button overflows sidebar');
       console.log('  sidebar:', JSON.stringify(measurements.sidebar));
       console.log('  accountPanel:', JSON.stringify(measurements.accountPanel));
       console.log('  editBtn:', JSON.stringify(measurements.editBtn));
       console.log('  footerActions:', JSON.stringify(measurements.footerActions));
-      console.log('  signout:', JSON.stringify(measurements.signout));
-      console.log('  langSwitcher:', JSON.stringify(measurements.langSwitcher));
+      console.log('  settingsButton:', JSON.stringify(measurements.settingsButton));
       console.log('  footerStyles:', JSON.stringify(measurements.footerStyles));
       console.log('  accountPanelStyles:', JSON.stringify(measurements.accountPanelStyles));
+
+      const settingsDialog = await measureSettingsDialog(page);
+      if (settingsDialog.overflowsViewport) console.log('    Settings dialog overflows viewport');
+      console.log('  settingsDialog:', JSON.stringify(settingsDialog.rect));
 
       await ctx.close();
     }

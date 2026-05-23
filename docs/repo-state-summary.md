@@ -189,7 +189,7 @@ Migration state:
 - `packages/client/src/features/stream/stream-media.test.ts`
   - helper coverage for stream playback-volume, stream capture constraint behavior, and quality-based capture presets
 - `packages/client/src/features/voice/VoicePanel.tsx`
-  - voice controls, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
+  - voice controls, active-call input/playback volume sliders, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
 - `packages/client/src/features/chat/MobileTabBar.tsx`
   - phone-width bottom navigation for `Channels` / `Chat` / `Voice` / `More`, including active-voice notification state
 - `packages/client/src/features/chat/ChannelList.tsx`
@@ -207,7 +207,9 @@ Migration state:
 - `packages/client/src/features/stream/stream-popup-controller.ts`
   - `window.open` popup registry keyed by `streamId`, duplicate-prevention, and popup-close cleanup
 - `packages/client/src/features/chat/ChatShell.tsx`
-  - top-level chat/sidebar composition plus server-name header and popup host mount point; mobile now uses a four-tab shell while desktop/tablet keep the multi-column layout, and sign-out still uses the authenticated logout path
+  - top-level chat/sidebar composition plus server-name header and popup host mount point; mobile now uses a four-tab shell while desktop/tablet keep the multi-column layout, and the sidebar footer now opens Settings instead of rendering language/server/session controls inline
+- `packages/client/src/features/chat/SettingsDialog.tsx`
+  - shared settings dialog for audio device selection, language switching, desktop server switching, and authenticated sign-out; desktop hides server switching when no `onChangeServer` callback is supplied
 - `apps/media/src/app.ts`
   - media service bootstrap; internal routes no longer expose permissive CORS and now reject unauthorized callers
 - `apps/media/src/lib/internal-auth.ts`
@@ -241,7 +243,13 @@ Migration state:
 Scripts:
 
 - `scripts/auth-smoke.mjs`
-  - Playwright smoke script to register -> logout -> login through the web UI (validates auth fetch end-to-end)
+  - Playwright smoke script to register -> settings logout -> login through the web UI (validates auth fetch end-to-end and the settings-dialog logout path)
+- `scripts/mobile-audit.mjs`
+  - Playwright mobile layout audit for login, signed-in chat, and joined-voice states; logout now flows through Settings and sidebar footer measurement targets the settings entry
+- `scripts/voice-ui-smoke.mjs`
+  - Playwright joined-voice smoke for the local app; waits for the gateway banner to clear before voice actions so it validates the real ready state
+- `scripts/sidebar-repro.mjs`
+  - sidebar footer reproduction helper; now targets the settings button/dialog instead of the old inline language/server/session controls
 - `scripts/dev-up.ps1`
   - stops leftover dev servers (by ports + saved PIDs) and starts infra + services with logs; auto-picks usable ports when Windows excludes `3001-3003`; honors persisted `webPort` from `/v1/meta/public-config` on restart; proactively ensures Docker engine readiness (best-effort auto-start Docker Desktop + wait), emits live daemon-error diagnostics, performs one automatic stuck-start recovery attempt (`restart Docker Desktop + wsl --shutdown`), and fails fast if Docker remains unhealthy; forwards `STUN_URLS`/`TURN_*` from `.env` into services for WebRTC reliability tuning; writes resolved runtime ports to `output/dev/runtime-ports.json`; `-EnableTurn -TurnHost <host>` starts the local compose TURN relay, validates that `baker-turn` is actually healthy, writes effective TURN runtime details to `output/dev/turn-runtime.json`, enforces public TURN_EXTERNAL_IP for public hosts (no silent LAN fallback), and prints an open-port/protocol checklist
 - `docs/dev-test-personal-config.md`
@@ -316,7 +324,7 @@ Community and release metadata:
 - web auth tokens now persist in `sessionStorage` instead of `localStorage`
 - web login hides registration when public registration is disabled, and the main client header shows the configured server name
 - late voice joiners now receive current stream room snapshots, and voice leave reconciles same-channel stream runtime on the server even if client cleanup did not happen first
-- desktop reuses the shared client shell but is not separately validated end-to-end
+- desktop reuses the shared client shell and its settings/auth/server-switch flows were validated in the real Electron app against local Baker services
 - channel `voiceQuality` is now persisted/admin-managed, but it is not yet applied to actual live voice media behavior
 
 Temporary compatibility layer:

@@ -13,9 +13,11 @@
 
 import { chromium } from '@playwright/test';
 import { mkdirSync, readFileSync, existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
-const repoRoot = resolve(new URL('.', import.meta.url).pathname, '..');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, '..');
 
 function readRuntimePort() {
   const path = join(repoRoot, 'output', 'dev', 'runtime-ports.json');
@@ -207,10 +209,12 @@ async function run() {
 
   // 4. Logout, then login screenshots at each viewport
   await page.setViewportSize({ width: 1280, height: 800 });
-  // logout via UI: button could be .sidebar-footer-signout OR mobile tabbar
-  const signOutBtn = page.locator('button.sidebar-footer-signout').first();
-  if (await signOutBtn.isVisible().catch(() => false)) {
-    await signOutBtn.click();
+  // logout via UI: open Settings, then use the session action.
+  const settingsBtn = page.locator('button.sidebar-footer-settings').first();
+  if (await settingsBtn.isVisible().catch(() => false)) {
+    await settingsBtn.click();
+    await page.locator('.settings-dialog').waitFor({ timeout: 10000 });
+    await page.locator('button.settings-dialog-action').last().click();
   } else {
     await page.evaluate(() => {
       sessionStorage.clear();

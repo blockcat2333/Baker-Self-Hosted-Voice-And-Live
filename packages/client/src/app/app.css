@@ -630,7 +630,6 @@ body {
 
 .sidebar-voice-idle {
   display: grid;
-  gap: 6px;
 }
 
 .sidebar-footer {
@@ -646,14 +645,9 @@ body {
   gap: 6px;
 }
 
-.sidebar-footer-signout {
+.sidebar-footer-settings {
   font-size: 12px;
-  padding: 5px 10px;
-  white-space: nowrap;
-}
-
-.sidebar-footer-server {
-  font-size: 12px;
+  min-width: 0;
   padding: 5px 10px;
   white-space: nowrap;
 }
@@ -662,6 +656,103 @@ body {
   display: flex;
   flex: 1;
   gap: 6px;
+}
+
+.settings-dialog-backdrop {
+  align-items: center;
+  background: rgba(2, 6, 23, 0.66);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 50;
+}
+
+.settings-dialog {
+  background: rgba(10, 17, 32, 0.98);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  display: flex;
+  flex-direction: column;
+  max-height: min(680px, calc(100svh - 48px));
+  max-width: 520px;
+  min-width: 0;
+  overflow: hidden;
+  width: min(520px, calc(100vw - 48px));
+}
+
+.settings-dialog-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-0);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+.settings-dialog-eyebrow {
+  color: var(--green-0);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+}
+
+.settings-dialog-title {
+  font-size: 20px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.settings-dialog-close {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.settings-dialog-body {
+  display: grid;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+}
+
+.settings-dialog-section {
+  border: 1px solid var(--border-0);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.settings-dialog-section-title {
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.settings-dialog-action {
+  justify-self: start;
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
+.settings-language-switcher {
+  flex: none;
+  width: 100%;
+}
+
+.settings-language-switcher .btn-ghost {
+  flex: 1;
+  min-width: 0;
 }
 
 .channel-loading {
@@ -1160,11 +1251,28 @@ body {
     gap: 8px;
   }
 
-  .sidebar-footer-signout,
-  .sidebar-footer-server {
+  .sidebar-footer-settings {
     font-size: 13px;
     min-height: 40px;
     padding: 8px 14px;
+  }
+
+  .settings-dialog-backdrop {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .settings-dialog {
+    max-height: calc(100svh - 88px);
+    width: calc(100vw - 24px);
+  }
+
+  .settings-dialog-header {
+    padding: 14px 14px;
+  }
+
+  .settings-dialog-body {
+    padding: 12px 14px 16px;
   }
 
   .language-switcher {
@@ -1360,8 +1468,7 @@ body {
     padding: 4px 8px;
   }
 
-  .sidebar-footer-signout,
-  .sidebar-footer-server {
+  .sidebar-footer-settings {
     font-size: 12px;
     padding: 4px 10px;
   }
@@ -1556,10 +1663,6 @@ body {
   display: grid;
   gap: 8px;
   min-width: 0;
-}
-
-.sidebar-voice-idle .voice-device-controls {
-  margin: 0 12px 8px;
 }
 
 .voice-device-field {

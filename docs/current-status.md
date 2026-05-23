@@ -48,6 +48,18 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-23 Baker Desktop Settings Dialog Migration
+
+- replaced the desktop/sidebar footer language-switch position with a single settings entry point
+- moved microphone selector, speaker selector, language switching, server switching, and sign-out into a shared settings dialog with backdrop click, Escape, and close-button dismissal
+- kept active voice mic/playback volume sliders in the voice panel, while removing device dropdowns from the idle voice sidebar and joined/error voice panel surfaces
+- preserved the existing local persistence keys for language and audio device selection, and kept Desktop server switching wired through the existing `onChangeServer` flow
+- updated Playwright smoke scripts to use the settings dialog for logout and mobile/sidebar measurement paths
+- validated with real app checks on 2026-05-23:
+  - built and launched the real Electron desktop app against the local Baker services
+  - connected to `localhost`, registered/logged in, confirmed the sidebar footer only exposes Settings, confirmed the dialog renders the microphone/speaker selectors and language controls, confirmed Escape dismissal, confirmed settings sign-out returns to login, and confirmed settings server-switch returns to the desktop server connection screen
+  - `scripts/auth-smoke.mjs`, `scripts/mobile-audit.mjs`, and `scripts/voice-ui-smoke.mjs` all passed against the local running app
+
 ### 2026-05-19 Server-Wide P2P / SFU Media Mode Switch
 
 - added the admin-controlled server media mode setting with `p2p` as the default and `sfu` as the built-in backend mode for both voice and livestream media
@@ -504,9 +516,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 Latest full validation run:
 
-- `pnpm typecheck` pass
-- `pnpm lint` pass
-- `pnpm test` pass (112 tests)
+- `pnpm --recursive --workspace-concurrency=1 run typecheck` pass
+- `pnpm --recursive --workspace-concurrency=1 run lint` pass
+- `pnpm test` pass (128 tests)
+- `pnpm --filter @baker/desktop build` pass
+- desktop settings smoke pass in the real Electron app against local Baker services
+- Playwright smoke pass:
+  - `node scripts/auth-smoke.mjs`
+  - `node scripts/mobile-audit.mjs`
+  - `node scripts/voice-ui-smoke.mjs`
 - `pnpm turbo run build --filter=@baker/api --filter=@baker/gateway --filter=@baker/media --filter=@baker/web --filter=@baker/admin` pass
 - real Chrome SFU smoke validation pass:
   - admin media mode switch to SFU
@@ -537,7 +555,7 @@ Open-source publication prep validation:
 - SFU mode is built in, but remains single-node and does not include recording, transcoding, HLS, or simulcast
 - voice and stream rooms are in-memory only, so multi-instance support is deferred
 - P2P remains the default media mode and safest fallback deployment path
-- desktop/Electron is still not validated end-to-end
+- desktop/Electron settings and auth/server-switch flows are validated; installer/update distribution remains outside this validation pass
 - admin-configured web/app ports are persisted and surfaced through the API/control panel, but changing them does not hot-restart services automatically
 - channel `voiceQuality` is stored and manageable from the control panel, but it is not yet wired into actual voice media quality controls
 - the admin panel still uses one shared management password rather than per-admin identities or RBAC
@@ -548,7 +566,7 @@ Open-source publication prep validation:
 - cookie-based refresh-token storage if/when the product is ready to tighten browser session handling further
 - TURN / SFU media-adapter hardening beyond the current internal-secret gate
 - explicit guild/channel lifecycle beyond the current shared starter workspace
-- Desktop shell end-to-end validation
+- Desktop installer/update validation beyond the current real-app settings/auth/server-switch smoke
 
 ## Next Recommendation
 

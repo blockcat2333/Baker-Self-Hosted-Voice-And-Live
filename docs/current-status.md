@@ -48,6 +48,21 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-25 Baker Desktop 1.0.5a Livestream Video Hotfix
+
+- released desktop client iteration `1.0.5a` for the Electron screen-livestream video path
+- fixed the desktop-only livestream regression where starting a screen share could publish audio without video
+- root cause: Electron 33 rejects mixed screen-capture constraints that combine standard video constraints with Chromium legacy `mandatory` desktop-capture fields
+- desktop now injects a narrowly scoped renderer-side media patch that sanitizes only Electron desktop screen-capture requests, leaves normal camera/microphone requests untouched, and fails fast instead of publishing an audio-only desktop stream if no live video track is available
+- validation completed:
+  - `pnpm exec vitest run apps/desktop`
+  - `pnpm --filter @baker/desktop typecheck`
+  - `pnpm --filter @baker/desktop lint`
+  - `pnpm --filter @baker/desktop build`
+  - real Electron capture smoke returned a live `1280x720` screen video track
+  - desktop publisher -> web viewer E2E returned live `1280x720` video in both the desktop local preview and the web popup viewer
+- scope note: no web or server code was changed for this hotfix
+
 ### 2026-05-25 Baker 1.0.5 Control Panel Update Release
 
 - added admin-panel one-click server updates backed by Docker Hub tags and a Docker Engine update helper

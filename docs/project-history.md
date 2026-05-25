@@ -1,5 +1,24 @@
 # Project History
 
+## 2026-05-25
+
+### Baker Desktop 1.0.5a livestream video hotfix
+
+What changed:
+
+- added a desktop-only Electron media capture patch for screen livestream publishing
+- the patch sanitizes Electron desktop capture requests before `getUserMedia`, keeping only the Chromium legacy `mandatory` desktop source constraints that Electron accepts
+- normal camera and microphone capture requests continue to pass through unchanged
+- if a desktop screen capture returns audio but no live video track, desktop retries video-only capture and merges the audio track back in; if video still cannot be obtained, publishing fails instead of starting an audio-only livestream
+- bumped the desktop client release label to `1.0.5a`
+
+Why:
+
+- Electron 33 rejects the previous mixed desktop capture constraints as malformed because they combine standard video constraints with `mandatory` desktop capture fields
+- the user-visible failure was desktop livestreams starting with sound but no picture, while the web and server runtime paths were already working
+- validation used the built desktop app, real Electron screen capture, and a desktop publisher to web viewer E2E run that confirmed live `1280x720` video on both sides
+- this fix is intentionally desktop-only and does not change the web client or server services
+
 ## 2026-05-23
 
 ### Baker Desktop settings dialog migration

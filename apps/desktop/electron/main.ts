@@ -5,6 +5,8 @@ import fs from 'node:fs/promises';
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell } from 'electron';
 import { NsisUpdater } from 'electron-updater';
 
+import { desktopMediaCapturePatchScript, isDesktopMediaPermissionAllowed } from './desktop-media';
+
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const releaseBaseUrl =
   'https://github.com/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases/download';
@@ -136,15 +138,23 @@ function createUpdater(serverVersion: string) {
 }
 
 function configurePermissions() {
-  const allowedPermissions = new Set(['display-capture', 'fullscreen', 'media', 'speaker-selection']);
-
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(allowedPermissions.has(permission));
+    callback(isDesktopMediaPermissionAllowed(permission));
   });
 
   session.defaultSession.setPermissionCheckHandler((_webContents, permission) =>
-    allowedPermissions.has(permission),
+    isDesktopMediaPermissionAllowed(permission),
   );
+}
+
+function installDesktopMediaCapturePatch(window: BrowserWindow) {
+  window.webContents.on('dom-ready', () => {
+    void window.webContents
+      .executeJavaScript(desktopMediaCapturePatchScript, true)
+      .catch((error) => {
+        void writeLog('screen-capture', 'Failed to install desktop media capture patch.', error);
+      });
+  });
 }
 
 function getScreenSourceLabel(source: Electron.DesktopCapturerSource, index: number) {
@@ -217,6 +227,8 @@ async function createWindow() {
     },
     width: 1400,
   });
+
+  installDesktopMediaCapturePatch(window);
 
   window.webContents.setWindowOpenHandler(() => ({
     action: 'allow',

@@ -27,7 +27,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: `1.0.5`
+- Release line: server `1.0.5`; desktop client `1.0.5a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -202,7 +202,7 @@ Then open the admin panel and switch **Server settings -> Media mode** from `p2p
 - SFU mode is single-node and does not include recording, transcoding, HLS, or simulcast yet
 - Voice and stream room runtime state is still in-memory
 - P2P remains the default and fallback deployment path
-- Desktop/Electron is present but not yet validated end-to-end
+- Desktop/Electron is present, and desktop screen livestream publishing has been validated end-to-end against the web viewer
 
 ## Monorepo Layout
 

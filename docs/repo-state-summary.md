@@ -210,6 +210,10 @@ Migration state:
   - top-level chat/sidebar composition plus server-name header and popup host mount point; mobile now uses a four-tab shell while desktop/tablet keep the multi-column layout, and the sidebar footer now opens Settings instead of rendering language/server/session controls inline
 - `packages/client/src/features/chat/SettingsDialog.tsx`
   - shared settings dialog for audio device selection, language switching, desktop server switching, and authenticated sign-out; desktop hides server switching when no `onChangeServer` callback is supplied
+- `apps/desktop/electron/desktop-media.ts`
+  - desktop-only renderer media patch for Electron screen livestream capture; sanitizes legacy desktop `mandatory` constraints, retries video-only capture when the first stream is audio-only, and prevents publishing an audio-only desktop screen stream
+- `apps/desktop/electron/desktop-media.test.ts`
+  - focused coverage for the Electron desktop media patch permission allowlist, normal media passthrough, audio+video merge retry, and no-video failure cleanup
 - `apps/media/src/app.ts`
   - media service bootstrap; internal routes no longer expose permissive CORS and now reject unauthorized callers
 - `apps/media/src/lib/internal-auth.ts`
@@ -324,7 +328,7 @@ Community and release metadata:
 - web auth tokens now persist in `sessionStorage` instead of `localStorage`
 - web login hides registration when public registration is disabled, and the main client header shows the configured server name
 - late voice joiners now receive current stream room snapshots, and voice leave reconciles same-channel stream runtime on the server even if client cleanup did not happen first
-- desktop reuses the shared client shell and its settings/auth/server-switch flows were validated in the real Electron app against local Baker services
+- desktop reuses the shared client shell; its settings/auth/server-switch flows were validated in the real Electron app, and desktop screen livestream publishing is validated through a built Electron publisher to web popup viewer E2E path
 - channel `voiceQuality` is now persisted/admin-managed, but it is not yet applied to actual live voice media behavior
 
 Temporary compatibility layer:

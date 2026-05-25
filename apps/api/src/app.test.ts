@@ -1,9 +1,14 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApiApp } from './app';
 import { createInMemoryDataAccess } from './testing/create-in-memory-data-access';
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
@@ -19,6 +24,27 @@ describe('api app', () => {
     expect(health.statusCode).toBe(200);
     expect(manifest.statusCode).toBe(200);
     expect(manifest.json().services).toHaveLength(5);
+
+    await app.close();
+  });
+
+  it('returns a client error for malformed JSON requests', async () => {
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    const response = await app.inject({
+      headers: {
+        'content-type': 'application/json',
+        'x-admin-password': 'admin',
+      },
+      method: 'POST',
+      payload: '',
+      url: '/v1/admin/deployment/apply',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().code).toBe('INVALID_PAYLOAD');
 
     await app.close();
   });
@@ -416,6 +442,66 @@ describe('api app', () => {
     expect(updateSettingsResponse.json().message).toContain('SFU');
 
     await app.close();
+  });
+
+  it('serves deployment settings and rejects apply without Docker socket access', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-deployment-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    try {
+      const settingsResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'GET',
+        url: '/v1/admin/deployment/settings',
+      });
+
+      expect(settingsResponse.statusCode).toBe(200);
+      expect(settingsResponse.json()).toMatchObject({
+        adminHostPort: 3001,
+        dockerEnabled: false,
+        pendingApply: false,
+        turnEnabled: false,
+        webHostPort: 3000,
+      });
+
+      const saveResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'PATCH',
+        payload: {
+          adminHostPort: 13001,
+          turnEnabled: true,
+          turnExternalIp: '203.0.113.10',
+          turnPassword: 'relay-secret',
+          turnUsername: 'relay',
+          webHostPort: 13000,
+        },
+        url: '/v1/admin/deployment/settings',
+      });
+
+      expect(saveResponse.statusCode).toBe(200);
+      expect(saveResponse.json()).toMatchObject({
+        adminHostPort: 13001,
+        pendingApply: true,
+        turnEnabled: true,
+        turnPasswordConfigured: true,
+        webHostPort: 13000,
+      });
+
+      const applyResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'POST',
+        url: '/v1/admin/deployment/apply',
+      });
+
+      expect(applyResponse.statusCode).toBe(409);
+    } finally {
+      await app.close();
+      await rm(tempDir, { force: true, recursive: true });
+    }
   });
 
   it('supports admin channel deletion constraints and position compaction', async () => {

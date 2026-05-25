@@ -47,6 +47,87 @@ export const AdminDeleteChannelResponseSchema = z.object({
 
 export const AdminServerSettingsSchema = PublicServerConfigSchema;
 
+export const AdminUpdateVersionSchema = z.object({
+  digest: z.string().nullable(),
+  image: z.string().min(1),
+  isLatest: z.boolean(),
+  publishedAt: z.string().datetime().nullable(),
+  releaseNotes: z.string().nullable(),
+  releaseUrl: z.string().url().nullable(),
+  tag: z.string().min(1),
+});
+
+export const AdminUpdateVersionsResponseSchema = z.object({
+  currentImage: z.string().nullable(),
+  currentVersion: z.string().min(1),
+  dockerEnabled: z.boolean(),
+  dockerStatus: z.string().nullable(),
+  repository: z.string().min(1),
+  versions: z.array(AdminUpdateVersionSchema),
+});
+
+export const AdminApplyUpdateRequestSchema = z.object({
+  tag: z.string().min(1).max(128).regex(/^[A-Za-z0-9_.-]+$/),
+});
+
+export const AdminUpdateJobStatusSchema = z.object({
+  completedAt: z.string().datetime().nullable(),
+  error: z.string().nullable(),
+  jobId: z.string().nullable(),
+  message: z.string().min(1),
+  phase: z.string().min(1),
+  startedAt: z.string().datetime().nullable(),
+  status: z.enum(['idle', 'running', 'succeeded', 'failed']),
+  targetImage: z.string().nullable(),
+  targetTag: z.string().nullable(),
+  updatedAt: z.string().datetime(),
+});
+
+export const AdminDeploymentSettingsSchema = z.object({
+  adminHostPort: z.number().int().min(1).max(65535),
+  allowedHosts: z.string(),
+  currentContainerName: z.string().nullable(),
+  currentImage: z.string().nullable(),
+  dockerEnabled: z.boolean(),
+  dockerStatus: z.string().nullable(),
+  pendingApply: z.boolean(),
+  sfuAnnouncedIp: z.string(),
+  sfuEnableTcp: z.boolean(),
+  sfuRtcMaxPort: z.number().int().min(1).max(65535),
+  sfuRtcMinPort: z.number().int().min(1).max(65535),
+  stunUrls: z.string(),
+  turnEnabled: z.boolean(),
+  turnExternalIp: z.string(),
+  turnMaxPort: z.number().int().min(1).max(65535),
+  turnMinPort: z.number().int().min(1).max(65535),
+  turnPasswordConfigured: z.boolean(),
+  turnPort: z.number().int().min(1).max(65535),
+  turnRealm: z.string(),
+  turnUrls: z.string(),
+  turnUsername: z.string(),
+  webHostPort: z.number().int().min(1).max(65535),
+});
+
+export const AdminUpdateDeploymentSettingsRequestSchema = z.object({
+  adminHostPort: z.number().int().min(1).max(65535).optional(),
+  allowedHosts: z.string().max(1000).optional(),
+  sfuAnnouncedIp: z.string().max(255).optional(),
+  sfuEnableTcp: z.boolean().optional(),
+  sfuRtcMaxPort: z.number().int().min(1).max(65535).optional(),
+  sfuRtcMinPort: z.number().int().min(1).max(65535).optional(),
+  stunUrls: z.string().max(2000).optional(),
+  turnEnabled: z.boolean().optional(),
+  turnExternalIp: z.string().max(255).optional(),
+  turnMaxPort: z.number().int().min(1).max(65535).optional(),
+  turnMinPort: z.number().int().min(1).max(65535).optional(),
+  turnPassword: z.string().max(256).optional(),
+  turnPort: z.number().int().min(1).max(65535).optional(),
+  turnRealm: z.string().max(255).optional(),
+  turnUrls: z.string().max(2000).optional(),
+  turnUsername: z.string().max(255).optional(),
+  webHostPort: z.number().int().min(1).max(65535).optional(),
+});
+
 export const AdminWorkspaceStateSchema = z.object({
   channels: z.array(ChannelSummarySchema),
   guildId: z.string().uuid().nullable(),
@@ -85,6 +166,12 @@ export type AdminVerifyPasswordRequest = z.infer<typeof AdminVerifyPasswordReque
 export type AdminVerifyPasswordResponse = z.infer<typeof AdminVerifyPasswordResponseSchema>;
 export type AdminDeleteChannelResponse = z.infer<typeof AdminDeleteChannelResponseSchema>;
 export type AdminServerSettings = z.infer<typeof AdminServerSettingsSchema>;
+export type AdminUpdateVersion = z.infer<typeof AdminUpdateVersionSchema>;
+export type AdminUpdateVersionsResponse = z.infer<typeof AdminUpdateVersionsResponseSchema>;
+export type AdminApplyUpdateRequest = z.infer<typeof AdminApplyUpdateRequestSchema>;
+export type AdminUpdateJobStatus = z.infer<typeof AdminUpdateJobStatusSchema>;
+export type AdminDeploymentSettings = z.infer<typeof AdminDeploymentSettingsSchema>;
+export type AdminUpdateDeploymentSettingsRequest = z.infer<typeof AdminUpdateDeploymentSettingsRequestSchema>;
 export type AdminWorkspaceState = z.infer<typeof AdminWorkspaceStateSchema>;
 export type AdminUpdateSettingsRequest = z.infer<typeof AdminUpdateSettingsRequestSchema>;
 export type AdminCreateChannelRequest = z.infer<typeof AdminCreateChannelRequestSchema>;

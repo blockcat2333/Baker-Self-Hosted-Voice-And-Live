@@ -3,9 +3,14 @@ import {
   AdminDeleteChannelResponseSchema,
   AdminCreateUserPayloadSchema,
   AdminCreateUserResponseSchema,
+  AdminApplyUpdateRequestSchema,
+  AdminDeploymentSettingsSchema,
   AdminServerSettingsSchema,
+  AdminUpdateDeploymentSettingsRequestSchema,
   AdminUpdateChannelRequestSchema,
+  AdminUpdateJobStatusSchema,
   AdminUpdateSettingsRequestSchema,
+  AdminUpdateVersionsResponseSchema,
   AdminVerifyPasswordRequestSchema,
   AdminVerifyPasswordResponseSchema,
   AdminWorkspaceStateSchema,
@@ -14,12 +19,30 @@ import {
   PublicServerConfigSchema,
 } from '@baker/protocol';
 import type { DatabaseAccess } from '@baker/db';
-import { parseAppEnv } from '@baker/shared';
+import { BAKER_VERSION, parseAppEnv } from '@baker/shared';
 
 import { ApiError } from '../lib/api-error';
+import {
+  BAKER_IMAGE_REPOSITORY,
+  createDockerEngineClient,
+  readContainerHostPort,
+  type DockerInspectResponse,
+} from '../lib/docker-control';
 import { DEFAULT_WORKSPACE_SLUG, ensureNewUserJoinsDefaultWorkspace } from '../lib/default-workspace';
 import { hashPassword } from '../lib/password';
+import {
+  readDeploymentPendingMarker,
+  readDeploymentRuntimeSettings,
+  updateDeploymentRuntimeSettings,
+  type DeploymentRuntimeSettings,
+} from '../lib/runtime-config';
 import { getOrCreateServerSettings, syncWorkspaceServerName, verifyAdminPassword } from '../lib/server-settings';
+import { listBakerUpdateVersions } from '../lib/update-versions';
+import {
+  readUpdateStatus,
+  writeFailedUpdateStatus,
+  writeStartingUpdateStatus,
+} from '../lib/update-status';
 
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -145,6 +168,87 @@ async function assertSfuAvailable() {
   }
 }
 
+function assertValidDeploymentSettings(settings: DeploymentRuntimeSettings) {
+  if (settings.turnMinPort > settings.turnMaxPort) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'TURN relay minimum port must be less than or equal to the maximum port.');
+  }
+  if (settings.sfuRtcMinPort > settings.sfuRtcMaxPort) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'SFU RTC minimum port must be less than or equal to the maximum port.');
+  }
+  if (settings.turnEnabled && !settings.turnUrls && !settings.turnExternalIp) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'TURN requires TURN URLs or an external IP.');
+  }
+  if (settings.turnEnabled && (!settings.turnUsername || !settings.turnPasswordConfigured)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'TURN requires a username and password.');
+  }
+}
+
+function imageTagFromImage(image: string | null) {
+  if (!image) {
+    return BAKER_VERSION;
+  }
+  const marker = `${BAKER_IMAGE_REPOSITORY}:`;
+  if (image.startsWith(marker)) {
+    return image.slice(marker.length) || BAKER_VERSION;
+  }
+  const tag = image.split(':').at(-1);
+  return tag && !tag.includes('/') ? tag : BAKER_VERSION;
+}
+
+function resolveContainerHostPorts(
+  settings: DeploymentRuntimeSettings,
+  inspect: DockerInspectResponse | null,
+  pendingChangedKeys: Set<string>,
+) {
+  const webHostPort = pendingChangedKeys.has('webHostPort')
+    ? settings.webHostPort
+    : (readContainerHostPort(inspect, 80) ?? settings.webHostPort);
+  const adminHostPort = pendingChangedKeys.has('adminHostPort')
+    ? settings.adminHostPort
+    : (readContainerHostPort(inspect, 8080) ?? settings.adminHostPort);
+
+  return {
+    ...settings,
+    adminHostPort,
+    webHostPort,
+  };
+}
+
+function currentContainerHostPortSettings(
+  settings: DeploymentRuntimeSettings,
+  inspect: DockerInspectResponse | null,
+) {
+  return {
+    ...settings,
+    adminHostPort: readContainerHostPort(inspect, 8080) ?? settings.adminHostPort,
+    webHostPort: readContainerHostPort(inspect, 80) ?? settings.webHostPort,
+  };
+}
+
+async function getAdminDeploymentSettings() {
+  const docker = createDockerEngineClient();
+  const [dockerEnabled, dockerStatus, runtimeSettings, pendingMarker] = await Promise.all([
+    docker.isAvailable(),
+    docker.getStatusMessage(),
+    readDeploymentRuntimeSettings(),
+    readDeploymentPendingMarker(),
+  ]);
+  const inspect = dockerEnabled ? await docker.inspectCurrentContainer() : null;
+  const resolvedSettings = dockerEnabled
+    ? resolveContainerHostPorts(runtimeSettings, inspect, new Set(pendingMarker?.changedKeys ?? []))
+    : runtimeSettings;
+
+  return AdminDeploymentSettingsSchema.parse({
+    ...resolvedSettings,
+    currentContainerName: inspect?.Name ? inspect.Name.replace(/^\//, '') : null,
+    currentImage: inspect?.Config?.Image ?? null,
+    dockerEnabled,
+    pendingApply: pendingMarker?.pendingApply === true,
+    ...(dockerEnabled ? {} : { currentContainerName: null, currentImage: null }),
+    dockerStatus,
+  });
+}
+
 export function registerSystemRoutes(app: SystemRoutesApp) {
   app.get('/v1/meta/public-config', async () => {
     const settings = await getOrCreateServerSettings(app.dataAccess);
@@ -235,6 +339,133 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
       webEnabled: nextSettings.webEnabled,
       webPort: nextSettings.webPort,
     });
+  });
+
+  app.get('/v1/admin/updates/versions', async (request) => {
+    await requireAdmin(app, request);
+    const docker = createDockerEngineClient();
+    const [dockerEnabled, dockerStatus, containerInfo, versions] = await Promise.all([
+      docker.isAvailable(),
+      docker.getStatusMessage(),
+      docker.getCurrentContainerInfo(),
+      listBakerUpdateVersions(),
+    ]);
+
+    return AdminUpdateVersionsResponseSchema.parse({
+      currentImage: containerInfo.currentImage,
+      currentVersion: BAKER_VERSION,
+      dockerEnabled,
+      dockerStatus,
+      repository: BAKER_IMAGE_REPOSITORY,
+      versions,
+    });
+  });
+
+  app.get('/v1/admin/updates/status', async (request) => {
+    await requireAdmin(app, request);
+    return AdminUpdateJobStatusSchema.parse(await readUpdateStatus());
+  });
+
+  app.post('/v1/admin/updates/apply', async (request) => {
+    await requireAdmin(app, request);
+    const input = AdminApplyUpdateRequestSchema.parse(request.body);
+    const docker = createDockerEngineClient();
+    if (!(await docker.isAvailable())) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Docker socket is not mounted; one-click update is unavailable.');
+    }
+
+    const [runtimeSettings, pendingMarker, inspect] = await Promise.all([
+      readDeploymentRuntimeSettings(),
+      readDeploymentPendingMarker(),
+      docker.inspectCurrentContainer(),
+    ]);
+    const settings = resolveContainerHostPorts(
+      runtimeSettings,
+      inspect,
+      new Set(pendingMarker?.changedKeys ?? []),
+    );
+    assertValidDeploymentSettings(settings);
+    const targetImage = `${BAKER_IMAGE_REPOSITORY}:${input.tag}`;
+
+    try {
+      const started = await docker.startUpdateHelper({
+        desiredSettings: settings,
+        previousSettings: currentContainerHostPortSettings(runtimeSettings, inspect),
+        pullPolicy: 'always',
+        targetImage,
+        targetTag: input.tag,
+      });
+      return AdminUpdateJobStatusSchema.parse(await writeStartingUpdateStatus(started));
+    } catch (err) {
+      const failed = await writeFailedUpdateStatus({
+        error: err instanceof Error ? err.message : String(err),
+        targetImage,
+        targetTag: input.tag,
+      });
+      return AdminUpdateJobStatusSchema.parse(failed);
+    }
+  });
+
+  app.get('/v1/admin/deployment/settings', async (request) => {
+    await requireAdmin(app, request);
+    return getAdminDeploymentSettings();
+  });
+
+  app.patch('/v1/admin/deployment/settings', async (request) => {
+    await requireAdmin(app, request);
+    const input = AdminUpdateDeploymentSettingsRequestSchema.parse(request.body);
+    const current = await readDeploymentRuntimeSettings();
+    const next = {
+      ...current,
+      ...input,
+      turnPasswordConfigured: input.turnPassword !== undefined
+        ? input.turnPassword.length > 0
+        : current.turnPasswordConfigured,
+    };
+    assertValidDeploymentSettings(next);
+    await updateDeploymentRuntimeSettings(input);
+    return getAdminDeploymentSettings();
+  });
+
+  app.post('/v1/admin/deployment/apply', async (request) => {
+    await requireAdmin(app, request);
+    const docker = createDockerEngineClient();
+    if (!(await docker.isAvailable())) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Docker socket is not mounted; deployment apply is unavailable.');
+    }
+
+    const [runtimeSettings, pendingMarker, inspect] = await Promise.all([
+      readDeploymentRuntimeSettings(),
+      readDeploymentPendingMarker(),
+      docker.inspectCurrentContainer(),
+    ]);
+    const desiredSettings = resolveContainerHostPorts(
+      runtimeSettings,
+      inspect,
+      new Set(pendingMarker?.changedKeys ?? []),
+    );
+    const previousSettings = currentContainerHostPortSettings(runtimeSettings, inspect);
+    assertValidDeploymentSettings(desiredSettings);
+    const targetImage = inspect?.Config?.Image ?? `${BAKER_IMAGE_REPOSITORY}:${BAKER_VERSION}`;
+    const targetTag = imageTagFromImage(targetImage);
+
+    try {
+      const started = await docker.startUpdateHelper({
+        desiredSettings,
+        previousSettings,
+        pullPolicy: 'never',
+        targetImage,
+        targetTag,
+      });
+      return AdminUpdateJobStatusSchema.parse(await writeStartingUpdateStatus(started));
+    } catch (err) {
+      const failed = await writeFailedUpdateStatus({
+        error: err instanceof Error ? err.message : String(err),
+        targetImage,
+        targetTag,
+      });
+      return AdminUpdateJobStatusSchema.parse(failed);
+    }
   });
 
   app.get('/v1/admin/workspace', async (request) => {

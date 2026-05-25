@@ -25,6 +25,17 @@ export function sendError(reply: FastifyReply, error: ApiError) {
   );
 }
 
+function isClientHttpError(error: unknown): error is { message?: string; statusCode: number } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'statusCode' in error &&
+    typeof error.statusCode === 'number' &&
+    error.statusCode >= 400 &&
+    error.statusCode < 500
+  );
+}
+
 export function handleApiError(error: unknown, request: FastifyRequest, reply: FastifyReply) {
   if (error instanceof ApiError) {
     return sendError(reply, error);
@@ -36,6 +47,15 @@ export function handleApiError(error: unknown, request: FastifyRequest, reply: F
         code: 'VALIDATION_ERROR',
         details: error.flatten(),
         message: 'Request validation failed.',
+      }),
+    );
+  }
+
+  if (isClientHttpError(error)) {
+    return reply.status(error.statusCode).send(
+      ErrorResponseSchema.parse({
+        code: 'INVALID_PAYLOAD',
+        message: error.message || 'Invalid request payload.',
       }),
     );
   }

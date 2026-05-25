@@ -139,6 +139,16 @@ select {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.admin-inline-grid--wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .admin-checkbox-row {
   display: grid;
   gap: 8px;
@@ -204,6 +214,34 @@ select {
   font-size: 13px;
 }
 
+.admin-section-header {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.admin-pending-badge {
+  background: rgba(251, 191, 36, 0.16);
+  border: 1px solid rgba(251, 191, 36, 0.42);
+  border-radius: 999px;
+  color: #fde68a;
+  font-size: 12px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.admin-status {
+  background: rgba(2, 6, 23, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 12px;
+  color: #cbd5e1;
+  display: grid;
+  font-size: 13px;
+  gap: 5px;
+  padding: 10px;
+}
+
 .admin-channel-list {
   display: grid;
   gap: 12px;
@@ -266,7 +304,13 @@ select {
   }
 
   .admin-inline-grid,
+  .admin-inline-grid--wide,
   .admin-channel-fields {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-section-header {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

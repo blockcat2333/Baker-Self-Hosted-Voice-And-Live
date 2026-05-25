@@ -10,15 +10,15 @@ set -eu
 
 export BAKER_RUNTIME_DIR
 
-if ! is_true "$TURN_ENABLED"; then
-  echo "[Init] TURN relay disabled"
-  exit 0
-fi
-
 capture_turn_runtime_overrides
 load_runtime_env
 apply_turn_runtime_overrides
 default_turn_urls_if_needed
+
+if ! is_true "$TURN_ENABLED"; then
+  echo "[Init] TURN relay disabled"
+  exit 0
+fi
 
 if [ -z "${TURN_USERNAME:-}" ] || [ -z "${TURN_PASSWORD:-}" ]; then
   echo "TURN_ENABLED=true requires TURN_USERNAME and TURN_PASSWORD." >&2

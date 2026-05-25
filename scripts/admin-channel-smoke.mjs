@@ -153,13 +153,27 @@ async function waitForChannelRowGone(page, channelName, timeoutMs = 20_000) {
   throw new Error(`Timed out waiting for channel row "${channelName}" to disappear.`);
 }
 
+async function adminCardByHeading(page, headings) {
+  const cards = page.locator('.admin-card');
+  const count = await cards.count();
+  for (let index = 0; index < count; index += 1) {
+    const card = cards.nth(index);
+    const heading = await card.locator('h2').first().textContent().catch(() => null);
+    if (heading && headings.includes(heading.trim())) {
+      return card;
+    }
+  }
+
+  throw new Error(`Could not find admin card with heading: ${headings.join(' / ')}`);
+}
+
 async function ensureWorkspaceExists(page) {
   const rows = page.locator('.admin-channel-row');
   if ((await rows.count()) > 0) {
     return;
   }
 
-  const userCard = page.locator('.admin-card').nth(1);
+  const userCard = await adminCardByHeading(page, ['Create User', '创建用户']);
   const suffix = uniqueSuffix();
   const inputs = userCard.locator('input');
 
@@ -190,7 +204,7 @@ async function loginAdmin(page) {
 }
 
 async function createChannel(page, name, type, voiceQuality = 'standard') {
-  const createChannelCard = page.locator('.admin-card').nth(2);
+  const createChannelCard = await adminCardByHeading(page, ['Create Channel', '创建频道']);
   await createChannelCard.locator('input').first().fill(name);
   const selects = createChannelCard.locator('select');
   await selects.nth(0).selectOption(type);
@@ -267,11 +281,11 @@ async function run() {
   const textRows = channelSummary.filter((item) => item.type === 'text');
   const voiceRows = channelSummary.filter((item) => item.type === 'voice');
 
-  if (!textRows.some((item) => item.deleteDisabled)) {
+  if (textRows.length === 1 && !textRows.some((item) => item.deleteDisabled)) {
     throw new Error('Expected the last remaining text channel delete action to be disabled.');
   }
 
-  if (!voiceRows.some((item) => item.deleteDisabled)) {
+  if (voiceRows.length === 1 && !voiceRows.some((item) => item.deleteDisabled)) {
     throw new Error('Expected the last remaining voice channel delete action to be disabled.');
   }
 

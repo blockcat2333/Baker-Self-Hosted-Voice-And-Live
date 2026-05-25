@@ -48,6 +48,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-25 Baker 1.0.5 Control Panel Update Release
+
+- added admin-panel one-click server updates backed by Docker Hub tags and a Docker Engine update helper
+- added admin deployment settings for Web/Admin host ports, allowed hosts, STUN, TURN, and SFU runtime settings that previously required Docker argument changes
+- persisted managed runtime settings in `/var/lib/baker/runtime/runtime.env`, including `TURN_ENABLED`, while keeping secrets and service data under the same Baker data volume
+- updated all-in-one Docker runtime docs to recommend mounting `/var/run/docker.sock` when one-click updates or deployment-setting applies are needed
+- validated the Docker update path with local registry tags, data retention, managed port remapping, helper cleanup, no-socket fallback behavior, and failed-image rollback
+- release version: server `1.0.5`; client release labels start at `1.0.5a` and advance by letter for client-only updates
+
 ### 2026-05-23 Baker Desktop Settings Dialog Migration
 
 - replaced the desktop/sidebar footer language-switch position with a single settings entry point

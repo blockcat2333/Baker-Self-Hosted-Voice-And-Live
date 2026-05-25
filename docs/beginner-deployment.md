@@ -39,7 +39,8 @@ docker run -d \
   -p 3000:80 \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.3
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  blockcat233/baker:1.0.5
 ```
 
 4. Read the first admin password:
@@ -57,8 +58,9 @@ docker logs baker
 
 1. Open the admin page and sign in with the password from `docker logs baker`.
 2. Review the server name, registration policy, and other instance settings.
-3. Open the main web app and create the first user account.
-4. Create a second test account or ask one friend to join before you test voice and livestream.
+3. Keep the Docker socket mount if you want the admin panel to perform one-click updates later.
+4. Open the main web app and create the first user account.
+5. Create a second test account or ask one friend to join before you test voice and livestream.
 
 ## When You Must Use HTTPS
 
@@ -105,7 +107,8 @@ docker run -d \
   -p 50000-50100:50000-50100/tcp \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.3
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  blockcat233/baker:1.0.5
 ```
 
 Then open the admin panel and change **Server settings -> Media mode** to `sfu`. Existing voice and livestream sessions reconnect immediately in the new mode, while text chat remains connected.
@@ -126,7 +129,8 @@ docker run -d \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.3
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  blockcat233/baker:1.0.5
 ```
 
 You still need to place HTTPS in front of the web app for real users.
@@ -166,12 +170,12 @@ Treat it the same way as the voice issue above. Livestream watching also needs a
 
 ## Upgrading Later
 
-If you keep the same Docker volume, you can recreate the container without losing your data.
+If you keep the same Docker volume, you can recreate the container without losing your data. Newer Baker versions can also update from the admin panel when `/var/run/docker.sock` is mounted.
 
 Typical upgrade flow:
 
 ```bash
-docker pull blockcat233/baker:1.0.3
+docker pull blockcat233/baker:1.0.5
 docker rm -f baker
 ```
 

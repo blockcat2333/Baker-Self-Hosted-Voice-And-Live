@@ -25,12 +25,19 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 当前状态
 
-- 当前发布线：`1.0.3`
+- 当前发布线：`1.0.5`
 - 当前已经完成并验证到 Milestone 5 的稳定性与部署加固阶段
 - 单仓库包含 Web、桌面壳层、管理后台、API、Gateway 和 Media 边界服务
 - 已实现认证、聊天、在线状态、语音、直播信令、弹窗观看和服务端设置
 - `blockcat233/baker` 现在是唯一官方支持的公开部署镜像
 - 标准校验流程为 `pnpm typecheck`、`pnpm lint`、`pnpm test`
+
+## 版本规则
+
+- 服务端发布使用纯数字版本号，例如 `1.0.5`，Docker 镜像为 `blockcat233/baker:1.0.5`。
+- 客户端发布标签使用服务端版本号加一个字母，从 `a` 开始，例如 `1.0.5a`、`1.0.5b`。
+- 只更新客户端时递增末尾字母；服务端大版本更新时递增数字版本，并把客户端字母重置为 `a`。
+- 仓库包元数据仍保持 semver 兼容；带字母的客户端标签用于客户端发布说明和客户端构建产物。
 
 ## 如果你是新手，请先看这里
 
@@ -54,7 +61,8 @@ docker run -d \
   -p 3000:80 \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.3
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  blockcat233/baker:1.0.5
 
 docker logs baker
 ```
@@ -66,13 +74,27 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
-如果你想始终跟随最新滚动版本，也可以把 `1.0.3` 换成 `latest`。
+如果你想始终跟随最新滚动版本，也可以把 `1.0.5` 换成 `latest`。
+
+`/var/run/docker.sock` 挂载只用于管理后台的一键更新和部署设置应用。没有这个挂载时，Baker 仍然可以正常运行，但更新需要在 Docker 宿主机上手动执行。
+
+## 管理后台一键更新
+
+挂载 `/var/run/docker.sock` 后，管理后台可以：
+
+- 从 Docker Hub 获取可用的 Baker 镜像 tag
+- 用当前镜像启动独立更新 helper 容器
+- 拉取管理员选择的目标镜像
+- 重建 Baker 容器，同时保留 `/var/lib/baker` 数据卷、容器名、重启策略和受管理的端口映射
+- 如果新容器健康检查失败，自动回滚到旧容器
+
+管理后台也提供了精选部署设置，不再需要手动改 Docker 参数：Web/Admin 宿主机端口、允许的 Host、STUN 地址、TURN 开关和中继端口、TURN 凭据、SFU 公网 IP、SFU RTC 端口范围。密码字段只允许写入，API 不会回显明文。
 
 ### Docker Desktop 图形界面填写示例
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
 
-- 镜像：`blockcat233/baker:1.0.3`
+- 镜像：`blockcat233/baker:1.0.5`
 - 容器名：`baker` 或 `baker-test`
 - 端口：
   - 宿主机 `3000` -> 容器 `80/tcp`
@@ -84,6 +106,9 @@ docker logs baker
 - 数据卷：
   - source / volume name：`baker-data`
   - container path：`/var/lib/baker`
+- 一键更新所需的可选绑定挂载：
+  - source：`/var/run/docker.sock`
+  - container path：`/var/run/docker.sock`
 - 环境变量：本地默认体验时先全部留空
 
 示例截图：
@@ -129,7 +154,8 @@ docker run -d \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.3
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  blockcat233/baker:1.0.5
 ```
 
 如果没有显式设置 `TURN_URLS`，Baker 会根据 `TURN_EXTERNAL_IP` 和 `TURN_PORT` 自动生成；如果你希望客户端拿到固定域名形式的 TURN 地址，也可以自己显式设置 `TURN_URLS`。
@@ -157,7 +183,8 @@ docker run -d \
   -p 50000-50100:50000-50100/tcp \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
-  blockcat233/baker:1.0.3
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  blockcat233/baker:1.0.5
 ```
 
 然后进入管理后台，在“服务器设置 -> 媒体模式”里从 `p2p` 切换到 `sfu`。切换会立即重建当前语音和直播媒体会话，但不会断开文字聊天 WebSocket。如果 SFU 公网 IP 或端口范围没有配置好，管理 API 会明确拒绝切换，而不是静默退回 P2P。

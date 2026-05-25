@@ -2,13 +2,19 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
+  AdminDeploymentSettings,
   AdminServerSettings,
+  AdminUpdateJobStatus,
+  AdminUpdateVersionsResponse,
   AdminWorkspaceState,
   ChannelSummary,
 } from '@baker/protocol';
 import {
+  AdminDeploymentSettingsSchema,
   AdminDeleteChannelResponseSchema,
   AdminServerSettingsSchema,
+  AdminUpdateJobStatusSchema,
+  AdminUpdateVersionsResponseSchema,
   AdminVerifyPasswordResponseSchema,
   AdminWorkspaceStateSchema,
   AuthUserSchema,
@@ -45,6 +51,10 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<AdminServerSettings | null>(null);
   const [workspace, setWorkspace] = useState<AdminWorkspaceState | null>(null);
+  const [deployment, setDeployment] = useState<AdminDeploymentSettings | null>(null);
+  const [updateVersions, setUpdateVersions] = useState<AdminUpdateVersionsResponse | null>(null);
+  const [selectedUpdateTag, setSelectedUpdateTag] = useState('');
+  const [updateStatus, setUpdateStatus] = useState<AdminUpdateJobStatus | null>(null);
 
   const [serverName, setServerName] = useState('Baker');
   const [allowPublicRegistration, setAllowPublicRegistration] = useState(true);
@@ -53,6 +63,24 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [appPort, setAppPort] = useState('5174');
   const [mediaMode, setMediaMode] = useState<'p2p' | 'sfu'>('p2p');
   const [newAdminPassword, setNewAdminPassword] = useState('');
+
+  const [webHostPort, setWebHostPort] = useState('3000');
+  const [adminHostPort, setAdminHostPort] = useState('3001');
+  const [allowedHosts, setAllowedHosts] = useState('');
+  const [stunUrls, setStunUrls] = useState('');
+  const [turnEnabled, setTurnEnabled] = useState(false);
+  const [turnUrls, setTurnUrls] = useState('');
+  const [turnUsername, setTurnUsername] = useState('');
+  const [turnPassword, setTurnPassword] = useState('');
+  const [turnExternalIp, setTurnExternalIp] = useState('');
+  const [turnRealm, setTurnRealm] = useState('baker');
+  const [turnPort, setTurnPort] = useState('3478');
+  const [turnMinPort, setTurnMinPort] = useState('49160');
+  const [turnMaxPort, setTurnMaxPort] = useState('49200');
+  const [sfuAnnouncedIp, setSfuAnnouncedIp] = useState('');
+  const [sfuEnableTcp, setSfuEnableTcp] = useState(true);
+  const [sfuRtcMinPort, setSfuRtcMinPort] = useState('50000');
+  const [sfuRtcMaxPort, setSfuRtcMaxPort] = useState('50100');
 
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserUsername, setNewUserUsername] = useState('');
@@ -74,6 +102,26 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       ),
     [workspace],
   );
+
+  function applyDeploymentSettingsToForm(nextDeployment: AdminDeploymentSettings) {
+    setWebHostPort(String(nextDeployment.webHostPort));
+    setAdminHostPort(String(nextDeployment.adminHostPort));
+    setAllowedHosts(nextDeployment.allowedHosts);
+    setStunUrls(nextDeployment.stunUrls);
+    setTurnEnabled(nextDeployment.turnEnabled);
+    setTurnUrls(nextDeployment.turnUrls);
+    setTurnUsername(nextDeployment.turnUsername);
+    setTurnPassword('');
+    setTurnExternalIp(nextDeployment.turnExternalIp);
+    setTurnRealm(nextDeployment.turnRealm);
+    setTurnPort(String(nextDeployment.turnPort));
+    setTurnMinPort(String(nextDeployment.turnMinPort));
+    setTurnMaxPort(String(nextDeployment.turnMaxPort));
+    setSfuAnnouncedIp(nextDeployment.sfuAnnouncedIp);
+    setSfuEnableTcp(nextDeployment.sfuEnableTcp);
+    setSfuRtcMinPort(String(nextDeployment.sfuRtcMinPort));
+    setSfuRtcMaxPort(String(nextDeployment.sfuRtcMaxPort));
+  }
 
   async function request<T>(
     path: string,
@@ -119,19 +167,24 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   }
 
   async function loadDashboard() {
-    const [nextSettings, nextWorkspace] = await Promise.all([
+    const [nextSettings, nextWorkspace, nextDeployment, nextUpdateStatus] = await Promise.all([
       request('/v1/admin/settings', { method: 'GET' }, AdminServerSettingsSchema),
       request('/v1/admin/workspace', { method: 'GET' }, AdminWorkspaceStateSchema),
+      request('/v1/admin/deployment/settings', { method: 'GET' }, AdminDeploymentSettingsSchema),
+      request('/v1/admin/updates/status', { method: 'GET' }, AdminUpdateJobStatusSchema),
     ]);
 
     setSettings(nextSettings);
     setWorkspace(nextWorkspace);
+    setDeployment(nextDeployment);
+    setUpdateStatus(nextUpdateStatus);
     setServerName(nextSettings.serverName);
     setAllowPublicRegistration(nextSettings.allowPublicRegistration);
     setWebEnabled(nextSettings.webEnabled);
     setWebPort(String(nextSettings.webPort));
     setAppPort(String(nextSettings.appPort));
     setMediaMode(nextSettings.mediaMode);
+    applyDeploymentSettingsToForm(nextDeployment);
   }
 
   async function handleLogin(event: React.FormEvent) {
@@ -197,6 +250,129 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       await loadDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('admin.error_save_settings'));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleCheckVersions() {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await request(
+        '/v1/admin/updates/versions',
+        { method: 'GET' },
+        AdminUpdateVersionsResponseSchema,
+      );
+      setUpdateVersions(response);
+      setSelectedUpdateTag((current) => current || response.versions[0]?.tag || '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('admin.error_check_versions'));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function refreshUpdateStatus() {
+    const nextStatus = await request(
+      '/v1/admin/updates/status',
+      { method: 'GET' },
+      AdminUpdateJobStatusSchema,
+    );
+    setUpdateStatus(nextStatus);
+    return nextStatus;
+  }
+
+  async function handleStartUpdate() {
+    if (!selectedUpdateTag) {
+      setError(t('admin.error_select_version'));
+      return;
+    }
+
+    if (!window.confirm(t('admin.confirm_start_update', { tag: selectedUpdateTag }))) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const status = await request(
+        '/v1/admin/updates/apply',
+        {
+          body: JSON.stringify({ tag: selectedUpdateTag }),
+          method: 'POST',
+        },
+        AdminUpdateJobStatusSchema,
+      );
+      setUpdateStatus(status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('admin.error_start_update'));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleSaveDeploymentSettings(event: React.FormEvent) {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const nextDeployment = await request(
+        '/v1/admin/deployment/settings',
+        {
+          body: JSON.stringify({
+            adminHostPort: Number(adminHostPort),
+            allowedHosts,
+            sfuAnnouncedIp,
+            sfuEnableTcp,
+            sfuRtcMaxPort: Number(sfuRtcMaxPort),
+            sfuRtcMinPort: Number(sfuRtcMinPort),
+            stunUrls,
+            turnEnabled,
+            turnExternalIp,
+            turnMaxPort: Number(turnMaxPort),
+            turnMinPort: Number(turnMinPort),
+            turnPassword: turnPassword || undefined,
+            turnPort: Number(turnPort),
+            turnRealm,
+            turnUrls,
+            turnUsername,
+            webHostPort: Number(webHostPort),
+          }),
+          method: 'PATCH',
+        },
+        AdminDeploymentSettingsSchema,
+      );
+      setDeployment(nextDeployment);
+      applyDeploymentSettingsToForm(nextDeployment);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('admin.error_save_deployment'));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleApplyDeployment() {
+    if (!window.confirm(t('admin.confirm_apply_deployment'))) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const status = await request(
+        '/v1/admin/deployment/apply',
+        { method: 'POST' },
+        AdminUpdateJobStatusSchema,
+      );
+      setUpdateStatus(status);
+      await loadDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('admin.error_apply_deployment'));
     } finally {
       setIsLoading(false);
     }
@@ -438,6 +614,58 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         </section>
 
         <section className="admin-card">
+          <h2>{t('admin.server_updates')}</h2>
+          <div className="admin-meta">
+            <span>{t('admin.current_version', { version: updateVersions?.currentVersion ?? 'unknown' })}</span>
+            <span>{t('admin.current_image', { image: deployment?.currentImage ?? updateVersions?.currentImage ?? 'unknown' })}</span>
+          </div>
+          {deployment?.dockerEnabled ? null : (
+            <p className="admin-channel-hint">
+              {t('admin.docker_socket_unavailable', { status: deployment?.dockerStatus ?? updateVersions?.dockerStatus ?? '' })}
+            </p>
+          )}
+          <div className="admin-inline-actions">
+            <button type="button" className="admin-secondary-btn" onClick={() => void handleCheckVersions()} disabled={isLoading}>
+              {t('admin.check_versions')}
+            </button>
+            <button type="button" className="admin-secondary-btn" onClick={() => void refreshUpdateStatus()} disabled={isLoading}>
+              {t('admin.refresh_status')}
+            </button>
+          </div>
+          <label className="admin-field">
+            <span>{t('admin.target_version')}</span>
+            <select value={selectedUpdateTag} onChange={(event) => setSelectedUpdateTag(event.target.value)} disabled={!updateVersions}>
+              <option value="">{t('admin.target_version_placeholder')}</option>
+              {(updateVersions?.versions ?? []).map((version) => (
+                <option key={version.tag} value={version.tag}>
+                  {version.tag}{version.isLatest ? ` (${t('admin.latest_version')})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedUpdateTag ? (
+            <p className="admin-copy">
+              {updateVersions?.versions.find((version) => version.tag === selectedUpdateTag)?.image}
+            </p>
+          ) : null}
+          {updateStatus ? (
+            <div className="admin-status">
+              <span>{t('admin.update_status', { status: updateStatus.status })}</span>
+              <span>{updateStatus.phase}: {updateStatus.message}</span>
+              {updateStatus.error ? <span className="admin-error">{updateStatus.error}</span> : null}
+            </div>
+          ) : null}
+          <button
+            type="button"
+            className="admin-primary-btn"
+            onClick={() => void handleStartUpdate()}
+            disabled={isLoading || !selectedUpdateTag || deployment?.dockerEnabled === false}
+          >
+            {t('admin.start_update')}
+          </button>
+        </section>
+
+        <section className="admin-card">
           <h2>{t('admin.create_user')}</h2>
           <form className="admin-form" onSubmit={handleCreateUser}>
             <label className="admin-field">
@@ -491,6 +719,104 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
           </form>
         </section>
       </div>
+
+      <section className="admin-card admin-card--full">
+        <div className="admin-section-header">
+          <div>
+            <h2>{t('admin.deployment_settings')}</h2>
+            <p className="admin-copy">{t('admin.deployment_settings_copy')}</p>
+          </div>
+          {deployment?.pendingApply ? <span className="admin-pending-badge">{t('admin.pending_apply')}</span> : null}
+        </div>
+        <form className="admin-form" onSubmit={handleSaveDeploymentSettings}>
+          <div className="admin-inline-grid admin-inline-grid--wide">
+            <label className="admin-field">
+              <span>{t('admin.web_host_port')}</span>
+              <input type="number" min={1} max={65535} value={webHostPort} onChange={(event) => setWebHostPort(event.target.value)} required />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.admin_host_port')}</span>
+              <input type="number" min={1} max={65535} value={adminHostPort} onChange={(event) => setAdminHostPort(event.target.value)} required />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.allowed_hosts')}</span>
+              <input value={allowedHosts} onChange={(event) => setAllowedHosts(event.target.value)} placeholder={t('admin.allowed_hosts_placeholder')} />
+            </label>
+          </div>
+          <label className="admin-field">
+            <span>{t('admin.stun_urls')}</span>
+            <input value={stunUrls} onChange={(event) => setStunUrls(event.target.value)} />
+          </label>
+          <div className="admin-checkbox-row">
+            <label><input type="checkbox" checked={turnEnabled} onChange={(event) => setTurnEnabled(event.target.checked)} /> {t('admin.turn_enabled')}</label>
+            <label><input type="checkbox" checked={sfuEnableTcp} onChange={(event) => setSfuEnableTcp(event.target.checked)} /> {t('admin.sfu_enable_tcp')}</label>
+          </div>
+          <div className="admin-inline-grid admin-inline-grid--wide">
+            <label className="admin-field">
+              <span>{t('admin.turn_urls')}</span>
+              <input value={turnUrls} onChange={(event) => setTurnUrls(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_external_ip')}</span>
+              <input value={turnExternalIp} onChange={(event) => setTurnExternalIp(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_realm')}</span>
+              <input value={turnRealm} onChange={(event) => setTurnRealm(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_username')}</span>
+              <input value={turnUsername} onChange={(event) => setTurnUsername(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_password')}</span>
+              <input
+                type="password"
+                value={turnPassword}
+                onChange={(event) => setTurnPassword(event.target.value)}
+                placeholder={deployment?.turnPasswordConfigured ? t('admin.secret_configured_placeholder') : ''}
+              />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_port')}</span>
+              <input type="number" min={1} max={65535} value={turnPort} onChange={(event) => setTurnPort(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_min_port')}</span>
+              <input type="number" min={1} max={65535} value={turnMinPort} onChange={(event) => setTurnMinPort(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.turn_max_port')}</span>
+              <input type="number" min={1} max={65535} value={turnMaxPort} onChange={(event) => setTurnMaxPort(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.sfu_announced_ip')}</span>
+              <input value={sfuAnnouncedIp} onChange={(event) => setSfuAnnouncedIp(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.sfu_rtc_min_port')}</span>
+              <input type="number" min={1} max={65535} value={sfuRtcMinPort} onChange={(event) => setSfuRtcMinPort(event.target.value)} />
+            </label>
+            <label className="admin-field">
+              <span>{t('admin.sfu_rtc_max_port')}</span>
+              <input type="number" min={1} max={65535} value={sfuRtcMaxPort} onChange={(event) => setSfuRtcMaxPort(event.target.value)} />
+            </label>
+          </div>
+          <div className="admin-inline-actions">
+            <button type="submit" className="admin-primary-btn" disabled={isLoading}>
+              {t('admin.save_deployment_settings')}
+            </button>
+            <button
+              type="button"
+              className="admin-secondary-btn"
+              onClick={() => void handleApplyDeployment()}
+              disabled={isLoading || deployment?.dockerEnabled === false}
+            >
+              {t('admin.apply_deployment_settings')}
+            </button>
+          </div>
+        </form>
+      </section>
 
       <section className="admin-card admin-card--full">
         <h2>{t('admin.workspace_channels')}</h2>

@@ -99,6 +99,7 @@ COPY docker/allinone/node-service.sh /opt/baker-allinone/node-service.sh
 COPY docker/allinone/postgres.sh /opt/baker-allinone/postgres.sh
 COPY docker/allinone/redis.sh /opt/baker-allinone/redis.sh
 COPY docker/allinone/turn.sh /opt/baker-allinone/turn.sh
+COPY docker/allinone/update-helper.mjs /opt/baker-allinone/update-helper.mjs
 
 RUN sed -i 's/\r$//' \
     /opt/baker-runtime/bootstrap.sh \
@@ -112,6 +113,7 @@ RUN sed -i 's/\r$//' \
     /opt/baker-allinone/postgres.sh \
     /opt/baker-allinone/redis.sh \
     /opt/baker-allinone/turn.sh \
+    /opt/baker-allinone/update-helper.mjs \
   && chmod +x \
     /opt/baker-runtime/bootstrap.sh \
     /opt/baker-runtime/lib.sh \

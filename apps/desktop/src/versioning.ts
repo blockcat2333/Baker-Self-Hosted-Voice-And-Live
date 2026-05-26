@@ -5,7 +5,7 @@ export interface BakerVersionParts {
   patch: number;
 }
 
-const bakerVersionPattern = /^v?(\d+)\.(\d+)\.(\d+)([a-z])?(?:[-+].*)?$/;
+const bakerVersionPattern = /^v?(\d+)\.(\d+)\.(\d+)(?:-?([a-z]))?(?:[.+-].*)?$/;
 const clientReleasePattern = /^v?\d+\.\d+\.\d+[a-z](?:[-+].*)?$/;
 
 export function parseBakerVersion(version: string): BakerVersionParts {
@@ -42,8 +42,7 @@ export function compareBakerVersions(left: string, right: string): number {
     a.major - b.major ||
     a.minor - b.minor ||
     a.patch - b.patch ||
-    suffixRank(a.clientSuffix) - suffixRank(b.clientSuffix) ||
-    left.localeCompare(right)
+    suffixRank(a.clientSuffix) - suffixRank(b.clientSuffix)
   );
 }
 

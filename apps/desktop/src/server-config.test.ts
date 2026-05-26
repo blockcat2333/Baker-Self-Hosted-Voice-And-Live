@@ -72,6 +72,7 @@ describe('desktop server config', () => {
     expect(isVersionGreater('1.0.5b', '1.0.5a')).toBe(true);
     expect(isVersionGreater('1.0.6a', '1.0.5z')).toBe(true);
     expect(isVersionGreater('1.0.5', '1.0.5a')).toBe(false);
+    expect(isVersionGreater('1.0.5b', '1.0.5-b')).toBe(false);
   });
 
   it('classifies client release labels separately from server image tags', () => {

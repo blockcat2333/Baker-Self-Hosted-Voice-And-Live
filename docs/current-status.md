@@ -48,6 +48,18 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-26 Baker Desktop 1.0.5b Client Release Prep
+
+- bumped the desktop client release label from `1.0.5a` to `1.0.5b`
+- updated the Windows installer artifact name to `Baker-Setup-1.0.5b-x64.exe`
+- kept the server release line at `1.0.5`; this is a desktop/client-only release
+- validation completed:
+  - `pnpm --filter @baker/desktop typecheck`
+  - `pnpm --filter @baker/desktop lint`
+  - `pnpm exec vitest run apps/desktop/src apps/desktop/electron`
+  - `pnpm --filter @baker/desktop dist:win`
+- built installer SHA-256: `68DA214845A50F8A5ADF206FDA8B3EC833E64B99C6980CF75C454B1F1D1976DC`
+
 ### 2026-05-26 Baker Desktop GitHub Update Mode and Remembered Login
 
 - desktop startup now checks GitHub Releases for client release labels such as `1.0.5a`, independent of the connected server version

@@ -2,6 +2,27 @@
 
 ## 2026-05-26
 
+### Baker Desktop 1.0.5b update picker release
+
+What changed:
+
+- bumped the desktop client release label to `1.0.5b`
+- prepared the Windows installer artifact naming for `Baker-Setup-1.0.5b-x64.exe`
+- kept the server release line at `1.0.5`; this is a client-only release label update
+
+Why:
+
+- `1.0.5b` packages the desktop GitHub update picker and remembered-login changes without requiring a new server image
+- electron-builder normalizes the app version in `latest.yml` to `1.0.5-b`, so the desktop version comparer also accepts that hyphenated form as equivalent to the public `1.0.5b` release label
+
+Validation:
+
+- `pnpm --filter @baker/desktop typecheck`
+- `pnpm --filter @baker/desktop lint`
+- `pnpm exec vitest run apps/desktop/src apps/desktop/electron`
+- `pnpm --filter @baker/desktop dist:win`
+- built installer SHA-256: `68DA214845A50F8A5ADF206FDA8B3EC833E64B99C6980CF75C454B1F1D1976DC`
+
 ### Baker Desktop GitHub update mode and remembered login
 
 What changed:

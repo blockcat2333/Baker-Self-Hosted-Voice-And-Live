@@ -214,6 +214,14 @@ Migration state:
   - desktop-only renderer media patch for Electron screen livestream capture; sanitizes legacy desktop `mandatory` constraints, retries video-only capture when the first stream is audio-only, and prevents publishing an audio-only desktop screen stream
 - `apps/desktop/electron/desktop-media.test.ts`
   - focused coverage for the Electron desktop media patch permission allowlist, normal media passthrough, audio+video merge retry, and no-video failure cleanup
+- `apps/desktop/electron/screen-source-picker.ts`
+  - desktop screen-source picker helpers for source serialization, window/screen classification, saved `共享声音` preference normalization, and selection validation
+- `apps/desktop/electron/excluded-system-audio.ts`
+  - main-process lifecycle for the Windows excluded-system-audio helper, including helper discovery, process launch, PCM chunk fanout to the renderer, and cleanup
+- `apps/desktop/native/excluded-system-audio.cpp`
+  - Windows WASAPI process-loopback helper that captures system audio while excluding the Baker Electron process tree
+- `apps/desktop/scripts/build-excluded-system-audio.mjs`
+  - MSVC build script for the native excluded-system-audio helper; Windows release builds require it, optional desktop builds skip when unavailable
 - `apps/media/src/app.ts`
   - media service bootstrap; internal routes no longer expose permissive CORS and now reject unauthorized callers
 - `apps/media/src/lib/internal-auth.ts`

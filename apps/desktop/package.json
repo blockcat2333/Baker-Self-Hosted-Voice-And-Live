@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dist:win": "pnpm build && electron-builder --win nsis --x64 --publish never",
+    "build": "pnpm build:native:optional && vite build",
+    "build:native:optional": "node scripts/build-excluded-system-audio.mjs",
+    "build:native:win": "node scripts/build-excluded-system-audio.mjs --required",
+    "dist:win": "pnpm build:native:win && vite build && electron-builder --win nsis --x64 --publish never",
     "dev": "vite",
     "lint": "eslint electron src vite.config.ts",
     "test": "vitest run apps/desktop",
@@ -39,6 +41,12 @@
     "files": [
       "dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/excluded-system-audio.exe",
+        "to": "native/excluded-system-audio.exe"
+      }
     ],
     "publish": [
       {

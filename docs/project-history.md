@@ -1,5 +1,35 @@
 # Project History
 
+## 2026-05-26
+
+### Baker Desktop source picker and excluded-system-audio capture
+
+What changed:
+
+- replaced the desktop livestream source text dialog with a custom Electron modal picker with `窗口` / `屏幕` tabs, preview thumbnails, search, scrolling, and fixed footer actions
+- added a remembered `共享声音` toggle to desktop screen sharing
+- changed desktop source selection to return `{ sourceId, shareAudio }`
+- added a Windows native WASAPI process-loopback helper for system audio capture with Baker's own process tree excluded
+- changed the shared client screen-capture path so Electron desktop video is always captured video-only, and the excluded system-audio track is merged in only when the user enables `共享声音`
+- wired helper compilation into desktop build scripts and `electron-builder` resources while keeping generated `.exe` and `.obj` artifacts ignored
+
+Why:
+
+- the previous source picker was a text-only button list, which did not scale when many windows were open and provided no visual confirmation of the selected window or screen
+- using normal Electron loopback audio would include Baker voice/playback in the livestream, causing echo; muting Baker locally was rejected because it breaks the broadcaster's voice-room experience
+- Windows process-loopback exclusion is the available route for preserving local Baker audio playback while removing Baker from the published system-audio mix
+
+Validation:
+
+- `pnpm --filter @baker/desktop typecheck`
+- `pnpm --filter @baker/client typecheck`
+- `pnpm --filter @baker/desktop lint`
+- `pnpm --filter @baker/client lint`
+- `pnpm exec vitest run apps/desktop/electron apps/desktop/src`
+- `pnpm exec vitest run packages/client/src/features/stream packages/client/src/features/media`
+- `pnpm --filter @baker/desktop build:native:win`
+- `pnpm --filter @baker/desktop build` reached Vite config loading after helper compilation but is blocked in the current sandbox by read permissions on an ancestor path
+
 ## 2026-05-25
 
 ### Baker Desktop 1.0.5a livestream video hotfix

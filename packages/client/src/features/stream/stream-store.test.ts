@@ -258,9 +258,7 @@ describe('stream store watch startup', () => {
         selectScreenSource,
       },
     });
-    getUserMedia
-      .mockRejectedValueOnce(new Error('System audio capture unavailable.'))
-      .mockResolvedValueOnce(new MockMediaStream([localPreviewTrack]));
+    getUserMedia.mockResolvedValueOnce(new MockMediaStream([localPreviewTrack]));
 
     await useStreamStore
       .getState()
@@ -298,18 +296,10 @@ describe('stream store watch startup', () => {
     expect(selectScreenSource).toHaveBeenCalledTimes(1);
     expect(getDisplayMedia).not.toHaveBeenCalled();
     expect(getUserMedia).toHaveBeenNthCalledWith(1, {
-      audio: {
-        mandatory: {
-          chromeMediaSource: 'desktop',
-          chromeMediaSourceId: 'screen:1:0',
-        },
-      },
-      video: electronVideoConstraints,
-    });
-    expect(getUserMedia).toHaveBeenNthCalledWith(2, {
       audio: false,
       video: electronVideoConstraints,
     });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
     expect(useStreamStore.getState().ownedStream).toMatchObject({
       sourceType: 'screen',
       status: 'live',

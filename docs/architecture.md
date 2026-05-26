@@ -13,6 +13,8 @@
 - popup livestream playback stays client-local: popup viewers now try autoplay with audio when the watched stream already has audio, fall back to muted autoplay only when the browser blocks audio autoplay, and retry audible playback if audio tracks arrive later
 - voice audio controls (mic input gain, global playback volume, per-participant playback volume) are local client-state concerns and do not change protocol or gateway contracts
 - stream audio capture controls are also client-local: camera streams now request audio capture and screen-share capture keeps browser echo/noise/gain constraints without forcing local-playback suppression, with no protocol or gateway contract changes
+- desktop screen-share source selection is Electron-local: the main process owns the custom picker, serializes `desktopCapturer` previews, persists the `共享声音` preference, and returns `{ sourceId, shareAudio }` to the shared client capture helper
+- desktop shared-system-audio publishing uses a Windows-only native WASAPI process-loopback helper to exclude the Baker process tree; renderer code merges that excluded audio track with Electron desktop video instead of asking Electron for ordinary loopback audio
 - stream quality selection is also client-owned: the broadcaster chooses resolution/frame-rate presets in the client, capture constraints are applied in-browser, and the chosen settings only travel through protocol/session metadata for orchestration and visibility
 - stream quality selection now includes fixed bitrate presets plus a best-effort codec preference selector, and publish setup applies best-effort sender `maxBitrate`, sender `degradationPreference`, and publish-time codec ordering through browser WebRTC APIs
 - watched-stream popup viewers now read live WebRTC receiver stats from the active watch runtime and render them locally in the popup UI; this telemetry is not persisted through protocol/gateway state
@@ -129,6 +131,7 @@ Room stream flow:
 - `voice.leave` and disconnect cleanup remove the caller's same-channel stream participation before broadcasting reconciled room state
 - viewers use `stream.watch` to join recv-only for a specific `streamId`
 - screen-share publishers mark outbound video tracks with `contentHint='detail'`
+- desktop screen-share publishers capture Electron desktop video without Electron loopback audio; when `共享声音` is enabled on Windows, a native helper streams system PCM with Baker's process tree excluded and the renderer turns it into an outbound WebRTC audio track
 - publishers apply best-effort sender bitrate caps (`maxBitrate`), sender `degradationPreference`, and optional codec-preference ordering during publish offer setup
 - `stream.state.updated` is the authoritative room snapshot for client reconciliation
 - client teardown is per-stream for watched sessions and separate from owned publish teardown

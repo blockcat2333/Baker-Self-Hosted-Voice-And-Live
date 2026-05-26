@@ -17,6 +17,28 @@ type SavedServerConfig = {
   serverVersion: string;
 };
 
+type ScreenSourceSelection = {
+  shareAudio: boolean;
+  sourceId: string;
+};
+
+type ScreenPickerSource = {
+  appIconDataUrl: string | null;
+  id: string;
+  name: string;
+  thumbnailDataUrl: string;
+  type: 'screen' | 'window';
+};
+
+type ScreenPickerData = {
+  audio: {
+    available: boolean;
+    reason: string | null;
+    shareAudio: boolean;
+  };
+  sources: ScreenPickerSource[];
+};
+
 contextBridge.exposeInMainWorld('bakerDesktop', {
   async clearSavedServer() {
     await ipcRenderer.invoke('desktop:clear-server');
@@ -58,9 +80,45 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
     return (await ipcRenderer.invoke('desktop:save-server', config)) as SavedServerConfig;
   },
   async selectScreenSource() {
-    return (await ipcRenderer.invoke('desktop:select-screen-source')) as string | null;
+    return (await ipcRenderer.invoke('desktop:select-screen-source')) as ScreenSourceSelection | null;
+  },
+  async startExcludedSystemAudioCapture() {
+    return (await ipcRenderer.invoke('desktop:excluded-audio-start')) as {
+      channelCount: number;
+      sampleRate: number;
+      sessionId: string;
+    };
+  },
+  onExcludedSystemAudioChunk(sessionId: string, callback: (chunk: Uint8Array) => void) {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { chunk: Uint8Array; sessionId: string },
+    ) => {
+      if (payload.sessionId === sessionId) {
+        callback(new Uint8Array(payload.chunk));
+      }
+    };
+    ipcRenderer.on('desktop:excluded-audio-chunk', listener);
+    return () => {
+      ipcRenderer.removeListener('desktop:excluded-audio-chunk', listener);
+    };
+  },
+  async stopExcludedSystemAudioCapture(sessionId: string) {
+    await ipcRenderer.invoke('desktop:excluded-audio-stop', sessionId);
   },
   async checkForUpdate(serverVersion: string) {
     return (await ipcRenderer.invoke('desktop:update-check', serverVersion)) as { feedUrl: string };
+  },
+});
+
+contextBridge.exposeInMainWorld('bakerDesktopScreenPicker', {
+  async cancel() {
+    await ipcRenderer.invoke('desktop:screen-picker:cancel');
+  },
+  async getData() {
+    return (await ipcRenderer.invoke('desktop:screen-picker:get-data')) as ScreenPickerData;
+  },
+  async select(selection: ScreenSourceSelection) {
+    await ipcRenderer.invoke('desktop:screen-picker:select', selection);
   },
 });

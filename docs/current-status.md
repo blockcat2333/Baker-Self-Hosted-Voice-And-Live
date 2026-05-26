@@ -48,6 +48,29 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-26 Baker Desktop Screen Picker and Excluded-Audio Capture
+
+- replaced the desktop screen-share text dialog with a custom Electron modal picker:
+  - separate `窗口` and `屏幕` tabs
+  - thumbnail preview grid
+  - search
+  - scrollable source list for large window counts
+  - fixed footer actions
+- added a remembered `共享声音` preference for desktop screen sharing; first launch defaults to enabled, and unsupported environments preserve the last preference instead of silently turning it off
+- changed the desktop screen source selection contract from a raw source id to `{ sourceId, shareAudio }`
+- added a Windows native WASAPI process-loopback helper that captures system audio while excluding the Baker Electron process tree, so the broadcaster can keep hearing Baker voice locally without publishing Baker's own output back into the livestream
+- renderer screen capture now records Electron desktop video with audio disabled, then merges the video track with the excluded-system-audio `AudioWorklet` track only when `共享声音` is enabled
+- release/build wiring now compiles the helper through `apps/desktop/scripts/build-excluded-system-audio.mjs`; Windows release builds require it, while normal non-Windows builds can skip it
+- validation completed:
+  - `pnpm --filter @baker/desktop typecheck`
+  - `pnpm --filter @baker/client typecheck`
+  - `pnpm --filter @baker/desktop lint`
+  - `pnpm --filter @baker/client lint`
+  - `pnpm exec vitest run apps/desktop/electron apps/desktop/src`
+  - `pnpm exec vitest run packages/client/src/features/stream packages/client/src/features/media`
+  - `pnpm --filter @baker/desktop build:native:win`
+- validation note: `pnpm --filter @baker/desktop build` is blocked in the current sandbox by Vite/esbuild config-read permissions (`Cannot read directory "../../../../.."`), after the native helper compilation step succeeds
+
 ### 2026-05-25 Baker Desktop 1.0.5a Livestream Video Hotfix
 
 - released desktop client iteration `1.0.5a` for the Electron screen-livestream video path

@@ -1,7 +1,7 @@
 export interface PlatformApi {
   name: 'desktop' | 'web';
   openExternal(url: string): Promise<void>;
-  selectScreenSource(): Promise<string | null>;
+  selectScreenSource(): Promise<{ shareAudio: boolean; sourceId: string } | null>;
 }
 
 export function createBrowserPlatformApi(): PlatformApi {
@@ -58,7 +58,35 @@ declare global {
         savedAt: string;
         serverVersion: string;
       }>;
-      selectScreenSource(): Promise<string | null>;
+      selectScreenSource(): Promise<{ shareAudio: boolean; sourceId: string } | null>;
+      startExcludedSystemAudioCapture(): Promise<{
+        channelCount: number;
+        sampleRate: number;
+        sessionId: string;
+      }>;
+      onExcludedSystemAudioChunk(
+        sessionId: string,
+        callback: (chunk: Uint8Array) => void,
+      ): () => void;
+      stopExcludedSystemAudioCapture(sessionId: string): Promise<void>;
+    };
+    bakerDesktopScreenPicker?: {
+      cancel(): Promise<void>;
+      getData(): Promise<{
+        audio: {
+          available: boolean;
+          reason: string | null;
+          shareAudio: boolean;
+        };
+        sources: Array<{
+          appIconDataUrl: string | null;
+          id: string;
+          name: string;
+          thumbnailDataUrl: string;
+          type: 'screen' | 'window';
+        }>;
+      }>;
+      select(selection: { shareAudio: boolean; sourceId: string }): Promise<void>;
     };
   }
 }

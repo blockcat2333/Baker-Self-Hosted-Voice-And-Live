@@ -202,7 +202,7 @@ Then open the admin panel and switch **Server settings -> Media mode** from `p2p
 - SFU mode is single-node and does not include recording, transcoding, HLS, or simulcast yet
 - Voice and stream room runtime state is still in-memory
 - P2P remains the default and fallback deployment path
-- Desktop/Electron is present, and desktop screen livestream publishing has been validated end-to-end against the web viewer
+- Desktop/Electron is present, desktop screen livestream publishing has been validated end-to-end against the web viewer, and the desktop picker now supports window/screen previews plus Windows excluded-system-audio sharing
 
 ## Monorepo Layout
 

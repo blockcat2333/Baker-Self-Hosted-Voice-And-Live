@@ -209,27 +209,104 @@ describe('stream-media helpers', () => {
     });
   });
 
-  it('retries Electron desktop capture when the first resolved stream is audio-only', async () => {
-    const audioTrack = new MockTrack('audio');
+  it('captures Electron desktop video without audio when source audio sharing is disabled', async () => {
     const videoTrack = new MockTrack('video');
-    const getUserMedia = vi
-      .fn()
-      .mockResolvedValueOnce(new MockMediaStream([audioTrack]))
-      .mockResolvedValueOnce(new MockMediaStream([videoTrack]));
+    const getUserMedia = vi.fn().mockResolvedValueOnce(new MockMediaStream([videoTrack]));
 
     vi.stubGlobal('MediaStream', MockMediaStream);
     vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
     vi.stubGlobal('window', {
       bakerDesktop: {
-        selectScreenSource: vi.fn().mockResolvedValue('screen:1:0'),
+        selectScreenSource: vi.fn().mockResolvedValue({ shareAudio: false, sourceId: 'screen:1:0' }),
       },
     });
 
     const stream = await captureScreenStream();
 
-    expect(getUserMedia).toHaveBeenCalledTimes(2);
-    expect(getUserMedia.mock.calls[1]?.[0]).toMatchObject({ audio: false });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(getUserMedia.mock.calls[0]?.[0]).toMatchObject({ audio: false });
+    expect((stream as unknown as MockMediaStream).getTracks().map((track) => track.kind)).toEqual(['video']);
+  });
+
+  it('merges Electron desktop video with excluded system audio when audio sharing is enabled', async () => {
+    const videoTrack = new MockTrack('video');
+    const audioTrack = new MockTrack('audio');
+    const getUserMedia = vi.fn().mockResolvedValueOnce(new MockMediaStream([videoTrack]));
+    const stopExcludedSystemAudioCapture = vi.fn().mockResolvedValue(undefined);
+    const unsubscribe = vi.fn();
+    const addModule = vi.fn().mockResolvedValue(undefined);
+    const connect = vi.fn();
+    class MockAudioContext {
+      audioWorklet = { addModule };
+      close = vi.fn().mockResolvedValue(undefined);
+
+      constructor(_options: { sampleRate: number }) {}
+
+      createMediaStreamDestination() {
+        return { stream: new MockMediaStream([audioTrack]) };
+      }
+    }
+    class MockAudioWorkletNode {
+      port = { postMessage: vi.fn() };
+
+      constructor(
+        _context: MockAudioContext,
+        _name: string,
+        _options: AudioWorkletNodeOptions,
+      ) {}
+
+      connect = connect;
+    }
+
+    vi.stubGlobal('AudioContext', MockAudioContext);
+    vi.stubGlobal('AudioWorkletNode', MockAudioWorkletNode);
+    vi.stubGlobal('MediaStream', MockMediaStream);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:excluded-audio-worklet') });
+    vi.stubGlobal('window', {
+      bakerDesktop: {
+        onExcludedSystemAudioChunk: vi.fn(() => unsubscribe),
+        selectScreenSource: vi.fn().mockResolvedValue({ shareAudio: true, sourceId: 'screen:1:0' }),
+        startExcludedSystemAudioCapture: vi.fn().mockResolvedValue({
+          channelCount: 2,
+          sampleRate: 48000,
+          sessionId: 'audio-session-1',
+        }),
+        stopExcludedSystemAudioCapture,
+      },
+    });
+
+    const stream = await captureScreenStream();
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(getUserMedia.mock.calls[0]?.[0]).toMatchObject({ audio: false });
+    expect(addModule).toHaveBeenCalledWith('blob:excluded-audio-worklet');
+    expect(connect).toHaveBeenCalledTimes(1);
     expect((stream as unknown as MockMediaStream).getTracks().map((track) => track.kind)).toEqual(['video', 'audio']);
+
+    audioTrack.stop();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(stopExcludedSystemAudioCapture).toHaveBeenCalledWith('audio-session-1');
+  });
+
+  it('stops captured desktop video when excluded system audio setup fails', async () => {
+    const videoTrack = new MockTrack('video');
+    const getUserMedia = vi.fn().mockResolvedValueOnce(new MockMediaStream([videoTrack]));
+
+    vi.stubGlobal('MediaStream', MockMediaStream);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('window', {
+      bakerDesktop: {
+        onExcludedSystemAudioChunk: vi.fn(() => vi.fn()),
+        selectScreenSource: vi.fn().mockResolvedValue({ shareAudio: true, sourceId: 'screen:1:0' }),
+        startExcludedSystemAudioCapture: vi.fn().mockRejectedValue(new Error('helper missing')),
+        stopExcludedSystemAudioCapture: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    await expect(captureScreenStream()).rejects.toThrow('helper missing');
+    expect(videoTrack.stop).toHaveBeenCalledTimes(1);
   });
 
   it('builds fallback camera options when device labels are unavailable', () => {

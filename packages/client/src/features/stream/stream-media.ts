@@ -15,11 +15,26 @@ export interface CameraOption {
 }
 type CameraDeviceLike = Pick<MediaDeviceInfo, 'deviceId' | 'kind' | 'label'>;
 type DesktopScreenSelector = {
-  selectScreenSource(): Promise<string | null>;
+  onExcludedSystemAudioChunk?(
+    sessionId: string,
+    callback: (chunk: Uint8Array) => void,
+  ): () => void;
+  selectScreenSource(): Promise<DesktopScreenSourceSelection | string | null>;
+  startExcludedSystemAudioCapture?(): Promise<ExcludedSystemAudioSession>;
+  stopExcludedSystemAudioCapture?(sessionId: string): Promise<void>;
 };
 type DesktopWindowLike = {
   bakerDesktop?: DesktopScreenSelector;
 };
+export interface DesktopScreenSourceSelection {
+  shareAudio: boolean;
+  sourceId: string;
+}
+interface ExcludedSystemAudioSession {
+  channelCount: number;
+  sampleRate: number;
+  sessionId: string;
+}
 type ElectronMediaTrackConstraints = MediaTrackConstraints & {
   mandatory: Record<string, number | string>;
 };
@@ -248,50 +263,200 @@ function stopStream(stream: MediaStream | null) {
   }
 }
 
+const excludedSystemAudioWorkletProcessor = `
+class BakerExcludedSystemAudioProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    this.channelCount = Math.max(1, options.processorOptions.channelCount || 2);
+    this.queue = [];
+    this.current = null;
+    this.offset = 0;
+    this.port.onmessage = (event) => {
+      this.queue.push(new Float32Array(event.data));
+    };
+  }
+
+  readSample() {
+    while (!this.current || this.offset >= this.current.length) {
+      this.current = this.queue.shift() || null;
+      this.offset = 0;
+      if (!this.current) {
+        return null;
+      }
+    }
+
+    return this.current[this.offset++];
+  }
+
+  process(_inputs, outputs) {
+    const output = outputs[0];
+    if (!output || output.length === 0) {
+      return true;
+    }
+
+    const frameCount = output[0].length;
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const frameSamples = [];
+      for (let channel = 0; channel < this.channelCount; channel += 1) {
+        frameSamples[channel] = this.readSample();
+      }
+
+      for (let channel = 0; channel < output.length; channel += 1) {
+        output[channel][frame] = frameSamples[channel] ?? frameSamples[0] ?? 0;
+      }
+    }
+
+    return true;
+  }
+}
+
+registerProcessor('baker-excluded-system-audio', BakerExcludedSystemAudioProcessor);
+`;
+
+let excludedSystemAudioWorkletUrl: string | null = null;
+
+function getExcludedSystemAudioWorkletUrl() {
+  if (!excludedSystemAudioWorkletUrl) {
+    excludedSystemAudioWorkletUrl = URL.createObjectURL(
+      new Blob([excludedSystemAudioWorkletProcessor], { type: 'text/javascript' }),
+    );
+  }
+
+  return excludedSystemAudioWorkletUrl;
+}
+
+function patchAudioTrackStop(track: MediaStreamTrack, stopCapture: () => void) {
+  const originalStop = track.stop.bind(track);
+  let stopped = false;
+  track.stop = () => {
+    if (stopped) {
+      return;
+    }
+
+    stopped = true;
+    stopCapture();
+    originalStop();
+  };
+}
+
+function transferChunk(chunk: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(chunk.byteLength);
+  copy.set(chunk);
+  return copy.buffer;
+}
+
+async function captureExcludedSystemAudioStream(
+  desktopScreenSelector: DesktopScreenSelector,
+): Promise<MediaStream> {
+  if (
+    !desktopScreenSelector.startExcludedSystemAudioCapture ||
+    !desktopScreenSelector.stopExcludedSystemAudioCapture ||
+    !desktopScreenSelector.onExcludedSystemAudioChunk
+  ) {
+    throw new Error('Excluded system audio capture is unavailable in this desktop client.');
+  }
+
+  const session = await desktopScreenSelector.startExcludedSystemAudioCapture();
+  let unsubscribe: (() => void) | null = null;
+  let context: AudioContext | null = null;
+
+  try {
+    context = new AudioContext({ sampleRate: session.sampleRate });
+    await context.audioWorklet.addModule(getExcludedSystemAudioWorkletUrl());
+    const node = new AudioWorkletNode(context, 'baker-excluded-system-audio', {
+      numberOfInputs: 0,
+      numberOfOutputs: 1,
+      outputChannelCount: [session.channelCount],
+      processorOptions: {
+        channelCount: session.channelCount,
+      },
+    });
+    const destination = context.createMediaStreamDestination();
+    node.connect(destination);
+    if (context.state === 'suspended') {
+      await context.resume();
+    }
+
+    unsubscribe = desktopScreenSelector.onExcludedSystemAudioChunk(session.sessionId, (chunk) => {
+      const buffer = transferChunk(chunk);
+      node.port.postMessage(buffer, [buffer]);
+    });
+
+    const stopCapture = () => {
+      unsubscribe?.();
+      unsubscribe = null;
+      void desktopScreenSelector.stopExcludedSystemAudioCapture?.(session.sessionId);
+      void context?.close().catch(() => {
+        // Best effort: the media track is already stopping.
+      });
+      context = null;
+    };
+
+    for (const track of destination.stream.getAudioTracks()) {
+      patchAudioTrackStop(track, stopCapture);
+    }
+
+    return destination.stream;
+  } catch (error) {
+    unsubscribe?.();
+    await desktopScreenSelector.stopExcludedSystemAudioCapture(session.sessionId);
+    await context?.close().catch(() => {
+      // Best effort cleanup after setup failure.
+    });
+    throw error;
+  }
+}
+
+function normalizeDesktopScreenSelection(
+  selection: DesktopScreenSourceSelection | string | null,
+): DesktopScreenSourceSelection | null {
+  if (typeof selection === 'string') {
+    return { shareAudio: false, sourceId: selection };
+  }
+
+  if (!selection || typeof selection.sourceId !== 'string') {
+    return null;
+  }
+
+  return {
+    shareAudio: selection.shareAudio === true,
+    sourceId: selection.sourceId,
+  };
+}
+
 async function captureElectronScreenStream(
   quality: StreamQualitySettings,
   sourceId: string,
+  includeAudio: boolean,
+  desktopScreenSelector: DesktopScreenSelector,
 ): Promise<MediaStream> {
-  let firstStream: MediaStream | null = null;
-
-  try {
-    firstStream = await navigator.mediaDevices.getUserMedia(
-      buildElectronScreenCaptureConstraints(quality, sourceId, true),
-    );
-  } catch {
-    firstStream = null;
-  }
-
-  if (firstStream && getLiveTracks(firstStream, 'video').length > 0) {
-    return firstStream;
-  }
-
-  let videoOnlyStream: MediaStream | null = null;
-  try {
-    videoOnlyStream = await navigator.mediaDevices.getUserMedia(
-      buildElectronScreenCaptureConstraints(quality, sourceId, false),
-    );
-  } catch (error) {
-    stopStream(firstStream);
-    throw error;
-  }
+  const videoOnlyStream = await navigator.mediaDevices.getUserMedia(
+    buildElectronScreenCaptureConstraints(quality, sourceId, false),
+  );
 
   const videoTracks = getLiveTracks(videoOnlyStream, 'video');
   if (videoTracks.length === 0) {
-    stopStream(firstStream);
     stopStream(videoOnlyStream);
     throw new Error('Desktop capture did not provide a video track.');
   }
 
-  if (!firstStream) {
+  if (!includeAudio) {
     return videoOnlyStream;
+  }
+
+  let audioStream: MediaStream | null = null;
+  try {
+    audioStream = await captureExcludedSystemAudioStream(desktopScreenSelector);
+  } catch (error) {
+    stopStream(videoOnlyStream);
+    throw error;
   }
 
   const mergedStream = new MediaStream();
   for (const track of videoTracks) {
     mergedStream.addTrack(track);
   }
-  for (const track of getLiveTracks(firstStream, 'audio')) {
+  for (const track of getLiveTracks(audioStream, 'audio')) {
     mergedStream.addTrack(track);
   }
 
@@ -306,12 +471,17 @@ export async function captureScreenStream(
     return navigator.mediaDevices.getDisplayMedia(buildScreenCaptureConstraints(quality));
   }
 
-  const sourceId = await desktopScreenSelector.selectScreenSource();
-  if (!sourceId) {
+  const selection = normalizeDesktopScreenSelection(await desktopScreenSelector.selectScreenSource());
+  if (!selection) {
     throw new Error('Screen share selection was canceled.');
   }
 
-  return captureElectronScreenStream(quality, sourceId);
+  return captureElectronScreenStream(
+    quality,
+    selection.sourceId,
+    selection.shareAudio,
+    desktopScreenSelector,
+  );
 }
 
 export function isDisplayAudioSource(sourceType: StreamSourceType): boolean {

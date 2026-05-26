@@ -11,7 +11,6 @@ import { useGatewayStore } from '../gateway/gateway-store';
 import { applyAudioOutputDevice, useAudioDeviceStore } from '../media/audio-device-store';
 import {
   DEFAULT_STREAM_PLAYBACK_VOLUME,
-  hasPlayableStreamAudioTrack,
   isDisplayAudioSource,
   startPopupStreamPlayback,
 } from './stream-media';
@@ -34,6 +33,10 @@ import {
   isPopupFullscreenSupported,
   togglePopupFullscreen,
 } from './stream-popup-fullscreen';
+import {
+  getPopupStreamTrackSignature,
+  shouldReattachPopupStreamAfterSourceTrackChange,
+} from './stream-popup-reattach';
 
 function sourceLabel(sourceType: 'camera' | 'screen' | null) {
   if (sourceType === 'camera') {
@@ -121,6 +124,7 @@ function StreamPopupVideo({
   const selectedAudioOutputId = useAudioDeviceStore((s) => s.selectedAudioOutputId);
   const [playbackState, setPlaybackState] = useState<'idle' | 'waiting' | 'playing' | 'blocked'>('idle');
   const attachedStreamRef = useRef<MediaStream | null>(null);
+  const streamTrackSignature = getPopupStreamTrackSignature(stream);
 
   useEffect(() => {
     const mediaElement = videoRef.current;
@@ -176,7 +180,7 @@ function StreamPopupVideo({
         setPlaybackState('playing');
       }
     };
-      const recoverPlaybackIfPaused = () => {
+    const recoverPlaybackIfPaused = () => {
       if (cancelled || !attachedStreamRef.current) {
         return;
       }
@@ -186,7 +190,7 @@ function StreamPopupVideo({
     const attachedStream = activeStream;
     attachedStreamRef.current = attachedStream;
     const onSourceTrackChanged = () => {
-      if (element.paused || (element.muted && hasPlayableStreamAudioTrack(attachedStream))) {
+      if (shouldReattachPopupStreamAfterSourceTrackChange(element, attachedStream)) {
         void attemptPlayback(attachedStream, { reattach: true });
       }
     };
@@ -209,7 +213,7 @@ function StreamPopupVideo({
       element.pause();
       element.srcObject = null;
     };
-  }, [stream]);
+  }, [stream, streamTrackSignature]);
 
   useEffect(() => {
     const mediaElement = videoRef.current;

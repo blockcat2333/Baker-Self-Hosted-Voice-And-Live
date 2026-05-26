@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildCameraCaptureConstraints,
   buildElectronScreenCaptureConstraints,
   buildScreenCaptureConstraints,
   clampStreamPlaybackVolume,
+  captureScreenStream,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
   getCameraSelectionKey,
   isDisplayAudioSource,
@@ -12,7 +13,46 @@ import {
   startPopupStreamPlayback,
 } from './stream-media';
 
+class MockTrack {
+  public readonly enabled = true;
+  public readonly id: string;
+  public readonly readyState = 'live';
+  public readonly stop = vi.fn();
+
+  constructor(public readonly kind: 'audio' | 'video') {
+    this.id = `${kind}-${Math.random()}`;
+  }
+}
+
+class MockMediaStream {
+  private readonly tracks: MockTrack[];
+
+  constructor(tracks: MockTrack[] = []) {
+    this.tracks = [...tracks];
+  }
+
+  addTrack(track: MockTrack) {
+    this.tracks.push(track);
+  }
+
+  getAudioTracks() {
+    return this.tracks.filter((track) => track.kind === 'audio');
+  }
+
+  getTracks() {
+    return [...this.tracks];
+  }
+
+  getVideoTracks() {
+    return this.tracks.filter((track) => track.kind === 'video');
+  }
+}
+
 describe('stream-media helpers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('clamps playback volume into the supported range', () => {
     expect(clampStreamPlaybackVolume(Number.NaN)).toBe(DEFAULT_STREAM_PLAYBACK_VOLUME);
     expect(clampStreamPlaybackVolume(-1)).toBe(0);
@@ -167,6 +207,29 @@ describe('stream-media helpers', () => {
         },
       },
     });
+  });
+
+  it('retries Electron desktop capture when the first resolved stream is audio-only', async () => {
+    const audioTrack = new MockTrack('audio');
+    const videoTrack = new MockTrack('video');
+    const getUserMedia = vi
+      .fn()
+      .mockResolvedValueOnce(new MockMediaStream([audioTrack]))
+      .mockResolvedValueOnce(new MockMediaStream([videoTrack]));
+
+    vi.stubGlobal('MediaStream', MockMediaStream);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    vi.stubGlobal('window', {
+      bakerDesktop: {
+        selectScreenSource: vi.fn().mockResolvedValue('screen:1:0'),
+      },
+    });
+
+    const stream = await captureScreenStream();
+
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(getUserMedia.mock.calls[1]?.[0]).toMatchObject({ audio: false });
+    expect((stream as unknown as MockMediaStream).getTracks().map((track) => track.kind)).toEqual(['video', 'audio']);
   });
 
   it('builds fallback camera options when device labels are unavailable', () => {

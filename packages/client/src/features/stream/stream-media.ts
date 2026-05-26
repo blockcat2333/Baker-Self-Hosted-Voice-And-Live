@@ -233,6 +233,71 @@ export function buildElectronScreenCaptureConstraints(
   };
 }
 
+function getLiveTracks(stream: MediaStream, kind: 'audio' | 'video'): MediaStreamTrack[] {
+  const tracks = kind === 'audio' ? stream.getAudioTracks() : stream.getVideoTracks();
+  return tracks.filter((track) => track.readyState !== 'ended');
+}
+
+function stopStream(stream: MediaStream | null) {
+  if (!stream) {
+    return;
+  }
+
+  for (const track of stream.getTracks()) {
+    track.stop();
+  }
+}
+
+async function captureElectronScreenStream(
+  quality: StreamQualitySettings,
+  sourceId: string,
+): Promise<MediaStream> {
+  let firstStream: MediaStream | null = null;
+
+  try {
+    firstStream = await navigator.mediaDevices.getUserMedia(
+      buildElectronScreenCaptureConstraints(quality, sourceId, true),
+    );
+  } catch {
+    firstStream = null;
+  }
+
+  if (firstStream && getLiveTracks(firstStream, 'video').length > 0) {
+    return firstStream;
+  }
+
+  let videoOnlyStream: MediaStream | null = null;
+  try {
+    videoOnlyStream = await navigator.mediaDevices.getUserMedia(
+      buildElectronScreenCaptureConstraints(quality, sourceId, false),
+    );
+  } catch (error) {
+    stopStream(firstStream);
+    throw error;
+  }
+
+  const videoTracks = getLiveTracks(videoOnlyStream, 'video');
+  if (videoTracks.length === 0) {
+    stopStream(firstStream);
+    stopStream(videoOnlyStream);
+    throw new Error('Desktop capture did not provide a video track.');
+  }
+
+  if (!firstStream) {
+    return videoOnlyStream;
+  }
+
+  const mergedStream = new MediaStream();
+  for (const track of videoTracks) {
+    mergedStream.addTrack(track);
+  }
+  for (const track of getLiveTracks(firstStream, 'audio')) {
+    mergedStream.addTrack(track);
+  }
+
+  return mergedStream;
+}
+
 export async function captureScreenStream(
   quality: StreamQualitySettings = DEFAULT_STREAM_QUALITY,
 ): Promise<MediaStream> {
@@ -246,15 +311,7 @@ export async function captureScreenStream(
     throw new Error('Screen share selection was canceled.');
   }
 
-  try {
-    return await navigator.mediaDevices.getUserMedia(
-      buildElectronScreenCaptureConstraints(quality, sourceId, true),
-    );
-  } catch {
-    return navigator.mediaDevices.getUserMedia(
-      buildElectronScreenCaptureConstraints(quality, sourceId, false),
-    );
-  }
+  return captureElectronScreenStream(quality, sourceId);
 }
 
 export function isDisplayAudioSource(sourceType: StreamSourceType): boolean {

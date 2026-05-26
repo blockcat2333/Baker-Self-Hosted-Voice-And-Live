@@ -12,6 +12,8 @@ export interface ServerHealth {
   version: string;
 }
 
+export { isServerVersionGreaterThanClient, isVersionGreater } from './versioning';
+
 const HEALTH_TIMEOUT_MS = 15000;
 const GATEWAY_TIMEOUT_MS = 10000;
 
@@ -38,32 +40,6 @@ export function normalizeServerInput(input: string): Pick<DesktopServerConfig, '
     gatewayUrl: `${gatewayProtocol}//${parsed.host}/ws`,
     input: trimmed,
   };
-}
-
-function parseVersion(version: string): number[] {
-  return version
-    .split('.')
-    .map((part) => Number.parseInt(part, 10))
-    .map((part) => (Number.isFinite(part) ? part : 0));
-}
-
-export function isVersionGreater(left: string, right: string): boolean {
-  const leftParts = parseVersion(left);
-  const rightParts = parseVersion(right);
-  const length = Math.max(leftParts.length, rightParts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = leftParts[index] ?? 0;
-    const rightPart = rightParts[index] ?? 0;
-    if (leftPart > rightPart) {
-      return true;
-    }
-    if (leftPart < rightPart) {
-      return false;
-    }
-  }
-
-  return false;
 }
 
 function isAbortError(error: unknown): boolean {

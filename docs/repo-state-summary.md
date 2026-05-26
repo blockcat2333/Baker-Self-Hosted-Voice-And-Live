@@ -159,7 +159,7 @@ Migration state:
 ## Key Client Files
 
 - `packages/client/src/app/AppRoot.tsx`
-  - resolves API base URL (explicit `apiBaseUrl` override; browser same-origin by default; non-http fallback to legacy `:3001`), then loads public server-config (with fallback + surfaced bootstrap errors) and gates Web-enabled state before rendering login/chat
+  - resolves API base URL (explicit `apiBaseUrl` override; browser same-origin by default; non-http fallback to legacy `:3001`), then loads public server-config (with fallback + surfaced bootstrap errors) and gates Web-enabled state before rendering login/chat; desktop can pass an update action into the shared login surface
 - `packages/client/src/app/derive-default-urls.ts`
   - derives default API + gateway URLs for LAN-friendly hostnames and non-http origins (Electron `file://` production)
 - `packages/sdk/src/http/api-client.ts`
@@ -173,7 +173,7 @@ Migration state:
 - `packages/client/src/features/gateway/gateway-store.test.ts`
   - regression coverage for popup cleanup, reconnect-error handling, `0ms` RTT path, and `voice.roster.updated` store updates
 - `packages/client/src/features/auth/LoginView.tsx`
-  - sign-in/create-account UI with registration password confirmation, server-name branding, and login-only mode when public registration is disabled
+  - sign-in/create-account UI with registration password confirmation, server-name branding, login-only mode when public registration is disabled, optional remembered account/password autofill, and an optional desktop update action beside the account field
 - `packages/client/src/features/auth/AccountPanel.tsx`
   - signed-in account surface for viewing email and editing username, with truncation-safe identity layout for long IDs/emails
 - `packages/client/src/features/auth/auth-store.ts`
@@ -210,6 +210,14 @@ Migration state:
   - top-level chat/sidebar composition plus server-name header and popup host mount point; mobile now uses a four-tab shell while desktop/tablet keep the multi-column layout, and the sidebar footer now opens Settings instead of rendering language/server/session controls inline
 - `packages/client/src/features/chat/SettingsDialog.tsx`
   - shared settings dialog for audio device selection, language switching, desktop server switching, and authenticated sign-out; desktop hides server switching when no `onChangeServer` callback is supplied
+- `apps/desktop/src/DesktopApp.tsx`
+  - Electron renderer shell for server selection, saved-server boot, non-blocking GitHub desktop update prompts, selected-version download/install flow, and handoff into the shared client app
+- `apps/desktop/src/versioning.ts`
+  - Baker release-version helpers that compare numeric server tags and lettered client labels according to the documented release rules
+- `apps/desktop/electron/main.ts`
+  - Electron main process for windows, desktop capture IPC, saved server config, logs, and GitHub release/update IPC; desktop update discovery filters for lettered client release labels
+- `apps/desktop/electron/preload.ts`
+  - context-bridge surface for desktop media, logs, saved server config, GitHub update version listing, selected-version update download, and install IPC
 - `apps/desktop/electron/desktop-media.ts`
   - desktop-only renderer media patch for Electron screen livestream capture; sanitizes legacy desktop `mandatory` constraints, retries video-only capture when the first stream is audio-only, and prevents publishing an audio-only desktop screen stream
 - `apps/desktop/electron/desktop-media.test.ts`

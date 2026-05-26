@@ -4,9 +4,28 @@ type UpdateEventPayload = {
   error?: string;
   feedUrl?: string;
   percent?: number;
-  serverVersion?: string;
+  targetVersion?: string;
   state: 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error';
   version?: string;
+};
+
+type DesktopUpdateVersion = {
+  assetNames: string[];
+  hasInstaller: boolean;
+  isLatest: boolean;
+  name: string;
+  publishedAt: string | null;
+  releaseNotes: string | null;
+  releaseUrl: string | null;
+  tag: string;
+};
+
+type DesktopUpdateVersionsResponse = {
+  currentVersion: string;
+  hasNewer: boolean;
+  latestVersion: string | null;
+  repository: string;
+  versions: DesktopUpdateVersion[];
 };
 
 type SavedServerConfig = {
@@ -79,6 +98,9 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
   async saveServer(config: SavedServerConfig) {
     return (await ipcRenderer.invoke('desktop:save-server', config)) as SavedServerConfig;
   },
+  async listUpdateVersions() {
+    return (await ipcRenderer.invoke('desktop:update-versions')) as DesktopUpdateVersionsResponse;
+  },
   async selectScreenSource() {
     return (await ipcRenderer.invoke('desktop:select-screen-source')) as ScreenSourceSelection | null;
   },
@@ -106,8 +128,8 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
   async stopExcludedSystemAudioCapture(sessionId: string) {
     await ipcRenderer.invoke('desktop:excluded-audio-stop', sessionId);
   },
-  async checkForUpdate(serverVersion: string) {
-    return (await ipcRenderer.invoke('desktop:update-check', serverVersion)) as { feedUrl: string };
+  async checkForUpdate(targetVersion: string) {
+    return (await ipcRenderer.invoke('desktop:update-check', targetVersion)) as { feedUrl: string };
   },
 });
 

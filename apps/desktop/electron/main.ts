@@ -20,10 +20,18 @@ import {
   type SerializedScreenSource,
   writeDesktopPreferences,
 } from './screen-source-picker';
+import {
+  compareBakerVersions,
+  isClientReleaseVersion,
+  isVersionGreater,
+  normalizeReleaseTag,
+} from '../src/versioning';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const releaseBaseUrl =
   'https://github.com/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases/download';
+const githubReleasesUrl =
+  'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
 const serverConfigFile = 'server.json';
 
 interface SavedServerConfig {
@@ -38,7 +46,7 @@ interface UpdateEventPayload {
   error?: string;
   feedUrl?: string;
   percent?: number;
-  serverVersion?: string;
+  targetVersion?: string;
   state:
     | 'checking'
     | 'available'
@@ -49,10 +57,29 @@ interface UpdateEventPayload {
   version?: string;
 }
 
+interface DesktopUpdateVersion {
+  assetNames: string[];
+  hasInstaller: boolean;
+  isLatest: boolean;
+  name: string;
+  publishedAt: string | null;
+  releaseNotes: string | null;
+  releaseUrl: string | null;
+  tag: string;
+}
+
+interface DesktopUpdateVersionsResponse {
+  currentVersion: string;
+  hasNewer: boolean;
+  latestVersion: string | null;
+  repository: string;
+  versions: DesktopUpdateVersion[];
+}
+
 let updateSession:
   | {
       feedUrl: string;
-      serverVersion: string;
+      targetVersion: string;
       updater: NsisUpdater;
     }
   | null = null;
@@ -99,28 +126,111 @@ async function writeLog(scope: string, message: string, details?: unknown) {
   await fs.appendFile(logFile, `${line}\n`, 'utf8');
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseReleaseAssetNames(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): string[] => {
+    if (!isRecord(item) || typeof item['name'] !== 'string') {
+      return [];
+    }
+    return [item['name']];
+  });
+}
+
+function parseDesktopUpdateVersions(value: unknown): DesktopUpdateVersion[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const releases = value.flatMap((item): DesktopUpdateVersion[] => {
+    if (!isRecord(item) || typeof item['tag_name'] !== 'string') {
+      return [];
+    }
+
+    const tag = normalizeReleaseTag(item['tag_name']);
+    if (!isClientReleaseVersion(tag) || item['draft'] === true) {
+      return [];
+    }
+
+    const assetNames = parseReleaseAssetNames(item['assets']);
+    const hasInstaller = assetNames.some((asset) => asset.endsWith('.yml'));
+
+    return [
+      {
+        assetNames,
+        hasInstaller,
+        isLatest: false,
+        name: typeof item['name'] === 'string' && item['name'] ? item['name'] : `Baker ${tag}`,
+        publishedAt: typeof item['published_at'] === 'string' ? item['published_at'] : null,
+        releaseNotes: typeof item['body'] === 'string' ? item['body'] : null,
+        releaseUrl: typeof item['html_url'] === 'string' ? item['html_url'] : null,
+        tag,
+      },
+    ];
+  });
+
+  return releases.sort((left, right) => compareBakerVersions(right.tag, left.tag));
+}
+
+async function fetchJson(url: string, headers: Record<string, string> = {}) {
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(`Fetch failed for ${url} with HTTP ${response.status}.`);
+  }
+  return response.json() as Promise<unknown>;
+}
+
+async function listDesktopUpdateVersions(): Promise<DesktopUpdateVersionsResponse> {
+  const versions = parseDesktopUpdateVersions(
+    await fetchJson(githubReleasesUrl, {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Baker-Desktop',
+    }),
+  );
+  const latestVersion = versions[0]?.tag ?? null;
+  const currentVersion = app.getVersion();
+
+  return {
+    currentVersion,
+    hasNewer: latestVersion ? isVersionGreater(latestVersion, currentVersion) : false,
+    latestVersion,
+    repository: 'blockcat2333/Baker-Self-Hosted-Voice-And-Live',
+    versions: versions.map((version) => ({
+      ...version,
+      isLatest: version.tag === latestVersion,
+    })),
+  };
+}
+
 function publishUpdateEvent(payload: UpdateEventPayload) {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('desktop:update-event', payload);
   }
 }
 
-function createUpdater(serverVersion: string) {
-  const feedUrl = `${releaseBaseUrl}/v${serverVersion}`;
+function createUpdater(targetVersion: string) {
+  const feedUrl = `${releaseBaseUrl}/v${targetVersion}`;
   const updater = new NsisUpdater({
     provider: 'generic',
     url: feedUrl,
   });
+  updater.allowDowngrade = true;
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
 
   updater.on('checking-for-update', () => {
-    publishUpdateEvent({ feedUrl, serverVersion, state: 'checking' });
+    publishUpdateEvent({ feedUrl, targetVersion, state: 'checking' });
   });
   updater.on('update-available', (info) => {
     publishUpdateEvent({
       feedUrl,
-      serverVersion,
+      targetVersion,
       state: 'available',
       version: info.version,
     });
@@ -128,7 +238,7 @@ function createUpdater(serverVersion: string) {
   updater.on('update-not-available', (info) => {
     publishUpdateEvent({
       feedUrl,
-      serverVersion,
+      targetVersion,
       state: 'not_available',
       version: info.version,
     });
@@ -137,14 +247,14 @@ function createUpdater(serverVersion: string) {
     publishUpdateEvent({
       feedUrl,
       percent: progress.percent,
-      serverVersion,
+      targetVersion,
       state: 'downloading',
     });
   });
   updater.on('update-downloaded', (info) => {
     publishUpdateEvent({
       feedUrl,
-      serverVersion,
+      targetVersion,
       state: 'downloaded',
       version: info.version,
     });
@@ -154,10 +264,10 @@ function createUpdater(serverVersion: string) {
     publishUpdateEvent({
       error: message,
       feedUrl,
-      serverVersion,
+      targetVersion,
       state: 'error',
     });
-    void writeLog('update', `Update failed for server ${serverVersion} from ${feedUrl}`, error);
+    void writeLog('update', `Update failed for desktop ${targetVersion} from ${feedUrl}`, error);
   });
 
   return { feedUrl, updater };
@@ -945,11 +1055,30 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle('desktop:update-check', async (_event, serverVersion: string) => {
-    const { feedUrl, updater } = createUpdater(serverVersion);
-    updateSession = { feedUrl, serverVersion, updater };
-    await writeLog('update', `Checking update. app=${app.getVersion()} server=${serverVersion} feed=${feedUrl}`);
-    publishUpdateEvent({ feedUrl, serverVersion, state: 'checking' });
+  ipcMain.handle('desktop:update-versions', async () => {
+    try {
+      const versions = await listDesktopUpdateVersions();
+      await writeLog(
+        'update',
+        `Checked GitHub releases. app=${app.getVersion()} latest=${versions.latestVersion ?? 'none'} count=${versions.versions.length}`,
+      );
+      return versions;
+    } catch (error) {
+      await writeLog('update', 'Failed to read GitHub release versions.', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('desktop:update-check', async (_event, targetVersion: string) => {
+    const version = normalizeReleaseTag(targetVersion);
+    if (!isClientReleaseVersion(version)) {
+      throw new Error('Desktop updates must use a client release label such as 1.0.5a.');
+    }
+
+    const { feedUrl, updater } = createUpdater(version);
+    updateSession = { feedUrl, targetVersion: version, updater };
+    await writeLog('update', `Checking update. app=${app.getVersion()} target=${version} feed=${feedUrl}`);
+    publishUpdateEvent({ feedUrl, targetVersion: version, state: 'checking' });
     await updater.checkForUpdates();
     return { feedUrl };
   });
@@ -960,7 +1089,7 @@ app.whenReady().then(async () => {
     }
     await writeLog(
       'update',
-      `Downloading update. app=${app.getVersion()} server=${updateSession.serverVersion} feed=${updateSession.feedUrl}`,
+      `Downloading update. app=${app.getVersion()} target=${updateSession.targetVersion} feed=${updateSession.feedUrl}`,
     );
     await updateSession.updater.downloadUpdate();
   });
@@ -971,7 +1100,7 @@ app.whenReady().then(async () => {
     }
     await writeLog(
       'update',
-      `Installing update. app=${app.getVersion()} server=${updateSession.serverVersion} feed=${updateSession.feedUrl}`,
+      `Installing update. app=${app.getVersion()} target=${updateSession.targetVersion} feed=${updateSession.feedUrl}`,
     );
     updateSession.updater.quitAndInstall(false, true);
   });

@@ -2,6 +2,32 @@
 
 ## 2026-05-26
 
+### Baker Desktop GitHub update mode and remembered login
+
+What changed:
+
+- changed Baker Desktop update discovery to read GitHub Releases directly on app launch instead of inferring desktop updates from the connected server version
+- filtered desktop update choices to client release labels such as `1.0.5a` and `1.0.5b`, keeping numeric server image tags such as `1.0.5` out of the desktop updater list
+- added a desktop update button on the server connection screen and passed the same update entry point into the shared login surface next to the account field
+- added a version picker dialog so users can refresh GitHub releases, choose a desktop version, download it, and restart to install after the updater finishes
+- changed newer-version handling to notify without blocking connection or login
+- added an opt-in "remember account and password" checkbox on the login form; when enabled, the saved account is filled automatically on the next launch
+
+Why:
+
+- the release rules separate server and client versions: server releases use numeric tags, while client-only releases advance the trailing letter
+- desktop updates should follow the latest compatible client label from GitHub, not the server container image tag
+- users still need to be able to connect without updating immediately
+
+Validation:
+
+- `pnpm --filter @baker/desktop typecheck`
+- `pnpm --filter @baker/client typecheck`
+- `pnpm --filter @baker/desktop lint`
+- `pnpm --filter @baker/client lint`
+- `pnpm exec vitest run apps/desktop/src apps/desktop/electron`
+- browser screenshot check of the login surface with the remembered-credentials control
+
 ### Baker Desktop source picker and excluded-system-audio capture
 
 What changed:

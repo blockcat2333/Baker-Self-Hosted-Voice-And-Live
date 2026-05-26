@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiClient } from '@baker/sdk';
@@ -8,21 +8,82 @@ import { useAuthStore } from './auth-store';
 
 export interface LoginViewProps {
   api: ApiClient;
-  publicConfig: PublicServerConfig;
   bootstrapError?: string | null;
+  desktopUpdateAction?: ReactNode;
+  publicConfig: PublicServerConfig;
 }
 
-export function LoginView({ api, publicConfig, bootstrapError }: LoginViewProps) {
+const REMEMBERED_CREDENTIALS_KEY = 'baker_remembered_credentials_v1';
+
+function loadRememberedCredentials(): { email: string; password: string; username: string } | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem(REMEMBERED_CREDENTIALS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<{ email: string; password: string; username: string }>;
+    if (typeof parsed.email !== 'string' || typeof parsed.password !== 'string') {
+      return null;
+    }
+    return {
+      email: parsed.email,
+      password: parsed.password,
+      username: typeof parsed.username === 'string' ? parsed.username : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveRememberedCredentials(input: { email: string; password: string; username: string }) {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(REMEMBERED_CREDENTIALS_KEY, JSON.stringify(input));
+  } catch {
+    // ignore unavailable storage
+  }
+}
+
+function clearRememberedCredentials() {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(REMEMBERED_CREDENTIALS_KEY);
+  } catch {
+    // ignore unavailable storage
+  }
+}
+
+export function LoginView({ api, publicConfig, bootstrapError, desktopUpdateAction }: LoginViewProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [username, setUsername] = useState('');
+  const [rememberCredentials, setRememberCredentials] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const { isLoading, error, login, register } = useAuthStore();
   const displayedError = localError ?? error ?? bootstrapError ?? null;
+
+  useEffect(() => {
+    const remembered = loadRememberedCredentials();
+    if (!remembered) {
+      return;
+    }
+
+    setEmail(remembered.email);
+    setPassword(remembered.password);
+    setUsername(remembered.username);
+    setRememberCredentials(true);
+  }, []);
+
+  function persistCredentialsAfterSuccess() {
+    if (rememberCredentials) {
+      saveRememberedCredentials({ email, password, username });
+    } else {
+      clearRememberedCredentials();
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,6 +100,7 @@ export function LoginView({ api, publicConfig, bootstrapError }: LoginViewProps)
       } else {
         await register(api, email, password, username);
       }
+      persistCredentialsAfterSuccess();
     } catch {
       // Store error is already populated.
     }
@@ -82,7 +144,10 @@ export function LoginView({ api, publicConfig, bootstrapError }: LoginViewProps)
         <form onSubmit={handleSubmit} className="login-form">
           {mode === 'register' && publicConfig.allowPublicRegistration && (
             <label className="field">
-              <span>{t('common.username')}</span>
+              <div className="field-label-row">
+                <span>{t('common.username')}</span>
+                {desktopUpdateAction}
+              </div>
               <input
                 type="text"
                 value={username}
@@ -96,7 +161,10 @@ export function LoginView({ api, publicConfig, bootstrapError }: LoginViewProps)
           )}
 
           <label className="field">
-            <span>{t('common.email')}</span>
+            <div className="field-label-row">
+              <span>{t('common.email')}</span>
+              {mode === 'login' ? desktopUpdateAction : null}
+            </div>
             <input
               type="email"
               value={email}
@@ -131,6 +199,15 @@ export function LoginView({ api, publicConfig, bootstrapError }: LoginViewProps)
               />
             </label>
           )}
+
+          <label className="login-remember-row">
+            <input
+              type="checkbox"
+              checked={rememberCredentials}
+              onChange={(event) => setRememberCredentials(event.target.checked)}
+            />
+            <span>{t('auth.remember_credentials')}</span>
+          </label>
 
           {displayedError ? <p className="login-error">{displayedError}</p> : null}
 

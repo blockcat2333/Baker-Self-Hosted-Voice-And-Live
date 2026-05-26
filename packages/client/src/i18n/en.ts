@@ -42,6 +42,7 @@ export const en = {
     create_account: 'Create account',
     public_registration_disabled: 'Public registration is disabled. Sign in with an existing account.',
     passwords_do_not_match: 'Passwords do not match.',
+    remember_credentials: 'Remember account and password',
   },
   account: {
     username_length_error: 'Username must be between 2 and 32 characters.',

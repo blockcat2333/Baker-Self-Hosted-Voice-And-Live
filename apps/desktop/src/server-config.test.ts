@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isVersionGreater, normalizeServerInput, probeGateway, readServerHealth } from './server-config';
+import {
+  isClientReleaseVersion,
+  isServerVersionGreaterThanClient,
+  isVersionGreater,
+} from './versioning';
+import { normalizeServerInput, probeGateway, readServerHealth } from './server-config';
 
 const originalFetch = globalThis.fetch;
 
@@ -64,6 +69,21 @@ describe('desktop server config', () => {
     expect(isVersionGreater('1.10.0', '1.9.9')).toBe(true);
     expect(isVersionGreater('1.0.3', '1.0.3')).toBe(false);
     expect(isVersionGreater('1.0.2', '1.0.3')).toBe(false);
+    expect(isVersionGreater('1.0.5b', '1.0.5a')).toBe(true);
+    expect(isVersionGreater('1.0.6a', '1.0.5z')).toBe(true);
+    expect(isVersionGreater('1.0.5', '1.0.5a')).toBe(false);
+  });
+
+  it('classifies client release labels separately from server image tags', () => {
+    expect(isClientReleaseVersion('1.0.5a')).toBe(true);
+    expect(isClientReleaseVersion('v1.0.5b')).toBe(true);
+    expect(isClientReleaseVersion('1.0.5')).toBe(false);
+  });
+
+  it('compares server numeric releases against a lettered client release line', () => {
+    expect(isServerVersionGreaterThanClient('1.0.6', '1.0.5z')).toBe(true);
+    expect(isServerVersionGreaterThanClient('1.0.5', '1.0.5a')).toBe(false);
+    expect(isServerVersionGreaterThanClient('1.0.4', '1.0.5a')).toBe(false);
   });
 
   it('reads and validates server health', async () => {

@@ -42,6 +42,7 @@ export const zh = {
     create_account: '创建账户',
     public_registration_disabled: '已关闭公开注册。请使用已有账户登录。',
     passwords_do_not_match: '两次输入的密码不一致。',
+    remember_credentials: '记住账号和密码',
   },
   account: {
     username_length_error: '用户名长度必须在 2 到 32 个字符之间。',

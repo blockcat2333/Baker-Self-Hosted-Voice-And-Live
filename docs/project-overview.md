@@ -91,6 +91,7 @@ Implemented today:
 - auth + chat HTTP flows
 - authenticated username update through `PATCH /v1/auth/me`
 - public server-config fetch for login/client gating
+- opt-in remembered account/password autofill on the shared login surface
 - admin HTTP control-plane routes for settings, managed account creation, and managed channel creation/update
 - authenticated logout with durable session + refresh-token revocation
 - gateway auth, presence, message push, voice, and room stream signaling
@@ -121,6 +122,7 @@ Implemented today:
 - API/gateway access-token acceptance now depends on the backing auth session still being live, not just JWT signature/expiry
 - browser auth tokens now stay in `sessionStorage` instead of `localStorage`
 - the admin panel no longer persists the management password in browser storage
+- Baker Desktop checks GitHub Releases for lettered client release labels on launch and exposes a non-blocking version picker for selected desktop updates
 - HTTPS dev proxy upstream selection is now runtime-port aware (`runtime-ports.json` + Vite log parsing) to avoid stale `:80` routing that can break external domain voice connectivity
 - dev startup now performs Docker engine readiness checks (best-effort Docker Desktop auto-start + wait), and if Docker backend is stuck in `starting` it performs one automatic recovery attempt (`restart Docker Desktop + wsl --shutdown`) before failing
 - dev startup now reports Docker daemon last-error details and exits early when Docker backend is stuck in `starting`, with explicit `wsl --shutdown` recovery guidance

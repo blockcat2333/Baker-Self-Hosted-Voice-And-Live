@@ -48,6 +48,23 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-26 Baker Desktop GitHub Update Mode and Remembered Login
+
+- desktop startup now checks GitHub Releases for client release labels such as `1.0.5a`, independent of the connected server version
+- desktop update selection now follows the documented version model:
+  - server releases remain numeric tags such as `1.0.5`
+  - desktop/client releases use the server version plus a trailing letter such as `1.0.5a`
+- the desktop connection screen and shared login surface now expose a one-click update entry point that opens a GitHub release/version picker
+- newer desktop releases show a non-blocking prompt; users can continue connecting or logging in without updating
+- the login form now has an opt-in remembered account/password checkbox and auto-fills saved credentials on the next launch
+- validation completed:
+  - `pnpm --filter @baker/desktop typecheck`
+  - `pnpm --filter @baker/client typecheck`
+  - `pnpm --filter @baker/desktop lint`
+  - `pnpm --filter @baker/client lint`
+  - `pnpm exec vitest run apps/desktop/src apps/desktop/electron`
+  - Playwright screenshot check of the login form with the remembered-credentials control
+
 ### 2026-05-26 Baker Desktop Screen Picker and Excluded-Audio Capture
 
 - replaced the desktop screen-share text dialog with a custom Electron modal picker:
@@ -602,7 +619,7 @@ Open-source publication prep validation:
 - SFU mode is built in, but remains single-node and does not include recording, transcoding, HLS, or simulcast
 - voice and stream rooms are in-memory only, so multi-instance support is deferred
 - P2P remains the default media mode and safest fallback deployment path
-- desktop/Electron settings and auth/server-switch flows are validated; installer/update distribution remains outside this validation pass
+- desktop/Electron settings and auth/server-switch flows are validated; the GitHub release picker/update wiring is covered by type/lint/unit checks, but a real signed installer download/install cycle remains outside this validation pass
 - admin-configured web/app ports are persisted and surfaced through the API/control panel, but changing them does not hot-restart services automatically
 - channel `voiceQuality` is stored and manageable from the control panel, but it is not yet wired into actual voice media quality controls
 - the admin panel still uses one shared management password rather than per-admin identities or RBAC
@@ -613,7 +630,7 @@ Open-source publication prep validation:
 - cookie-based refresh-token storage if/when the product is ready to tighten browser session handling further
 - TURN / SFU media-adapter hardening beyond the current internal-secret gate
 - explicit guild/channel lifecycle beyond the current shared starter workspace
-- Desktop installer/update validation beyond the current real-app settings/auth/server-switch smoke
+- Desktop signed-installer download/install validation beyond the current release-picker wiring checks
 
 ## Next Recommendation
 

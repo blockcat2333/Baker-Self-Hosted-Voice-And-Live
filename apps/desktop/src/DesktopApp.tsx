@@ -4,7 +4,7 @@ import { AppRoot, createDesktopPlatformApi, useAuthStore } from '@baker/client';
 
 import {
   type DesktopServerConfig,
-  isVersionGreater,
+  isServerVersionGreaterThanClient,
   normalizeServerInput,
   probeGateway,
   readServerHealth,
@@ -20,12 +20,31 @@ type UpdateEventPayload = {
   error?: string;
   feedUrl?: string;
   percent?: number;
-  serverVersion?: string;
+  targetVersion?: string;
   state: 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error';
   version?: string;
 };
 
-type DesktopPhase = 'loading' | 'setup' | 'update' | 'app';
+type DesktopUpdateVersion = {
+  assetNames: string[];
+  hasInstaller: boolean;
+  isLatest: boolean;
+  name: string;
+  publishedAt: string | null;
+  releaseNotes: string | null;
+  releaseUrl: string | null;
+  tag: string;
+};
+
+type DesktopUpdateVersionsResponse = {
+  currentVersion: string;
+  hasNewer: boolean;
+  latestVersion: string | null;
+  repository: string;
+  versions: DesktopUpdateVersion[];
+};
+
+type DesktopPhase = 'loading' | 'setup' | 'app';
 
 class DesktopErrorBoundary extends Component<
   { children: ReactNode },
@@ -102,14 +121,19 @@ export function DesktopApp() {
   const [phase, setPhase] = useState<DesktopPhase>('loading');
   const [appInfo, setAppInfo] = useState<DesktopAppInfo | null>(null);
   const [serverConfig, setServerConfig] = useState<DesktopServerConfig | null>(null);
-  const [pendingUpdateConfig, setPendingUpdateConfig] = useState<DesktopServerConfig | null>(null);
   const [serverInput, setServerInput] = useState('');
   const [bootError, setBootError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateEvent, setUpdateEvent] = useState<UpdateEventPayload | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
-  const [skippedUpdate, setSkippedUpdate] = useState(false);
+  const [serverVersionWarning, setServerVersionWarning] = useState<string | null>(null);
+  const [updateCatalog, setUpdateCatalog] = useState<DesktopUpdateVersionsResponse | null>(null);
+  const [updateCatalogError, setUpdateCatalogError] = useState<string | null>(null);
+  const [isCheckingVersions, setIsCheckingVersions] = useState(false);
+  const [selectedUpdateTag, setSelectedUpdateTag] = useState('');
+  const [isUpdateChooserOpen, setIsUpdateChooserOpen] = useState(false);
+  const [isUpdateNoticeDismissed, setIsUpdateNoticeDismissed] = useState(false);
 
   useEffect(() => {
     return window.bakerDesktop?.onUpdateEvent((event) => {
@@ -135,6 +159,7 @@ export function DesktopApp() {
 
       if (info) {
         setAppInfo(info);
+        void refreshUpdateVersions({ openChooser: false, silent: true });
       }
 
       const saved = await window.bakerDesktop?.getSavedServer();
@@ -148,7 +173,7 @@ export function DesktopApp() {
       }
 
       setServerInput(saved.input);
-      await connectWithConfig(saved, info?.version ?? '0.0.0', false);
+      await connectWithConfig(saved, info?.version ?? '0.0.0');
     }
 
     void boot().catch((err) => {
@@ -161,11 +186,7 @@ export function DesktopApp() {
     };
   }, []);
 
-  async function connectWithConfig(
-    config: DesktopServerConfig,
-    appVersion: string,
-    skipUpdateCheck: boolean,
-  ) {
+  async function connectWithConfig(config: DesktopServerConfig, appVersion: string) {
     setIsConnecting(true);
     setBootError(null);
 
@@ -179,23 +200,18 @@ export function DesktopApp() {
       };
       await window.bakerDesktop?.saveServer(nextConfig);
       setServerConfig(nextConfig);
-
-      if (!skipUpdateCheck && isVersionGreater(health.version, appVersion)) {
-        setPendingUpdateConfig(nextConfig);
-        setUpdateEvent(null);
-        setUpdateError(null);
-        setPhase('update');
-        return;
-      }
-
-      setSkippedUpdate(skipUpdateCheck && isVersionGreater(health.version, appVersion));
+      setServerVersionWarning(
+        isServerVersionGreaterThanClient(health.version, appVersion)
+          ? `Server ${health.version} is newer than this client ${appVersion}. Check GitHub releases for a matching desktop client.`
+          : null,
+      );
       setPhase('app');
     } finally {
       setIsConnecting(false);
     }
   }
 
-  async function handleConnect(skipUpdateCheck = false) {
+  async function handleConnect() {
     const appVersion = appInfo?.version ?? '0.0.0';
 
     try {
@@ -207,7 +223,6 @@ export function DesktopApp() {
           serverVersion: '0.0.0',
         },
         appVersion,
-        skipUpdateCheck,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to Baker server.';
@@ -220,16 +235,66 @@ export function DesktopApp() {
     }
   }
 
+  async function refreshUpdateVersions({
+    openChooser,
+    silent,
+  }: {
+    openChooser: boolean;
+    silent: boolean;
+  }) {
+    if (openChooser) {
+      setIsUpdateChooserOpen(true);
+    }
+
+    setIsCheckingVersions(true);
+    if (!silent) {
+      setUpdateCatalogError(null);
+    }
+
+    try {
+      const response = await window.bakerDesktop?.listUpdateVersions();
+      if (!response) {
+        throw new Error('Desktop update API is unavailable.');
+      }
+      setUpdateCatalog(response);
+      setSelectedUpdateTag((current) => current || response.latestVersion || response.versions[0]?.tag || '');
+      if (response.hasNewer) {
+        setIsUpdateNoticeDismissed(false);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to check GitHub releases.';
+      setUpdateCatalogError(message);
+      if (!silent) {
+        void window.bakerDesktop?.logError({
+          message,
+          scope: 'update-list',
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
+    } finally {
+      setIsCheckingVersions(false);
+    }
+  }
+
+  async function openUpdateChooser() {
+    setIsUpdateChooserOpen(true);
+    if (!updateCatalog && !isCheckingVersions) {
+      await refreshUpdateVersions({ openChooser: true, silent: false });
+    }
+  }
+
   async function handleStartUpdate() {
-    if (!pendingUpdateConfig) {
+    if (!selectedUpdateTag) {
+      setUpdateError('Select a desktop version first.');
       return;
     }
 
     setIsUpdating(true);
     setUpdateError(null);
+    setUpdateEvent(null);
 
     try {
-      await window.bakerDesktop?.checkForUpdate(pendingUpdateConfig.serverVersion);
+      await window.bakerDesktop?.checkForUpdate(selectedUpdateTag);
       await window.bakerDesktop?.downloadUpdate();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Update failed.';
@@ -243,65 +308,129 @@ export function DesktopApp() {
     }
   }
 
-  function continueToApp(skipped: boolean) {
-    if (!pendingUpdateConfig) {
-      return;
-    }
-    setServerConfig(pendingUpdateConfig);
-    setSkippedUpdate(skipped);
-    setPhase('app');
-  }
-
   async function switchServer() {
     await useAuthStore.getState().logout();
     await window.bakerDesktop?.clearSavedServer();
-    setPendingUpdateConfig(null);
     setServerConfig(null);
-    setSkippedUpdate(false);
+    setServerVersionWarning(null);
     setBootError(null);
     setPhase('setup');
   }
 
-  if (phase === 'app' && serverConfig) {
-    const warning =
-      skippedUpdate && appInfo
-        ? `Server ${serverConfig.serverVersion} is newer than this client ${appInfo.version}. You chose to connect without updating.`
-        : null;
+  const selectedUpdateVersion =
+    updateCatalog?.versions.find((version) => version.tag === selectedUpdateTag) ?? null;
+  const updateNotice =
+    updateCatalog?.hasNewer && updateCatalog.latestVersion && !isUpdateNoticeDismissed
+      ? `Baker Desktop ${updateCatalog.latestVersion} is available. Current version: ${updateCatalog.currentVersion}.`
+      : null;
+  const updateAction = (
+    <button
+      type="button"
+      className="desktop-update-chip"
+      onClick={() => {
+        void openUpdateChooser();
+      }}
+      disabled={isCheckingVersions}
+      title="Check GitHub releases"
+    >
+      {isCheckingVersions ? 'Checking...' : updateCatalog?.hasNewer ? 'Update available' : 'Update'}
+    </button>
+  );
+  const desktopUpdateOverlay = (
+    <>
+      {updateNotice ? (
+        <div className="desktop-update-toast" role="status">
+          <span>{updateNotice}</span>
+          <div className="desktop-update-toast-actions">
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                void openUpdateChooser();
+              }}
+            >
+              View versions
+            </button>
+            <button type="button" className="btn-ghost" onClick={() => setIsUpdateNoticeDismissed(true)}>
+              Later
+            </button>
+          </div>
+        </div>
+      ) : null}
 
-    return (
-      <DesktopErrorBoundary>
-        <AppRoot
-          apiBaseUrl={serverConfig.apiBaseUrl}
-          gatewayUrl={serverConfig.gatewayUrl}
-          onChangeServer={() => {
-            void switchServer();
-          }}
-          platformApi={platformApi}
-          versionWarning={warning}
-        />
-      </DesktopErrorBoundary>
-    );
-  }
+      {isUpdateChooserOpen ? (
+        <div className="desktop-update-dialog-backdrop" role="presentation">
+          <section className="desktop-update-dialog" role="dialog" aria-modal="true" aria-labelledby="desktop-update-title">
+            <header className="desktop-update-dialog-header">
+              <div>
+                <p className="desktop-boot-eyebrow">GitHub Releases</p>
+                <h2 id="desktop-update-title" className="desktop-update-dialog-title">Desktop updates</h2>
+              </div>
+              <button type="button" className="btn-ghost" onClick={() => setIsUpdateChooserOpen(false)}>
+                Close
+              </button>
+            </header>
 
-  if (phase === 'update' && pendingUpdateConfig && appInfo) {
-    const isDownloaded = updateEvent?.state === 'downloaded';
+            <div className="desktop-update-dialog-body">
+              <div className="desktop-update-status">
+                <span>Current desktop version: {updateCatalog?.currentVersion ?? appInfo?.version ?? 'unknown'}</span>
+                <span>{updateEventLabel(updateEvent)}</span>
+                {updateCatalogError ? <strong>{updateCatalogError}</strong> : null}
+                {updateError ? <strong>{updateError}</strong> : null}
+              </div>
 
-    return (
-      <DesktopErrorBoundary>
-        <div className="desktop-boot-shell">
-          <section className="desktop-boot-panel">
-            <p className="desktop-boot-eyebrow">Baker Desktop</p>
-            <h1 className="desktop-boot-title">Update available</h1>
-            <p className="desktop-boot-copy">
-              Server {pendingUpdateConfig.serverVersion} is newer than this client {appInfo.version}. You can update now
-              or continue connecting without updating.
-            </p>
-            <div className="desktop-update-status">
-              <span>{updateEventLabel(updateEvent)}</span>
-              {updateError ? <strong>{updateError}</strong> : null}
+              <label className="desktop-server-field">
+                <span>Target desktop version</span>
+                <select
+                  value={selectedUpdateTag}
+                  onChange={(event) => setSelectedUpdateTag(event.target.value)}
+                  disabled={isCheckingVersions || isUpdating}
+                >
+                  <option value="">Select a version</option>
+                  {(updateCatalog?.versions ?? []).map((version) => (
+                    <option key={version.tag} value={version.tag}>
+                      {version.tag}{version.isLatest ? ' (latest)' : ''}{version.hasInstaller ? '' : ' (metadata only)'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedUpdateVersion ? (
+                <div className="desktop-update-version-detail">
+                  <span>{selectedUpdateVersion.name}</span>
+                  {selectedUpdateVersion.publishedAt ? (
+                    <span>Published {new Date(selectedUpdateVersion.publishedAt).toLocaleString()}</span>
+                  ) : null}
+                  {selectedUpdateVersion.releaseUrl ? (
+                    <button
+                      type="button"
+                      className="btn-ghost"
+                      onClick={() => {
+                        void window.bakerDesktop?.openExternal(selectedUpdateVersion.releaseUrl!);
+                      }}
+                    >
+                      Open release notes
+                    </button>
+                  ) : null}
+                  {!selectedUpdateVersion.hasInstaller ? (
+                    <strong>This release does not include desktop update assets.</strong>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
-            <div className="desktop-boot-actions">
-              {isDownloaded ? (
+
+            <footer className="desktop-update-dialog-actions">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  void refreshUpdateVersions({ openChooser: true, silent: false });
+                }}
+                disabled={isCheckingVersions || isUpdating}
+              >
+                Refresh list
+              </button>
+              {updateEvent?.state === 'downloaded' ? (
                 <button
                   type="button"
                   className="btn-primary"
@@ -312,64 +441,83 @@ export function DesktopApp() {
                   Restart and install
                 </button>
               ) : (
-                <button type="button" className="btn-primary" disabled={isUpdating} onClick={() => void handleStartUpdate()}>
-                  {isUpdating ? 'Updating...' : updateError ? 'Retry update' : 'Update now'}
-                </button>
-              )}
-              <button type="button" className="btn-ghost" onClick={() => continueToApp(true)}>
-                Continue
-              </button>
-              {updateError ? (
                 <button
                   type="button"
-                  className="btn-ghost"
-                  onClick={() => {
-                    void window.bakerDesktop?.openLogs();
-                  }}
+                  className="btn-primary"
+                  onClick={() => void handleStartUpdate()}
+                  disabled={!selectedUpdateTag || selectedUpdateVersion?.hasInstaller === false || isCheckingVersions || isUpdating}
                 >
-                  Open logs
+                  {isUpdating ? 'Updating...' : updateError ? 'Retry update' : 'Update selected'}
                 </button>
-              ) : null}
-            </div>
+              )}
+            </footer>
           </section>
         </div>
+      ) : null}
+    </>
+  );
+
+  if (phase === 'app' && serverConfig) {
+    const warning = serverVersionWarning;
+
+    return (
+      <DesktopErrorBoundary>
+        <>
+          <AppRoot
+            apiBaseUrl={serverConfig.apiBaseUrl}
+            desktopUpdateAction={updateAction}
+            gatewayUrl={serverConfig.gatewayUrl}
+            onChangeServer={() => {
+              void switchServer();
+            }}
+            platformApi={platformApi}
+            versionWarning={warning}
+          />
+          {desktopUpdateOverlay}
+        </>
       </DesktopErrorBoundary>
     );
   }
 
   return (
     <DesktopErrorBoundary>
-      <div className="desktop-boot-shell">
-        <form
-          className="desktop-boot-panel"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void handleConnect(false);
-          }}
-        >
-          <p className="desktop-boot-eyebrow">Baker Desktop {appInfo?.version ?? ''}</p>
-          <h1 className="desktop-boot-title">
-            {phase === 'loading' ? 'Starting Baker...' : 'Connect to your Baker server'}
-          </h1>
-          <label className="desktop-server-field">
-            <span>Domain or IP address</span>
-            <input
-              type="text"
-              value={serverInput}
-              onChange={(event) => setServerInput(event.target.value)}
-              placeholder="example.com or 192.168.1.10"
-              autoFocus
-            />
-            <small>Include the port when your server uses one, for example https://ark.kkdy.space:3323</small>
-          </label>
-          {bootError ? <p className="desktop-boot-error">{bootError}</p> : null}
-          <div className="desktop-boot-actions">
-            <button type="submit" className="btn-primary" disabled={phase === 'loading' || isConnecting}>
-              {isConnecting ? 'Connecting...' : 'Connect'}
-            </button>
-          </div>
-        </form>
-      </div>
+      <>
+        <div className="desktop-boot-shell">
+          <form
+            className="desktop-boot-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleConnect();
+            }}
+          >
+            <p className="desktop-boot-eyebrow">Baker Desktop {appInfo?.version ?? ''}</p>
+            <h1 className="desktop-boot-title">
+              {phase === 'loading' ? 'Starting Baker...' : 'Connect to your Baker server'}
+            </h1>
+            <label className="desktop-server-field">
+              <div className="desktop-field-label-row">
+                <span>Domain or IP address</span>
+                {updateAction}
+              </div>
+              <input
+                type="text"
+                value={serverInput}
+                onChange={(event) => setServerInput(event.target.value)}
+                placeholder="example.com or 192.168.1.10"
+                autoFocus
+              />
+              <small>Include the port when your server uses one, for example https://ark.kkdy.space:3323</small>
+            </label>
+            {bootError ? <p className="desktop-boot-error">{bootError}</p> : null}
+            <div className="desktop-boot-actions">
+              <button type="submit" className="btn-primary" disabled={phase === 'loading' || isConnecting}>
+                {isConnecting ? 'Connecting...' : 'Connect'}
+              </button>
+            </div>
+          </form>
+        </div>
+        {desktopUpdateOverlay}
+      </>
     </DesktopErrorBoundary>
   );
 }

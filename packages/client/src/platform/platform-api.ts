@@ -19,7 +19,7 @@ export function createBrowserPlatformApi(): PlatformApi {
 declare global {
   interface Window {
     bakerDesktop?: {
-      checkForUpdate(serverVersion: string): Promise<{ feedUrl: string }>;
+      checkForUpdate(targetVersion: string): Promise<{ feedUrl: string }>;
       clearSavedServer(): Promise<void>;
       downloadUpdate(): Promise<void>;
       getAppInfo(): Promise<{ logsDirectory: string; platform: string; version: string }>;
@@ -32,12 +32,28 @@ declare global {
       } | null>;
       installUpdate(): Promise<void>;
       logError(payload: { message: string; scope: string; stack?: string }): Promise<void>;
+      listUpdateVersions(): Promise<{
+        currentVersion: string;
+        hasNewer: boolean;
+        latestVersion: string | null;
+        repository: string;
+        versions: Array<{
+          assetNames: string[];
+          hasInstaller: boolean;
+          isLatest: boolean;
+          name: string;
+          publishedAt: string | null;
+          releaseNotes: string | null;
+          releaseUrl: string | null;
+          tag: string;
+        }>;
+      }>;
       onUpdateEvent(
         callback: (payload: {
           error?: string;
           feedUrl?: string;
           percent?: number;
-          serverVersion?: string;
+          targetVersion?: string;
           state: 'checking' | 'available' | 'not_available' | 'downloading' | 'downloaded' | 'error';
           version?: string;
         }) => void,

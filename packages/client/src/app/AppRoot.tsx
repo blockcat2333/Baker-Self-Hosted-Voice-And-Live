@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { I18nextProvider, useTranslation } from 'react-i18next';
 
 import type { PublicServerConfig } from '@baker/protocol';
@@ -15,6 +15,7 @@ import { deriveDefaultApiBaseUrl, deriveDefaultGatewayUrl } from './derive-defau
 
 export interface AppRootProps {
   apiBaseUrl?: string;
+  desktopUpdateAction?: ReactNode;
   gatewayUrl?: string;
   mediaBaseUrl?: string;
   onChangeServer?: () => void;
@@ -32,6 +33,7 @@ export function AppRoot(props: AppRootProps) {
 
 function AppRootContent({
   apiBaseUrl,
+  desktopUpdateAction,
   gatewayUrl,
   onChangeServer,
   platformApi: _platformApi,
@@ -153,7 +155,14 @@ function AppRootContent({
   }
 
   if (!accessToken) {
-    return <LoginView api={api} publicConfig={publicConfig} bootstrapError={bootstrapError} />;
+    return (
+      <LoginView
+        api={api}
+        bootstrapError={bootstrapError}
+        desktopUpdateAction={desktopUpdateAction}
+        publicConfig={publicConfig}
+      />
+    );
   }
 
   if (isBootstrapping) {

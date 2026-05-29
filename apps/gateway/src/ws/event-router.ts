@@ -43,6 +43,14 @@ import {
   MediaSfuProduceCommandDataSchema,
   MediaSfuResumeConsumerCommandDataSchema,
   MediaSignalCommandDataSchema,
+  MusicListenAckDataSchema,
+  MusicListenCommandDataSchema,
+  MusicStartAckDataSchema,
+  MusicStartCommandDataSchema,
+  MusicStopAckDataSchema,
+  MusicStopCommandDataSchema,
+  MusicUnlistenAckDataSchema,
+  MusicUnlistenCommandDataSchema,
   StreamStartAckDataSchema,
   StreamStartCommandDataSchema,
   StreamStopAckDataSchema,
@@ -92,6 +100,27 @@ function resolveTargetPublication(
   }
 
   return null;
+}
+
+async function validateVoiceChannelAccess(
+  runtime: GatewayRuntime,
+  channelId: string,
+  userId: string,
+): Promise<{ ok: true } | { code: 'CHANNEL_NOT_FOUND' | 'CHANNEL_NOT_TEXT' | 'FORBIDDEN'; message: string; ok: false }> {
+  const channel = await runtime.db.channels.findById(channelId);
+  if (!channel) {
+    return { code: 'CHANNEL_NOT_FOUND', message: 'Channel not found.', ok: false };
+  }
+  if (channel.type !== 'voice') {
+    return { code: 'CHANNEL_NOT_TEXT', message: 'This channel is not a voice channel.', ok: false };
+  }
+
+  const membership = await runtime.db.guildMembers.findMembership(channel.guildId, userId);
+  if (!membership) {
+    return { code: 'FORBIDDEN', message: 'You are not a member of the guild that owns this channel.', ok: false };
+  }
+
+  return { ok: true };
 }
 
 type RouterReply =
@@ -166,6 +195,18 @@ export async function routeGatewayMessage(
 
     case 'voice.speaking.updated':
       return handleVoiceSpeaking(connection, reqId, data, runtime);
+
+    case 'music.start':
+      return handleMusicStart(connection, reqId, data, runtime);
+
+    case 'music.stop':
+      return handleMusicStop(connection, reqId, data, runtime);
+
+    case 'music.listen':
+      return handleMusicListen(connection, reqId, data, runtime);
+
+    case 'music.unlisten':
+      return handleMusicUnlisten(connection, reqId, data, runtime);
 
     case 'stream.start':
       return handleStreamStart(connection, reqId, data, runtime);
@@ -441,6 +482,9 @@ async function handleVoiceJoin(
   if (runtime.streamRoom.getPublications(channelId).length > 0) {
     runtime.streamRoom.broadcastStateUpdated(channelId, [connection.id]);
   }
+  if (runtime.musicRoom.getPublications(channelId).length > 0) {
+    runtime.musicRoom.broadcastStateUpdated(channelId, [connection.id]);
+  }
 
   log.info({ connectionId: connection.id, userId, channelId, sessionId: mediaSession.sessionId }, 'User joined voice channel');
 
@@ -553,6 +597,36 @@ async function handleVoiceLeave(
     runtime.streamRoom.broadcastStateUpdated(change.channelId, voiceConnectionIds);
   }
 
+  const musicChanges = runtime.musicRoom.leaveChannelForUser(channelId, userId);
+  for (const change of musicChanges) {
+    const voiceConnectionIds = getVoiceConnectionIds(runtime, change.channelId);
+    if (change.type === 'host_stopped') {
+      runtime.musicRoom.broadcastStateUpdated(change.channelId, [
+        ...change.connectionIds,
+        ...voiceConnectionIds,
+      ]);
+      if (runtime.mediaMode === 'sfu') {
+        await runtime.closeSfuSession({
+          channelId: change.channelId,
+          mode: 'music_publish',
+          sessionId: change.sessionId,
+          streamId: change.musicId,
+        });
+      }
+      continue;
+    }
+
+    if (runtime.mediaMode === 'sfu') {
+      await runtime.closeSfuSession({
+        channelId: change.channelId,
+        mode: 'music_listen',
+        sessionId: change.sessionId,
+        streamId: change.musicId,
+      });
+    }
+    runtime.musicRoom.broadcastStateUpdated(change.channelId, voiceConnectionIds);
+  }
+
   log.info({ connectionId: connection.id, userId, channelId }, 'User left voice channel');
 
   return createAckEnvelope(reqId, VoiceLeaveAckDataSchema.parse({ channelId }));
@@ -637,6 +711,301 @@ async function handleVoiceSpeaking(
 }
 
 // ── media.signal.* relay ──────────────────────────────────────────────────────
+
+async function handleMusicStart(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MusicStartCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'music.start requires { channelId: string (uuid) }.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const { channelId } = parsed.data;
+  const userId = connection.userId as string;
+  const access = await validateVoiceChannelAccess(runtime, channelId, userId);
+  if (!access.ok) {
+    return createErrorEnvelope({ code: access.code, message: access.message, reqId, retryable: false });
+  }
+
+  if (!runtime.voiceRoom.getParticipant(channelId, userId)) {
+    return createErrorEnvelope({
+      code: 'VOICE_NOT_JOINED',
+      message: 'You must be in the voice channel before sharing music.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  if (runtime.musicRoom.findHostedPublicationByUser(userId, channelId)) {
+    return createErrorEnvelope({
+      code: 'MUSIC_ALREADY_LIVE',
+      message: 'You already have an active music share in this voice channel.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const musicId = randomUUID();
+  let mediaSession: MediaSessionResponse;
+  try {
+    mediaSession = await runtime.createMediaSession({
+      channelId,
+      mode: 'music_publish',
+      sessionId: randomUUID(),
+      streamId: musicId,
+      userId,
+    });
+  } catch (err) {
+    log.warn({ err, channelId, userId }, 'Music media session create failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to create music session. Try again.',
+      reqId,
+      retryable: true,
+    });
+  }
+
+  const started = runtime.musicRoom.start(channelId, musicId, userId, connection.id, mediaSession.sessionId);
+  if (!started) {
+    return createErrorEnvelope({
+      code: 'MUSIC_ALREADY_LIVE',
+      message: 'You already have an active music share in this voice channel.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  runtime.musicRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+
+  return createAckEnvelope(reqId, MusicStartAckDataSchema.parse({
+    channelId,
+    iceServers: mediaSession.iceServers,
+    mediaMode: runtime.mediaMode,
+    musicId,
+    sessionId: mediaSession.sessionId,
+    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
+  }));
+}
+
+async function handleMusicStop(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MusicStopCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'music.stop requires { channelId: string (uuid), musicId?: string (uuid) }.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const { channelId, musicId } = parsed.data;
+  const userId = connection.userId as string;
+  const publication = musicId
+    ? runtime.musicRoom.getPublication(channelId, musicId)
+    : runtime.musicRoom.findHostedPublicationByUser(userId, channelId);
+
+  if (!publication) {
+    return createErrorEnvelope({
+      code: musicId ? 'MUSIC_NOT_FOUND' : 'MUSIC_NOT_HOST',
+      message: musicId
+        ? 'Music share not found in this channel.'
+        : 'You do not have an active music share in this channel.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  if (publication.host.userId !== userId) {
+    return createErrorEnvelope({
+      code: 'MUSIC_NOT_HOST',
+      message: 'Only the active host can stop this music share.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const stopped = runtime.musicRoom.stop(channelId, publication.musicId, userId);
+  if (!stopped) {
+    return createErrorEnvelope({
+      code: 'MUSIC_NOT_FOUND',
+      message: 'Music share not found in this channel.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  if (runtime.mediaMode === 'sfu') {
+    await runtime.closeSfuSession({
+      channelId,
+      mode: 'music_publish',
+      sessionId: stopped.sessionId,
+      streamId: stopped.musicId,
+    });
+  }
+
+  runtime.musicRoom.broadcastStateUpdated(channelId, [
+    ...stopped.connectionIds,
+    ...getVoiceConnectionIds(runtime, channelId),
+  ]);
+
+  return createAckEnvelope(reqId, MusicStopAckDataSchema.parse({ channelId, musicId: stopped.musicId }));
+}
+
+async function handleMusicListen(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MusicListenCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'music.listen requires { channelId: string (uuid), musicId: string (uuid) }.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const { channelId, musicId } = parsed.data;
+  const userId = connection.userId as string;
+  const access = await validateVoiceChannelAccess(runtime, channelId, userId);
+  if (!access.ok) {
+    return createErrorEnvelope({ code: access.code, message: access.message, reqId, retryable: false });
+  }
+
+  if (!runtime.voiceRoom.getParticipant(channelId, userId)) {
+    return createErrorEnvelope({
+      code: 'VOICE_NOT_JOINED',
+      message: 'You must be in the voice channel before listening to shared music.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const publication = runtime.musicRoom.getPublication(channelId, musicId);
+  if (!publication) {
+    return createErrorEnvelope({
+      code: 'MUSIC_NOT_LIVE',
+      message: 'No active music share exists for this id.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  if (publication.host.userId === userId) {
+    return createErrorEnvelope({
+      code: 'MUSIC_ALREADY_LISTENING',
+      message: 'You cannot listen to your own music share.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const existingListener = runtime.musicRoom.getListener(channelId, musicId, userId);
+  if (existingListener) {
+    return createAckEnvelope(reqId, MusicListenAckDataSchema.parse({
+      channelId,
+      hostSessionId: publication.host.sessionId,
+      hostUserId: publication.host.userId,
+      iceServers: [],
+      mediaMode: runtime.mediaMode,
+      musicId,
+      sessionId: existingListener.sessionId,
+    }));
+  }
+
+  let mediaSession: MediaSessionResponse;
+  try {
+    mediaSession = await runtime.createMediaSession({
+      channelId,
+      mode: 'music_listen',
+      sessionId: randomUUID(),
+      streamId: musicId,
+      userId,
+    });
+  } catch (err) {
+    log.warn({ err, channelId, musicId, userId }, 'Music listen media session create failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to join music listen session. Try again.',
+      reqId,
+      retryable: true,
+    });
+  }
+
+  const listen = runtime.musicRoom.addListener(channelId, musicId, userId, connection.id, mediaSession.sessionId);
+  if (!listen) {
+    return createErrorEnvelope({
+      code: 'MUSIC_NOT_LIVE',
+      message: 'No active music share exists for this id.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  runtime.musicRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+
+  return createAckEnvelope(reqId, MusicListenAckDataSchema.parse({
+    channelId,
+    hostSessionId: listen.publication.host.sessionId,
+    hostUserId: listen.publication.host.userId,
+    iceServers: mediaSession.iceServers,
+    mediaMode: runtime.mediaMode,
+    musicId,
+    sessionId: listen.listenerSessionId,
+    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
+  }));
+}
+
+async function handleMusicUnlisten(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MusicUnlistenCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'music.unlisten requires { channelId: string (uuid), musicId: string (uuid) }.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  const { channelId, musicId } = parsed.data;
+  const userId = connection.userId as string;
+  const listener = runtime.musicRoom.getListener(channelId, musicId, userId);
+  const removed = runtime.musicRoom.removeListener(channelId, musicId, userId);
+
+  if (removed) {
+    if (runtime.mediaMode === 'sfu' && listener) {
+      await runtime.closeSfuSession({
+        channelId,
+        mode: 'music_listen',
+        sessionId: listener.sessionId,
+        streamId: musicId,
+      });
+    }
+    runtime.musicRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+  }
+
+  return createAckEnvelope(reqId, MusicUnlistenAckDataSchema.parse({ channelId, musicId }));
+}
 
 async function handleStreamStart(
   connection: GatewayConnection,
@@ -1061,7 +1430,11 @@ function handleMediaSignalRelay(
   const targetConn = runtime.connections.findByUserId(targetUserId);
   if (!targetConn) {
     return createErrorEnvelope({
-      code: signal.session.mode === 'voice' ? 'VOICE_NOT_JOINED' : 'STREAM_NOT_LIVE',
+      code: signal.session.mode === 'voice'
+        ? 'VOICE_NOT_JOINED'
+        : signal.session.mode === 'music_publish' || signal.session.mode === 'music_listen'
+          ? 'MUSIC_NOT_LIVE'
+          : 'STREAM_NOT_LIVE',
       message: 'Target user is not connected.',
       reqId,
       retryable: false,
@@ -1080,14 +1453,34 @@ function handleMediaSignalRelay(
         retryable: false,
       });
     }
-  } else if (!runtime.streamRoom.canRelaySignal(
-    signal.session.channelId,
-    signal.session.streamId,
-    signal.session.mode,
-    fromUserId,
-    signal.session.sessionId,
-    targetUserId,
-  )) {
+  } else if (
+    (signal.session.mode === 'music_publish' || signal.session.mode === 'music_listen') &&
+    !runtime.musicRoom.canRelaySignal(
+      signal.session.channelId,
+      signal.session.streamId,
+      signal.session.mode,
+      fromUserId,
+      signal.session.sessionId,
+      targetUserId,
+    )
+  ) {
+    return createErrorEnvelope({
+      code: 'MUSIC_NOT_LIVE',
+      message: 'Music signaling is only allowed for the active host/listener session.',
+      reqId,
+      retryable: false,
+    });
+  } else if (
+    (signal.session.mode === 'stream_publish' || signal.session.mode === 'stream_watch') &&
+    !runtime.streamRoom.canRelaySignal(
+      signal.session.channelId,
+      signal.session.streamId,
+      signal.session.mode,
+      fromUserId,
+      signal.session.sessionId,
+      targetUserId,
+    )
+  ) {
     return createErrorEnvelope({
       code: 'STREAM_NOT_LIVE',
       message: 'Stream signaling is only allowed for the active host/viewer session.',
@@ -1111,7 +1504,12 @@ function handleMediaSignalRelay(
 function validateSfuAccess(
   connection: GatewayConnection,
   runtime: GatewayRuntime,
-  descriptor: { channelId: string; mode: 'stream_publish' | 'stream_watch' | 'voice'; sessionId: string; streamId?: string },
+  descriptor: {
+    channelId: string;
+    mode: 'music_listen' | 'music_publish' | 'stream_publish' | 'stream_watch' | 'voice';
+    sessionId: string;
+    streamId?: string;
+  },
 ): boolean {
   const userId = connection.userId as string;
 
@@ -1126,6 +1524,20 @@ function validateSfuAccess(
 
   if (!descriptor.streamId) {
     return false;
+  }
+
+  if (descriptor.mode === 'music_publish' || descriptor.mode === 'music_listen') {
+    const publication = runtime.musicRoom.getPublication(descriptor.channelId, descriptor.streamId);
+    if (!publication) {
+      return false;
+    }
+
+    if (descriptor.mode === 'music_publish') {
+      return publication.host.userId === userId && publication.host.sessionId === descriptor.sessionId;
+    }
+
+    const listener = publication.listeners.get(userId);
+    return Boolean(listener && listener.connectionId === connection.id && listener.sessionId === descriptor.sessionId);
   }
 
   const publication = runtime.streamRoom.getPublication(descriptor.channelId, descriptor.streamId);

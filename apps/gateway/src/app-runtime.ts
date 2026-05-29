@@ -46,6 +46,7 @@ import type { DatabaseAccess } from '@baker/db';
 import type { RedisClient } from './lib/redis';
 import type { TokenVerifier } from './lib/token-verifier';
 import { ConnectionManager } from './ws/connection-manager';
+import { MusicRoomManager } from './ws/music-room-manager';
 import { PresenceManager } from './ws/presence-manager';
 import { StreamRoomManager } from './ws/stream-room-manager';
 import { VoiceRoomManager } from './ws/voice-room-manager';
@@ -73,6 +74,7 @@ export interface GatewayRuntimeOptions {
 export class GatewayRuntime {
   readonly connections: ConnectionManager;
   readonly presence: PresenceManager;
+  readonly musicRoom: MusicRoomManager;
   readonly streamRoom: StreamRoomManager;
   readonly voiceRoom: VoiceRoomManager;
   readonly tokenVerifier: TokenVerifier;
@@ -95,6 +97,7 @@ export class GatewayRuntime {
     this.subClient = options.subClient;
     this.tokenVerifier = options.tokenVerifier;
     this.presence = new PresenceManager(this.connections, options.pubClient);
+    this.musicRoom = new MusicRoomManager(this.connections);
     this.streamRoom = new StreamRoomManager(this.connections);
     this.voiceRoom = new VoiceRoomManager(this.connections);
   }
@@ -295,9 +298,11 @@ export class GatewayRuntime {
     this.mediaMode = mediaMode;
     const voiceChannelIds = this.voiceRoom.getActiveChannelIds();
     const streamChanges = this.streamRoom.clearAll();
+    const musicChanges = this.musicRoom.clearAll();
     const affectedChannelIds = [...new Set([
       ...voiceChannelIds,
       ...streamChanges.map((change) => change.channelId),
+      ...musicChanges.map((change) => change.channelId),
     ])];
     const targetConnectionIds = new Set<string>();
 
@@ -315,6 +320,14 @@ export class GatewayRuntime {
           targetConnectionIds.add(connectionId);
         }
         void this.db.streamSessions.updateStatus(change.sessionId, 'idle', { endedAt: new Date() });
+      }
+    }
+
+    for (const change of musicChanges) {
+      if (change.type === 'host_stopped') {
+        for (const connectionId of change.connectionIds) {
+          targetConnectionIds.add(connectionId);
+        }
       }
     }
 
@@ -345,9 +358,12 @@ export class GatewayRuntime {
   }
 
   private broadcastSfuProducerEvent(event: 'media.sfu.producer.added' | 'media.sfu.producer.removed', producer: SfuProducer): void {
-    const connectionIds = producer.source === 'voice'
-      ? this.voiceRoom.getParticipants(producer.channelId).map((participant) => participant.connectionId)
-      : this.streamRoom.getAudienceConnectionIds(producer.channelId, producer.streamId);
+    const connectionIds =
+      producer.source === 'voice'
+        ? this.voiceRoom.getParticipants(producer.channelId).map((participant) => participant.connectionId)
+        : producer.source === 'music'
+          ? this.voiceRoom.getParticipants(producer.channelId).map((participant) => participant.connectionId)
+          : this.streamRoom.getAudienceConnectionIds(producer.channelId, producer.streamId);
 
     for (const connectionId of connectionIds) {
       const conn = this.connections.getById(connectionId);

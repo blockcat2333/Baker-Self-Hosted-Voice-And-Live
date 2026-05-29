@@ -11,7 +11,15 @@ export interface ExcludedSystemAudioCaptureSession {
   sessionId: string;
 }
 
+export interface WindowAudioSource {
+  id: string;
+  processId: number;
+  title: string;
+}
+
 interface RunningExcludedSystemAudioSession extends ExcludedSystemAudioCaptureSession {
+  chunkEvent: string;
+  endedEvent: string;
   process: ChildProcess;
   stderr: string;
   webContents: WebContents;
@@ -92,12 +100,97 @@ function stopProcess(child: ChildProcess) {
   child.kill();
 }
 
-export async function startExcludedSystemAudioCapture(
+async function runHelperJson(currentDirectory: string, args: string[]): Promise<unknown> {
+  if (process.platform !== 'win32') {
+    throw new Error('Window audio helper is only available on Windows.');
+  }
+
+  const helperPath = getExcludedSystemAudioHelperPath(currentDirectory);
+  await fs.access(helperPath);
+
+  return await new Promise((resolve, reject) => {
+    const child = spawn(helperPath, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.once('error', reject);
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `Window audio helper exited with code ${code}.`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch {
+        reject(new Error('Window audio helper returned invalid JSON.'));
+      }
+    });
+  });
+}
+
+export async function listWindowAudioSources(currentDirectory: string): Promise<WindowAudioSource[]> {
+  const raw = await runHelperJson(currentDirectory, ['--list-windows']);
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.flatMap((item): WindowAudioSource[] => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+    const source = item as Partial<WindowAudioSource>;
+    if (
+      typeof source.id !== 'string' ||
+      typeof source.title !== 'string' ||
+      typeof source.processId !== 'number' ||
+      !Number.isInteger(source.processId) ||
+      source.processId <= 0
+    ) {
+      return [];
+    }
+    return [{ id: source.id, processId: source.processId, title: source.title }];
+  });
+}
+
+export async function getWindowAudioLevels(
+  currentDirectory: string,
+  processIds: number[],
+): Promise<Record<string, number>> {
+  if (processIds.length === 0) {
+    return {};
+  }
+
+  const raw = await runHelperJson(currentDirectory, ['--meter-once', ...processIds.map(String)]);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+
+  const levels: Record<string, number> = {};
+  for (const [processId, value] of Object.entries(raw)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      levels[processId] = Math.max(0, Math.min(1, value));
+    }
+  }
+  return levels;
+}
+
+async function startAudioCapture(
   currentDirectory: string,
   webContents: WebContents,
+  args: string[],
+  events: { chunk: string; ended: string },
 ): Promise<ExcludedSystemAudioCaptureSession> {
   if (process.platform !== 'win32') {
-    throw new Error('Excluded system audio capture is only available on Windows.');
+    throw new Error('System audio capture is only available on Windows.');
   }
 
   const helperPath = getExcludedSystemAudioHelperPath(currentDirectory);
@@ -108,7 +201,7 @@ export async function startExcludedSystemAudioCapture(
   }
 
   const sessionId = randomUUID();
-  const child = spawn(helperPath, [String(process.pid)], {
+  const child = spawn(helperPath, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -136,7 +229,7 @@ export async function startExcludedSystemAudioCapture(
 
     child.once('exit', (code) => {
       runningSessions.delete(sessionId);
-      webContents.send('desktop:excluded-audio-ended', {
+      webContents.send(events.ended, {
         code,
         sessionId,
         stderr,
@@ -154,7 +247,7 @@ export async function startExcludedSystemAudioCapture(
 
     child.stdout.on('data', (chunk: Buffer) => {
       if (headerResolved) {
-        webContents.send('desktop:excluded-audio-chunk', {
+        webContents.send(events.chunk, {
           chunk: new Uint8Array(chunk),
           sessionId,
         });
@@ -177,6 +270,8 @@ export async function startExcludedSystemAudioCapture(
         headerResolved = true;
         runningSessions.set(sessionId, {
           ...metadata,
+          chunkEvent: events.chunk,
+          endedEvent: events.ended,
           process: child,
           sessionId,
           stderr,
@@ -189,7 +284,7 @@ export async function startExcludedSystemAudioCapture(
       }
 
       if (remainder.length > 0) {
-        webContents.send('desktop:excluded-audio-chunk', {
+        webContents.send(events.chunk, {
           chunk: new Uint8Array(remainder),
           sessionId,
         });
@@ -204,6 +299,41 @@ export async function startExcludedSystemAudioCapture(
   };
 }
 
+export async function startExcludedSystemAudioCapture(
+  currentDirectory: string,
+  webContents: WebContents,
+): Promise<ExcludedSystemAudioCaptureSession> {
+  return startAudioCapture(
+    currentDirectory,
+    webContents,
+    ['--capture', 'exclude', String(process.pid)],
+    {
+      chunk: 'desktop:excluded-audio-chunk',
+      ended: 'desktop:excluded-audio-ended',
+    },
+  );
+}
+
+export async function startWindowAudioCapture(
+  currentDirectory: string,
+  webContents: WebContents,
+  processId: number,
+): Promise<ExcludedSystemAudioCaptureSession> {
+  if (!Number.isInteger(processId) || processId <= 0) {
+    throw new Error('Invalid window audio process id.');
+  }
+
+  return startAudioCapture(
+    currentDirectory,
+    webContents,
+    ['--capture', 'include', String(processId)],
+    {
+      chunk: 'desktop:window-audio-chunk',
+      ended: 'desktop:window-audio-ended',
+    },
+  );
+}
+
 export function stopExcludedSystemAudioCapture(sessionId: string) {
   const session = runningSessions.get(sessionId);
   if (!session) {
@@ -212,6 +342,10 @@ export function stopExcludedSystemAudioCapture(sessionId: string) {
 
   runningSessions.delete(sessionId);
   stopProcess(session.process);
+}
+
+export function stopWindowAudioCapture(sessionId: string) {
+  stopExcludedSystemAudioCapture(sessionId);
 }
 
 export function stopAllExcludedSystemAudioCaptures() {

@@ -196,7 +196,11 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       kind: input.kind,
       rtpParameters: input.rtpParameters as types.RtpParameters,
     });
-    const source = input.mode === 'voice' ? 'voice' : 'stream';
+    const source = input.mode === 'voice'
+      ? 'voice'
+      : input.mode === 'music_publish' || input.mode === 'music_listen'
+        ? 'music'
+        : 'stream';
     const summary: SfuProducer = {
       channelId: input.channelId,
       id: producer.id,
@@ -410,6 +414,9 @@ export class MediasoupMediaAdapter implements MediaAdapter {
         }
         if (input.mode === 'voice') {
           return producer.source === 'voice';
+        }
+        if (input.mode === 'music_publish' || input.mode === 'music_listen') {
+          return producer.source === 'music' && producer.streamId === input.streamId;
         }
         return producer.source === 'stream' && producer.streamId === input.streamId;
       });

@@ -6,6 +6,7 @@ import type { GatewayRuntime } from '../app-runtime';
 import type { TokenVerifier } from '../lib/token-verifier';
 import { ConnectionManager } from './connection-manager';
 import { routeGatewayMessage } from './event-router';
+import { MusicRoomManager } from './music-room-manager';
 import { PresenceManager } from './presence-manager';
 import { StreamRoomManager } from './stream-room-manager';
 import { VoiceRoomManager } from './voice-room-manager';
@@ -30,7 +31,7 @@ function parseSentEnvelopes(sendMock: ReturnType<typeof vi.fn>) {
 }
 
 function makeRuntime(overrides: Partial<GatewayRuntime> = {}): GatewayRuntime {
-  const connections = new ConnectionManager();
+  const connections = overrides.connections ?? new ConnectionManager();
   const tokenVerifier: TokenVerifier = async (_token) => ({ code: 'TOKEN_INVALID', ok: false });
 
   // Minimal db stub — only the methods the router actually calls.
@@ -66,12 +67,14 @@ function makeRuntime(overrides: Partial<GatewayRuntime> = {}): GatewayRuntime {
 
   const voiceRoom = new VoiceRoomManager(connections);
   const streamRoom = new StreamRoomManager(connections);
+  const musicRoom = new MusicRoomManager(connections);
 
   return {
     connections,
     db,
     fanoutEnabled: false,
     presence,
+    musicRoom,
     streamRoom,
     tokenVerifier,
     voiceRoom,
@@ -1455,6 +1458,424 @@ describe('routeGatewayMessage', () => {
     expect(reply.op).toBe('error');
     if (reply.op === 'error') {
       expect(reply.code).toBe('VOICE_NOT_JOINED');
+    }
+  });
+
+  it('returns VOICE_NOT_JOINED for music.start when user has not joined voice', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000301';
+    const guildId = '00000000-0000-0000-0000-000000000302';
+    const userId = '00000000-0000-0000-0000-000000000303';
+
+    const musicRuntime = makeRuntime({
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            id === channelId
+              ? { id: channelId, guildId, name: 'Music Voice', type: 'voice', position: 0, topic: null, createdAt: new Date() }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && uId === userId
+              ? { guildId, userId: uId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+    });
+    const conn = makeConnection({ userId });
+
+    const reply = await routeGatewayMessage(
+      conn,
+      JSON.stringify({
+        command: 'music.start',
+        data: { channelId },
+        op: 'command',
+        reqId: 'req-music-start-not-joined',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+
+    expect(reply.op).toBe('error');
+    if (reply.op === 'error') {
+      expect(reply.code).toBe('VOICE_NOT_JOINED');
+    }
+  });
+
+  it('supports P2P music start/listen and relays only valid music signal pairs', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000311';
+    const guildId = '00000000-0000-0000-0000-000000000312';
+    const hostUserId = '00000000-0000-0000-0000-000000000313';
+    const listenerUserId = '00000000-0000-0000-0000-000000000314';
+    const hostMusicSessionId = '00000000-0000-0000-0000-000000000315';
+    const listenerMusicSessionId = '00000000-0000-0000-0000-000000000316';
+
+    const sharedConnections = new ConnectionManager();
+    const voiceRoom = new VoiceRoomManager(sharedConnections);
+    const musicRoom = new MusicRoomManager(sharedConnections);
+    const hostSend = vi.fn();
+    const listenerSend = vi.fn();
+    const createMediaSession = vi.fn(async (descriptor: Parameters<GatewayRuntime['createMediaSession']>[0]) => ({
+      iceServers: [{ urls: 'stun:stun.example.com' }],
+      sessionId: descriptor.mode === 'music_publish' ? hostMusicSessionId : listenerMusicSessionId,
+    }));
+    const musicRuntime = makeRuntime({
+      connections: sharedConnections,
+      createMediaSession,
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            id === channelId
+              ? { id: channelId, guildId, name: 'Music Voice', type: 'voice', position: 0, topic: null, createdAt: new Date() }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && (uId === hostUserId || uId === listenerUserId)
+              ? { guildId, userId: uId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+      mediaMode: 'p2p',
+      musicRoom,
+      presence: new PresenceManager(sharedConnections, null),
+      voiceRoom,
+    });
+
+    const hostConn = sharedConnections.attach({ close() {}, send: hostSend });
+    const listenerConn = sharedConnections.attach({ close() {}, send: listenerSend });
+    sharedConnections.markAuthenticated(hostConn.id, hostUserId, '00000000-0000-0000-0000-000000000317', null, [guildId]);
+    sharedConnections.markAuthenticated(listenerConn.id, listenerUserId, '00000000-0000-0000-0000-000000000318', null, [guildId]);
+    voiceRoom.join(channelId, hostUserId, hostConn.id, '00000000-0000-0000-0000-000000000319');
+    voiceRoom.join(channelId, listenerUserId, listenerConn.id, '00000000-0000-0000-0000-000000000320');
+
+    const startReply = await routeGatewayMessage(
+      hostConn,
+      JSON.stringify({
+        command: 'music.start',
+        data: { channelId },
+        op: 'command',
+        reqId: 'req-music-p2p-start',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+
+    expect(startReply.op).toBe('ack');
+    if (startReply.op !== 'ack') throw new Error('music.start should ack');
+    const startData = startReply.data as { mediaMode: string; musicId: string; sessionId: string };
+    expect(startData.mediaMode).toBe('p2p');
+    expect(startData.sessionId).toBe(hostMusicSessionId);
+    expect(createMediaSession).toHaveBeenCalledWith(expect.objectContaining({
+      channelId,
+      mode: 'music_publish',
+      streamId: startData.musicId,
+      userId: hostUserId,
+    }));
+
+    const listenReply = await routeGatewayMessage(
+      listenerConn,
+      JSON.stringify({
+        command: 'music.listen',
+        data: { channelId, musicId: startData.musicId },
+        op: 'command',
+        reqId: 'req-music-p2p-listen',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+
+    expect(listenReply.op).toBe('ack');
+    if (listenReply.op !== 'ack') throw new Error('music.listen should ack');
+    const listenData = listenReply.data as { hostSessionId: string; hostUserId: string; mediaMode: string; sessionId: string };
+    expect(listenData.mediaMode).toBe('p2p');
+    expect(listenData.hostSessionId).toBe(hostMusicSessionId);
+    expect(listenData.hostUserId).toBe(hostUserId);
+    expect(listenData.sessionId).toBe(listenerMusicSessionId);
+    expect(musicRoom.getPublication(channelId, startData.musicId)?.listeners.has(listenerUserId)).toBe(true);
+
+    listenerSend.mockClear();
+    const invalidSignalReply = await routeGatewayMessage(
+      hostConn,
+      JSON.stringify({
+        command: 'media.signal.offer',
+        data: {
+          signal: {
+            sdp: 'offer-sdp',
+            session: {
+              channelId,
+              mode: 'music_publish',
+              sessionId: '00000000-0000-0000-0000-000000000321',
+              streamId: startData.musicId,
+              transportMode: 'p2p',
+              userId: hostUserId,
+            },
+            type: 'offer',
+          },
+          targetUserId: listenerUserId,
+        },
+        op: 'command',
+        reqId: 'req-music-p2p-signal-invalid',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+
+    expect(invalidSignalReply.op).toBe('error');
+    if (invalidSignalReply.op === 'error') {
+      expect(invalidSignalReply.code).toBe('MUSIC_NOT_LIVE');
+    }
+
+    const signalReply = await routeGatewayMessage(
+      hostConn,
+      JSON.stringify({
+        command: 'media.signal.offer',
+        data: {
+          signal: {
+            sdp: 'offer-sdp',
+            session: {
+              channelId,
+              mode: 'music_publish',
+              sessionId: hostMusicSessionId,
+              streamId: startData.musicId,
+              transportMode: 'p2p',
+              userId: hostUserId,
+            },
+            type: 'offer',
+          },
+          targetUserId: listenerUserId,
+        },
+        op: 'command',
+        reqId: 'req-music-p2p-signal-valid',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+
+    expect(signalReply.op).toBe('ack');
+    const relayed = parseSentEnvelopes(listenerSend).find(
+      (envelope) => envelope.op === 'event' && envelope.event === 'media.signal',
+    );
+    expect(relayed).toBeDefined();
+    expect(relayed?.data.fromUserId).toBe(hostUserId);
+    expect(relayed?.data.signal.session.mode).toBe('music_publish');
+  });
+
+  it('supports SFU music sessions and validates music_publish/music_listen access', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000331';
+    const guildId = '00000000-0000-0000-0000-000000000332';
+    const hostUserId = '00000000-0000-0000-0000-000000000333';
+    const listenerUserId = '00000000-0000-0000-0000-000000000334';
+    const hostMusicSessionId = '00000000-0000-0000-0000-000000000335';
+    const listenerMusicSessionId = '00000000-0000-0000-0000-000000000336';
+
+    const sharedConnections = new ConnectionManager();
+    const voiceRoom = new VoiceRoomManager(sharedConnections);
+    const musicRoom = new MusicRoomManager(sharedConnections);
+    const createMediaSession = vi.fn(async (descriptor: Parameters<GatewayRuntime['createMediaSession']>[0]) => ({
+      iceServers: [],
+      sessionId: descriptor.mode === 'music_publish' ? hostMusicSessionId : listenerMusicSessionId,
+      sfu: {
+        producers: descriptor.mode === 'music_listen'
+          ? [{
+            channelId,
+            id: 'music-producer-audio',
+            kind: 'audio' as const,
+            sessionId: hostMusicSessionId,
+            source: 'music' as const,
+            ...(descriptor.streamId ? { streamId: descriptor.streamId } : {}),
+            userId: hostUserId,
+          }]
+          : [],
+        routerRtpCapabilities: { codecs: [] },
+      },
+    }));
+    const createSfuTransport = vi.fn(async (data: Parameters<GatewayRuntime['createSfuTransport']>[0]) => ({
+      direction: data.direction,
+      transportOptions: {
+        dtlsParameters: {},
+        iceCandidates: [],
+        iceParameters: {},
+        id: `transport-${data.direction}`,
+      },
+    }));
+    const produceSfu = vi.fn(async (data: Parameters<GatewayRuntime['produceSfu']>[0]) => ({
+      producer: {
+        channelId: data.channelId,
+        id: 'music-producer-audio',
+        kind: data.kind,
+        sessionId: data.sessionId,
+        source: data.mode === 'music_publish' || data.mode === 'music_listen' ? 'music' as const : 'stream' as const,
+        ...(data.streamId ? { streamId: data.streamId } : {}),
+        userId: data.userId,
+      },
+      producerId: 'music-producer-audio',
+    }));
+    const musicRuntime = makeRuntime({
+      connections: sharedConnections,
+      createMediaSession,
+      createSfuTransport,
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            id === channelId
+              ? { id: channelId, guildId, name: 'Music Voice', type: 'voice', position: 0, topic: null, createdAt: new Date() }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && (uId === hostUserId || uId === listenerUserId)
+              ? { guildId, userId: uId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+      mediaMode: 'sfu',
+      musicRoom,
+      presence: new PresenceManager(sharedConnections, null),
+      produceSfu,
+      voiceRoom,
+    });
+
+    const hostConn = sharedConnections.attach({ close() {}, send() {} });
+    const listenerConn = sharedConnections.attach({ close() {}, send() {} });
+    sharedConnections.markAuthenticated(hostConn.id, hostUserId, '00000000-0000-0000-0000-000000000337', null, [guildId]);
+    sharedConnections.markAuthenticated(listenerConn.id, listenerUserId, '00000000-0000-0000-0000-000000000338', null, [guildId]);
+    voiceRoom.join(channelId, hostUserId, hostConn.id, '00000000-0000-0000-0000-000000000339');
+    voiceRoom.join(channelId, listenerUserId, listenerConn.id, '00000000-0000-0000-0000-000000000340');
+
+    const startReply = await routeGatewayMessage(
+      hostConn,
+      JSON.stringify({
+        command: 'music.start',
+        data: { channelId },
+        op: 'command',
+        reqId: 'req-music-sfu-start',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+    expect(startReply.op).toBe('ack');
+    if (startReply.op !== 'ack') throw new Error('music.start should ack');
+    const startData = startReply.data as { mediaMode: string; musicId: string; sessionId: string; sfu?: { routerRtpCapabilities?: unknown } };
+    expect(startData.mediaMode).toBe('sfu');
+    expect(startData.sessionId).toBe(hostMusicSessionId);
+    expect(startData.sfu?.routerRtpCapabilities).toEqual({ codecs: [] });
+
+    const listenReply = await routeGatewayMessage(
+      listenerConn,
+      JSON.stringify({
+        command: 'music.listen',
+        data: { channelId, musicId: startData.musicId },
+        op: 'command',
+        reqId: 'req-music-sfu-listen',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+    expect(listenReply.op).toBe('ack');
+    if (listenReply.op !== 'ack') throw new Error('music.listen should ack');
+    const listenData = listenReply.data as { mediaMode: string; sessionId: string; sfu?: { producers?: Array<{ source: string; streamId?: string }> } };
+    expect(listenData.mediaMode).toBe('sfu');
+    expect(listenData.sessionId).toBe(listenerMusicSessionId);
+    expect(listenData.sfu?.producers?.[0]).toMatchObject({
+      source: 'music',
+      streamId: startData.musicId,
+    });
+
+    const publishTransportReply = await routeGatewayMessage(
+      hostConn,
+      JSON.stringify({
+        command: 'media.sfu.create_transport',
+        data: {
+          channelId,
+          direction: 'send',
+          mode: 'music_publish',
+          sessionId: hostMusicSessionId,
+          streamId: startData.musicId,
+        },
+        op: 'command',
+        reqId: 'req-music-sfu-publish-transport',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+    expect(publishTransportReply.op).toBe('ack');
+
+    const listenTransportReply = await routeGatewayMessage(
+      listenerConn,
+      JSON.stringify({
+        command: 'media.sfu.create_transport',
+        data: {
+          channelId,
+          direction: 'recv',
+          mode: 'music_listen',
+          sessionId: listenerMusicSessionId,
+          streamId: startData.musicId,
+        },
+        op: 'command',
+        reqId: 'req-music-sfu-listen-transport',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+    expect(listenTransportReply.op).toBe('ack');
+    expect(createSfuTransport).toHaveBeenCalledTimes(2);
+
+    const produceReply = await routeGatewayMessage(
+      hostConn,
+      JSON.stringify({
+        command: 'media.sfu.produce',
+        data: {
+          channelId,
+          kind: 'audio',
+          mode: 'music_publish',
+          rtpParameters: {},
+          sessionId: hostMusicSessionId,
+          streamId: startData.musicId,
+          transportId: 'transport-send',
+        },
+        op: 'command',
+        reqId: 'req-music-sfu-produce',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+    expect(produceReply.op).toBe('ack');
+    if (produceReply.op === 'ack') {
+      expect((produceReply.data as { producer: { source: string } }).producer.source).toBe('music');
+    }
+
+    const forbiddenReply = await routeGatewayMessage(
+      listenerConn,
+      JSON.stringify({
+        command: 'media.sfu.create_transport',
+        data: {
+          channelId,
+          direction: 'send',
+          mode: 'music_publish',
+          sessionId: hostMusicSessionId,
+          streamId: startData.musicId,
+        },
+        op: 'command',
+        reqId: 'req-music-sfu-forbidden',
+        ts: ts(),
+        v: 1,
+      }),
+      musicRuntime,
+    );
+    expect(forbiddenReply.op).toBe('error');
+    if (forbiddenReply.op === 'error') {
+      expect(forbiddenReply.code).toBe('FORBIDDEN');
     }
   });
 

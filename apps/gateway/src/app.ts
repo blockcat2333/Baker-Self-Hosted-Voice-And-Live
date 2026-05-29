@@ -166,6 +166,37 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
               runtime.streamRoom.broadcastStateUpdated(change.channelId, voiceConnectionIds);
             }
           }
+
+          const musicChanges = runtime.musicRoom.leaveAllForUser(userId);
+          for (const change of musicChanges) {
+            const voiceConnectionIds = runtime.voiceRoom
+              .getParticipants(change.channelId)
+              .map((participant) => participant.connectionId);
+            if (change.type === 'host_stopped') {
+              runtime.musicRoom.broadcastStateUpdated(change.channelId, [
+                ...change.connectionIds,
+                ...voiceConnectionIds,
+              ]);
+              if (runtime.mediaMode === 'sfu') {
+                void runtime.closeSfuSession({
+                  channelId: change.channelId,
+                  mode: 'music_publish',
+                  sessionId: change.sessionId,
+                  streamId: change.musicId,
+                });
+              }
+            } else {
+              if (runtime.mediaMode === 'sfu') {
+                void runtime.closeSfuSession({
+                  channelId: change.channelId,
+                  mode: 'music_listen',
+                  sessionId: change.sessionId,
+                  streamId: change.musicId,
+                });
+              }
+              runtime.musicRoom.broadcastStateUpdated(change.channelId, voiceConnectionIds);
+            }
+          }
         }
       });
     });

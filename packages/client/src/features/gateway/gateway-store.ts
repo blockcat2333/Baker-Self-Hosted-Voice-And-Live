@@ -8,6 +8,7 @@ import {
   MediaModeUpdatedEventDataSchema,
   MediaSfuProducerEventDataSchema,
   MessageCreatedEventDataSchema,
+  MusicStateUpdatedEventDataSchema,
   PresenceUpdatedEventDataSchema,
   StreamStateUpdatedEventDataSchema,
   VoiceMemberUpdatedEventDataSchema,
@@ -19,6 +20,7 @@ import {
 
 import { useAuthStore } from '../auth/auth-store';
 import { useChatStore } from '../chat/chat-store';
+import { useMusicStore } from '../music/music-store';
 import { closeAllStreamPopups } from '../stream/stream-popup-controller';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
@@ -207,6 +209,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       clearLatencyProbe();
       clearHandshakeTimeout();
       useVoiceStore.getState().handleGatewayWillReconnect();
+      useMusicStore.getState().handleGatewayWillReconnect();
       useStreamStore.getState().handleGatewayWillReconnect();
       set({ gatewayRttMs: null, presenceMap: {}, voiceRosterByChannel: {}, voiceNetworkByChannel: {} });
       const { status } = get();
@@ -372,11 +375,23 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           }
         }
 
+        if (envelope.event === 'music.state.updated') {
+          const result = MusicStateUpdatedEventDataSchema.safeParse(envelope.data);
+          if (result.success) {
+            useMusicStore.getState().handleMusicStateUpdated(result.data, sendCommandAwaitAck, sendRawCommand);
+          }
+        }
+
         if (envelope.event === 'media.signal') {
           const result = MediaSignalRelayEventDataSchema.safeParse(envelope.data);
           if (result.success) {
             if (result.data.signal.session.mode === 'voice') {
               useVoiceStore.getState().handleMediaSignal(result.data);
+            } else if (
+              result.data.signal.session.mode === 'music_publish' ||
+              result.data.signal.session.mode === 'music_listen'
+            ) {
+              useMusicStore.getState().handleMediaSignal(result.data);
             } else {
               useStreamStore.getState().handleMediaSignal(result.data);
             }
@@ -388,6 +403,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           if (result.success) {
             if (result.data.producer.source === 'voice') {
               useVoiceStore.getState().handleSfuProducerAdded(result.data);
+            } else if (result.data.producer.source === 'music') {
+              useMusicStore.getState().handleSfuProducerAdded(result.data);
             } else {
               useStreamStore.getState().handleSfuProducerAdded(result.data);
             }
@@ -399,6 +416,8 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           if (result.success) {
             if (result.data.producer.source === 'voice') {
               useVoiceStore.getState().handleSfuProducerRemoved(result.data);
+            } else if (result.data.producer.source === 'music') {
+              useMusicStore.getState().handleSfuProducerRemoved(result.data);
             } else {
               useStreamStore.getState().handleSfuProducerRemoved(result.data);
             }
@@ -409,6 +428,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           const result = MediaModeUpdatedEventDataSchema.safeParse(envelope.data);
           if (result.success) {
             void useVoiceStore.getState().handleMediaModeUpdated();
+            useMusicStore.getState().handleGatewayWillReconnect();
             void useStreamStore.getState().handleMediaModeUpdated(sendCommandAwaitAck, sendRawCommand);
           }
         }
@@ -499,6 +519,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       client = null;
       closeAllStreamPopups();
       useVoiceStore.getState().handleGatewayDisconnected();
+      useMusicStore.getState().reset();
       useStreamStore.getState().reset();
       set({
         status: 'disconnected',

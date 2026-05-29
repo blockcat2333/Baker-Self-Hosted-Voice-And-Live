@@ -7,10 +7,15 @@ import { NsisUpdater } from 'electron-updater';
 
 import { desktopMediaCapturePatchScript, isDesktopMediaPermissionAllowed } from './desktop-media';
 import {
+  getWindowAudioLevels,
   isExcludedSystemAudioCaptureAvailable,
+  listWindowAudioSources,
   startExcludedSystemAudioCapture,
+  startWindowAudioCapture,
   stopAllExcludedSystemAudioCaptures,
   stopExcludedSystemAudioCapture,
+  stopWindowAudioCapture,
+  type WindowAudioSource,
 } from './excluded-system-audio';
 import {
   normalizeScreenSourceSelection,
@@ -100,6 +105,13 @@ let activeScreenPicker:
       };
       resolve(selection: ScreenSourceSelection | null): void;
       sources: SerializedScreenSource[];
+      window: BrowserWindow;
+    }
+  | null = null;
+let activeMusicPicker:
+  | {
+      resolve(selection: { processId: number } | null): void;
+      sources: WindowAudioSource[];
       window: BrowserWindow;
     }
   | null = null;
@@ -925,6 +937,279 @@ async function selectScreenSource(owner: BrowserWindow | null): Promise<ScreenSo
   return selection;
 }
 
+function buildMusicPickerDocument() {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Baker Music Share</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+      background: #0f172a;
+      color: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #0f172a; }
+    .shell {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 14px;
+      height: 100vh;
+      padding: 18px;
+    }
+    h1 { font-size: 18px; margin: 0; }
+    .subtitle { color: #94a3b8; font-size: 12px; margin: 4px 0 0; }
+    .search {
+      width: 100%;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 6px;
+      background: rgba(15, 23, 42, 0.9);
+      color: #e5e7eb;
+      font: inherit;
+      padding: 10px 12px;
+    }
+    .content {
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 8px;
+    }
+    .list { display: grid; gap: 1px; }
+    .row {
+      align-items: center;
+      background: rgba(30, 41, 59, 0.72);
+      border: 0;
+      color: inherit;
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 124px;
+      gap: 12px;
+      min-height: 52px;
+      padding: 10px 12px;
+      text-align: left;
+      width: 100%;
+    }
+    .row:hover { background: rgba(51, 65, 85, 0.8); }
+    .row[aria-pressed="true"] {
+      background: rgba(34, 197, 94, 0.16);
+      outline: 1px solid rgba(34, 197, 94, 0.45);
+      outline-offset: -1px;
+    }
+    .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .meter {
+      height: 8px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.22);
+    }
+    .meter-fill {
+      height: 100%;
+      width: 0%;
+      background: #22c55e;
+      transition: width 120ms linear;
+    }
+    .empty {
+      color: #94a3b8;
+      font-size: 13px;
+      padding: 18px;
+    }
+    footer {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .btn {
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 9px 14px;
+    }
+    .btn-secondary {
+      background: rgba(15, 23, 42, 0.86);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      color: #cbd5e1;
+    }
+    .btn-primary {
+      background: #16a34a;
+      border: 1px solid #22c55e;
+      color: #052e16;
+    }
+    .btn:disabled { cursor: not-allowed; opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <h1>Select music window</h1>
+      <p class="subtitle">Only the selected window process tree audio is shared. Window names stay local.</p>
+    </header>
+    <input id="search" class="search" type="search" placeholder="Search windows" />
+    <section id="content" class="content" aria-live="polite"></section>
+    <footer>
+      <button id="cancel" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="share" class="btn btn-primary" type="button" disabled>Share</button>
+    </footer>
+  </main>
+  <script>
+    const api = window.bakerDesktopMusicPicker;
+    const content = document.getElementById('content');
+    const search = document.getElementById('search');
+    const share = document.getElementById('share');
+    const cancel = document.getElementById('cancel');
+    let sources = [];
+    let selectedId = null;
+    let levels = {};
+
+    function filteredSources() {
+      const query = search.value.trim().toLowerCase();
+      return sources.filter((source) => !query || source.title.toLowerCase().includes(query));
+    }
+
+    function render() {
+      const visible = filteredSources();
+      if (!visible.some((source) => source.id === selectedId)) {
+        selectedId = visible[0]?.id ?? null;
+      }
+      share.disabled = !selectedId;
+      if (visible.length === 0) {
+        content.innerHTML = '<div class="empty">No shareable windows.</div>';
+        return;
+      }
+
+      const list = document.createElement('div');
+      list.className = 'list';
+      for (const source of visible) {
+        const row = document.createElement('button');
+        row.className = 'row';
+        row.type = 'button';
+        row.setAttribute('aria-pressed', String(source.id === selectedId));
+        row.addEventListener('click', () => {
+          selectedId = source.id;
+          render();
+        });
+
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.title = source.title;
+        name.textContent = source.title;
+
+        const meter = document.createElement('div');
+        meter.className = 'meter';
+        const fill = document.createElement('div');
+        fill.className = 'meter-fill';
+        fill.style.width = Math.round((levels[String(source.processId)] || 0) * 100) + '%';
+        meter.appendChild(fill);
+        row.append(name, meter);
+        list.appendChild(row);
+      }
+      content.replaceChildren(list);
+    }
+
+    async function refreshLevels() {
+      try {
+        const processIds = [...new Set(filteredSources().map((source) => source.processId))];
+        levels = await api.getLevels(processIds);
+        render();
+      } catch {}
+    }
+
+    search.addEventListener('input', () => {
+      render();
+      void refreshLevels();
+    });
+    cancel.addEventListener('click', () => void api.cancel());
+    share.addEventListener('click', () => {
+      const source = sources.find((candidate) => candidate.id === selectedId);
+      if (!source) return;
+      void api.select({ processId: source.processId });
+    });
+
+    api.getData().then((data) => {
+      sources = data.sources;
+      selectedId = sources[0]?.id ?? null;
+      render();
+      search.focus();
+      void refreshLevels();
+      setInterval(refreshLevels, 500);
+    }).catch(() => {
+      content.innerHTML = '<div class="empty">Could not load windows.</div>';
+    });
+  </script>
+</body>
+</html>`;
+}
+
+async function showMusicSourcePicker(
+  owner: BrowserWindow | null,
+  sources: WindowAudioSource[],
+): Promise<{ processId: number } | null> {
+  if (activeMusicPicker) {
+    activeMusicPicker.window.focus();
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    const pickerWindow = new BrowserWindow({
+      autoHideMenuBar: true,
+      height: 620,
+      icon: getDesktopIconPath(),
+      modal: !!owner,
+      parent: owner ?? undefined,
+      resizable: true,
+      show: false,
+      title: 'Baker Music Share',
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: path.join(currentDirectory, 'preload.cjs'),
+        sandbox: false,
+      },
+      width: 720,
+    });
+
+    activeMusicPicker = { resolve, sources, window: pickerWindow };
+    pickerWindow.once('ready-to-show', () => {
+      pickerWindow.show();
+    });
+    pickerWindow.once('closed', () => {
+      if (activeMusicPicker?.window === pickerWindow) {
+        activeMusicPicker = null;
+        resolve(null);
+      }
+    });
+    void pickerWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildMusicPickerDocument())}`);
+  });
+}
+
+async function selectMusicSource(owner: BrowserWindow | null): Promise<{ processId: number } | null> {
+  if (!(await isExcludedSystemAudioCaptureAvailable(currentDirectory))) {
+    throw new Error('Window audio helper is not available. Build the Windows native helper before sharing music.');
+  }
+
+  const sources = await listWindowAudioSources(currentDirectory);
+  if (sources.length === 0) {
+    throw new Error('No window audio source is available.');
+  }
+
+  if (process.env.BAKER_DESKTOP_AUTO_SELECT_MUSIC_SOURCE === '1') {
+    return { processId: sources[0]!.processId };
+  }
+
+  return showMusicSourcePicker(owner, sources);
+}
+
 async function createWindow() {
   const window = new BrowserWindow({
     height: 900,
@@ -986,6 +1271,16 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle('desktop:select-music-source', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    try {
+      return await selectMusicSource(owner);
+    } catch (error) {
+      await writeLog('music-capture', 'Music source selection failed.', error);
+      throw error;
+    }
+  });
+
   ipcMain.handle('desktop:screen-picker:get-data', async (event) => {
     if (!activeScreenPicker || activeScreenPicker.window.webContents.id !== event.sender.id) {
       throw new Error('No screen picker is active.');
@@ -1024,6 +1319,73 @@ app.whenReady().then(async () => {
     picker.window.close();
   });
 
+  ipcMain.handle('desktop:music-picker:get-data', async (event) => {
+    if (!activeMusicPicker || activeMusicPicker.window.webContents.id !== event.sender.id) {
+      throw new Error('No music picker is active.');
+    }
+
+    return {
+      sources: activeMusicPicker.sources,
+    };
+  });
+
+  ipcMain.handle('desktop:music-picker:get-levels', async (event, rawProcessIds: unknown) => {
+    if (!activeMusicPicker || activeMusicPicker.window.webContents.id !== event.sender.id) {
+      throw new Error('No music picker is active.');
+    }
+
+    if (!Array.isArray(rawProcessIds)) {
+      throw new Error('Invalid music picker process list.');
+    }
+
+    const availableProcessIds = new Set(activeMusicPicker.sources.map((source) => source.processId));
+    const processIds = [
+      ...new Set(
+        rawProcessIds.filter(
+          (processId): processId is number =>
+            Number.isInteger(processId) && processId > 0 && availableProcessIds.has(processId),
+        ),
+      ),
+    ];
+
+    return getWindowAudioLevels(currentDirectory, processIds);
+  });
+
+  ipcMain.handle('desktop:music-picker:select', async (event, rawSelection: unknown) => {
+    if (!activeMusicPicker || activeMusicPicker.window.webContents.id !== event.sender.id) {
+      throw new Error('No music picker is active.');
+    }
+
+    if (!rawSelection || typeof rawSelection !== 'object') {
+      throw new Error('Invalid music source selection.');
+    }
+
+    const processId = (rawSelection as { processId?: unknown }).processId;
+    if (
+      typeof processId !== 'number' ||
+      !Number.isInteger(processId) ||
+      !activeMusicPicker.sources.some((source) => source.processId === processId)
+    ) {
+      throw new Error('Invalid music source selection.');
+    }
+
+    const picker = activeMusicPicker;
+    activeMusicPicker = null;
+    picker.resolve({ processId });
+    picker.window.close();
+  });
+
+  ipcMain.handle('desktop:music-picker:cancel', async (event) => {
+    if (!activeMusicPicker || activeMusicPicker.window.webContents.id !== event.sender.id) {
+      return;
+    }
+
+    const picker = activeMusicPicker;
+    activeMusicPicker = null;
+    picker.resolve(null);
+    picker.window.close();
+  });
+
   ipcMain.handle('desktop:excluded-audio-start', async (event) => {
     try {
       return await startExcludedSystemAudioCapture(currentDirectory, event.sender);
@@ -1035,6 +1397,23 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('desktop:excluded-audio-stop', async (_event, sessionId: string) => {
     stopExcludedSystemAudioCapture(sessionId);
+  });
+
+  ipcMain.handle('desktop:window-audio-available', async () => {
+    return isExcludedSystemAudioCaptureAvailable(currentDirectory);
+  });
+
+  ipcMain.handle('desktop:window-audio-start', async (event, processId: number) => {
+    try {
+      return await startWindowAudioCapture(currentDirectory, event.sender, processId);
+    } catch (error) {
+      await writeLog('music-capture', 'Window audio capture failed to start.', error);
+      throw error;
+    }
+  });
+
+  ipcMain.handle('desktop:window-audio-stop', async (_event, sessionId: string) => {
+    stopWindowAudioCapture(sessionId);
   });
 
   ipcMain.handle('desktop:get-app-info', async () => ({

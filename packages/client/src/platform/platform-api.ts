@@ -75,6 +75,7 @@ declare global {
         serverVersion: string;
       }>;
       selectScreenSource(): Promise<{ shareAudio: boolean; sourceId: string } | null>;
+      selectMusicSource(): Promise<{ processId: number } | null>;
       startExcludedSystemAudioCapture(): Promise<{
         channelCount: number;
         sampleRate: number;
@@ -85,6 +86,17 @@ declare global {
         callback: (chunk: Uint8Array) => void,
       ): () => void;
       stopExcludedSystemAudioCapture(sessionId: string): Promise<void>;
+      isWindowAudioCaptureAvailable(): Promise<boolean>;
+      startWindowAudioCapture(processId: number): Promise<{
+        channelCount: number;
+        sampleRate: number;
+        sessionId: string;
+      }>;
+      onWindowAudioCaptureChunk(
+        sessionId: string,
+        callback: (chunk: Uint8Array) => void,
+      ): () => void;
+      stopWindowAudioCapture(sessionId: string): Promise<void>;
     };
     bakerDesktopScreenPicker?: {
       cancel(): Promise<void>;
@@ -103,6 +115,18 @@ declare global {
         }>;
       }>;
       select(selection: { shareAudio: boolean; sourceId: string }): Promise<void>;
+    };
+    bakerDesktopMusicPicker?: {
+      cancel(): Promise<void>;
+      getData(): Promise<{
+        sources: Array<{
+          id: string;
+          processId: number;
+          title: string;
+        }>;
+      }>;
+      getLevels(processIds: number[]): Promise<Record<string, number>>;
+      select(selection: { processId: number }): Promise<void>;
     };
   }
 }

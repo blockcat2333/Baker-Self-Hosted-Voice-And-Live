@@ -8,7 +8,7 @@ export const MediaTransportModeSchema = z.enum(['p2p', 'sfu']);
 
 export const MediaSignalTypeSchema = z.enum(['answer', 'end', 'ice_candidate', 'offer', 'restart_ice']);
 
-export const SessionModeSchema = z.enum(['stream_publish', 'stream_watch', 'voice']);
+export const SessionModeSchema = z.enum(['music_listen', 'music_publish', 'stream_publish', 'stream_watch', 'voice']);
 
 export const MediaSessionDescriptorSchema = z.object({
   channelId: z.string().uuid(),
@@ -68,7 +68,7 @@ export const MediaSessionResponseSchema = z.object({
       id: z.string().min(1),
       kind: z.enum(['audio', 'video']),
       sessionId: z.string().uuid(),
-      source: z.enum(['stream', 'voice']),
+      source: z.enum(['music', 'stream', 'voice']),
       streamId: z.string().uuid().optional(),
       userId: z.string().uuid(),
     })),
@@ -96,7 +96,7 @@ export const MediaSignalRelayEventDataSchema = z.object({
 
 export const SfuTransportDirectionSchema = z.enum(['recv', 'send']);
 
-export const SfuProducerSourceSchema = z.enum(['stream', 'voice']);
+export const SfuProducerSourceSchema = z.enum(['music', 'stream', 'voice']);
 
 export const SfuProducerSchema = z.object({
   channelId: z.string().uuid(),

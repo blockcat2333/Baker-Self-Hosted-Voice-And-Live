@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../auth/auth-store';
 import { sendCommandAwaitAck, sendRawCommand, useGatewayStore } from '../gateway/gateway-store';
 import { useAudioDeviceStore } from '../media/audio-device-store';
+import { useMusicStore } from '../music/music-store';
 import { useStreamStore } from '../stream/stream-store';
 import {
   DEFAULT_VOICE_PARTICIPANT_VOLUME,
@@ -131,9 +132,18 @@ export function VoicePanel() {
   const clearError = useVoiceStore((s) => s.clearError);
   const toggleMute = useVoiceStore((s) => s.toggleMute);
   const disconnectCurrentStream = useStreamStore((s) => s.disconnectCurrentStream);
+  const musicError = useMusicStore((s) => s.error);
+  const isDesktopMusicCaptureAvailable = useMusicStore((s) => s.isDesktopCaptureAvailable);
+  const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
+  const publishedMusic = useMusicStore((s) => s.publishedMusic);
+  const refreshDesktopCaptureAvailability = useMusicStore((s) => s.refreshDesktopCaptureAvailability);
+  const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
+  const startMusicShare = useMusicStore((s) => s.startMusicShare);
+  const stopMusicShare = useMusicStore((s) => s.stopMusicShare);
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
   const presenceMap = useGatewayStore((s) => s.presenceMap);
   const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
+  const isDesktop = typeof window !== 'undefined' && window.bakerDesktop?.platform === 'desktop';
 
   const participantNameById = useMemo(() => {
     const names: Record<string, string> = {};
@@ -146,6 +156,10 @@ export function VoicePanel() {
     }
     return names;
   }, [myUserId, participants, presenceMap, t]);
+
+  useEffect(() => {
+    refreshDesktopCaptureAvailability();
+  }, [refreshDesktopCaptureAvailability]);
 
   if (status === 'idle') return null;
 
@@ -186,6 +200,7 @@ export function VoicePanel() {
 
   function handleLeave() {
     void (async () => {
+      await stopMusicShare(sendCommandAwaitAck);
       await disconnectCurrentStream(sendCommandAwaitAck);
       await leaveVoiceChannel(sendCommandAwaitAck);
     })();
@@ -193,6 +208,19 @@ export function VoicePanel() {
 
   function handleMute() {
     toggleMute(sendRawCommand);
+  }
+
+  function handleMusicShareToggle() {
+    if (!channelId || isConnecting) {
+      return;
+    }
+
+    if (publishedMusic) {
+      void stopMusicShare(sendCommandAwaitAck);
+      return;
+    }
+
+    void startMusicShare(channelId, sendCommandAwaitAck, sendRawCommand);
   }
 
   return (
@@ -240,7 +268,28 @@ export function VoicePanel() {
             <span className="voice-volume-value">{toVoiceVolumePercent(playbackVolume)}%</span>
           </div>
         </label>
+
+        <label className="voice-audio-control">
+          <span className="voice-audio-control-label">{t('voice.shared_music')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={100}
+              value={Math.round(musicPlaybackVolume * 100)}
+              onChange={(event) => setMusicPlaybackVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{toVoiceVolumePercent(musicPlaybackVolume)}%</span>
+          </div>
+        </label>
       </div>
+
+      {musicError ? (
+        <p className="voice-panel-warning" role="alert">
+          {musicError}
+        </p>
+      ) : null}
 
       <ul className="voice-participant-list">
         {participants.map((participant) => {
@@ -326,6 +375,27 @@ export function VoicePanel() {
       </ul>
 
       <div className="voice-panel-controls">
+        {isDesktop ? (
+          <button
+            type="button"
+            className="btn-ghost voice-music-btn"
+            onClick={handleMusicShareToggle}
+            disabled={
+              isConnecting ||
+              (!publishedMusic && !isDesktopMusicCaptureAvailable) ||
+              publishedMusic?.status === 'capturing' ||
+              publishedMusic?.status === 'starting' ||
+              publishedMusic?.status === 'stopping'
+            }
+            title={
+              isDesktopMusicCaptureAvailable
+                ? t('voice.music_share_title')
+                : t('voice.music_share_unavailable_title')
+            }
+          >
+            {publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}
+          </button>
+        ) : null}
         <button
           type="button"
           className={`btn-ghost voice-mute-btn${isMuted ? ' voice-mute-btn--muted' : ''}`}

@@ -1990,6 +1990,13 @@ body {
   color: var(--red-0);
 }
 
+.voice-music-btn {
+  border-radius: 6px;
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
 .voice-leave-btn {
   border: 1px solid var(--red-2);
   border-radius: 6px;

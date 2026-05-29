@@ -41,6 +41,10 @@ type ScreenSourceSelection = {
   sourceId: string;
 };
 
+type MusicSourceSelection = {
+  processId: number;
+};
+
 type ScreenPickerSource = {
   appIconDataUrl: string | null;
   id: string;
@@ -56,6 +60,16 @@ type ScreenPickerData = {
     shareAudio: boolean;
   };
   sources: ScreenPickerSource[];
+};
+
+type MusicPickerSource = {
+  id: string;
+  processId: number;
+  title: string;
+};
+
+type MusicPickerData = {
+  sources: MusicPickerSource[];
 };
 
 contextBridge.exposeInMainWorld('bakerDesktop', {
@@ -104,6 +118,9 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
   async selectScreenSource() {
     return (await ipcRenderer.invoke('desktop:select-screen-source')) as ScreenSourceSelection | null;
   },
+  async selectMusicSource() {
+    return (await ipcRenderer.invoke('desktop:select-music-source')) as MusicSourceSelection | null;
+  },
   async startExcludedSystemAudioCapture() {
     return (await ipcRenderer.invoke('desktop:excluded-audio-start')) as {
       channelCount: number;
@@ -128,6 +145,33 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
   async stopExcludedSystemAudioCapture(sessionId: string) {
     await ipcRenderer.invoke('desktop:excluded-audio-stop', sessionId);
   },
+  async isWindowAudioCaptureAvailable() {
+    return (await ipcRenderer.invoke('desktop:window-audio-available')) as boolean;
+  },
+  async startWindowAudioCapture(processId: number) {
+    return (await ipcRenderer.invoke('desktop:window-audio-start', processId)) as {
+      channelCount: number;
+      sampleRate: number;
+      sessionId: string;
+    };
+  },
+  onWindowAudioCaptureChunk(sessionId: string, callback: (chunk: Uint8Array) => void) {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { chunk: Uint8Array; sessionId: string },
+    ) => {
+      if (payload.sessionId === sessionId) {
+        callback(new Uint8Array(payload.chunk));
+      }
+    };
+    ipcRenderer.on('desktop:window-audio-chunk', listener);
+    return () => {
+      ipcRenderer.removeListener('desktop:window-audio-chunk', listener);
+    };
+  },
+  async stopWindowAudioCapture(sessionId: string) {
+    await ipcRenderer.invoke('desktop:window-audio-stop', sessionId);
+  },
   async checkForUpdate(targetVersion: string) {
     return (await ipcRenderer.invoke('desktop:update-check', targetVersion)) as { feedUrl: string };
   },
@@ -142,5 +186,20 @@ contextBridge.exposeInMainWorld('bakerDesktopScreenPicker', {
   },
   async select(selection: ScreenSourceSelection) {
     await ipcRenderer.invoke('desktop:screen-picker:select', selection);
+  },
+});
+
+contextBridge.exposeInMainWorld('bakerDesktopMusicPicker', {
+  async cancel() {
+    await ipcRenderer.invoke('desktop:music-picker:cancel');
+  },
+  async getData() {
+    return (await ipcRenderer.invoke('desktop:music-picker:get-data')) as MusicPickerData;
+  },
+  async getLevels(processIds: number[]) {
+    return (await ipcRenderer.invoke('desktop:music-picker:get-levels', processIds)) as Record<string, number>;
+  },
+  async select(selection: MusicSourceSelection) {
+    await ipcRenderer.invoke('desktop:music-picker:select', selection);
   },
 });

@@ -34,6 +34,14 @@ const githubReleasesUrl =
   'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
 const serverConfigFile = 'server.json';
 
+function getDesktopIconPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'branding', 'baker-icon.png');
+  }
+
+  return path.resolve(currentDirectory, '../../build/icons/baker-icon.png');
+}
+
 interface SavedServerConfig {
   apiBaseUrl: string;
   gatewayUrl: string;
@@ -826,6 +834,7 @@ async function showScreenSourcePicker(
     const pickerWindow = new BrowserWindow({
       autoHideMenuBar: true,
       height: 720,
+      icon: getDesktopIconPath(),
       modal: !!owner,
       parent: owner ?? undefined,
       resizable: true,
@@ -919,6 +928,7 @@ async function selectScreenSource(owner: BrowserWindow | null): Promise<ScreenSo
 async function createWindow() {
   const window = new BrowserWindow({
     height: 900,
+    icon: getDesktopIconPath(),
     minHeight: 700,
     minWidth: 1100,
     title: 'Baker Desktop',
@@ -938,6 +948,7 @@ async function createWindow() {
     action: 'allow',
     overrideBrowserWindowOptions: {
       autoHideMenuBar: true,
+      icon: getDesktopIconPath(),
       title: 'Baker Stream',
       webPreferences: {
         contextIsolation: true,

@@ -44,6 +44,10 @@
     ],
     "extraResources": [
       {
+        "from": "build/icons/baker-icon.png",
+        "to": "branding/baker-icon.png"
+      },
+      {
         "from": "native/excluded-system-audio.exe",
         "to": "native/excluded-system-audio.exe"
       }
@@ -57,6 +61,7 @@
       }
     ],
     "win": {
+      "icon": "build/icons/baker.ico",
       "target": [
         {
           "target": "nsis",

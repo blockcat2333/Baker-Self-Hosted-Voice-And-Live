@@ -48,6 +48,14 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-29 Control Panel Runtime Status and Self-Repair
+
+- added admin runtime health endpoints for PostgreSQL, Redis, API, Gateway, Media, Caddy Web/Admin routing, and optional TURN
+- added service-level repair through `supervisorctl`, with TURN treated as disabled when `TURN_ENABLED=false`
+- added persisted self-repair settings under `/var/lib/baker/runtime` and an all-in-one watchdog process that keeps checking after the admin page closes
+- added container-level fallback repair through the existing Docker update helper when Docker socket access is mounted
+- added a runtime status card to the admin panel with automatic refresh, one-click service repair, self-repair interval controls, and bilingual text
+
 ### 2026-05-26 Baker Desktop 1.0.5b Client Release Prep
 
 - bumped the desktop client release label from `1.0.5a` to `1.0.5b`
@@ -178,7 +186,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - changed the default host ports to:
   - Web on `3000`
   - Admin on `3001`
-  so Docker Desktop / local-machine startup avoids common `:80` bind failures
+    so Docker Desktop / local-machine startup avoids common `:80` bind failures
 - removed the old "copy `.env` and manually fill secrets before startup" requirement for the default quick-start path
 - added `.github/workflows/publish-images.yml` so GitHub Actions can publish the all-in-one `baker` image to Docker Hub
 - expanded the English and Chinese GitHub landing docs with a Docker Desktop form walkthrough, explicit port/volume values, the most common missing-port-mapping mistake, and matching UI screenshots so new users can follow the setup without translating field names manually
@@ -276,6 +284,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### 2026-04-18 UI Hardening Pass — Account Panel Overflow Fix + Layout Hardening + i18n
 
 **Primary fix — sidebar footer / account panel overflow (blocking visual bug):**
+
 - the Edit button was pushed completely outside the sidebar and overlapping the message area when the username or email was long (e.g. `long.username@example.com`)
 - root cause: `.account-panel` used `display: grid` with no explicit column template, and `.account-panel-edit-btn` had `min-width: 72px` + `flex-shrink: 0`, so grid auto-sizing let children exceed the container width
 - fix: switched `.account-panel` to `display: flex; flex-direction: column` with `min-width: 0; overflow: hidden`, removed rigid `min-width: 72px` from Edit button in favor of `white-space: nowrap`, added `min-width: 0` to `.account-panel-header`
@@ -284,9 +293,11 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - screenshots captured to `scripts/sidebar-screenshots/` for evidence
 
 **Additional layout hardening:**
+
 - added `min-width: 0` to `.stream-watch-row-summary > div:first-child` and `.stream-section-header > div:first-child` to prevent long usernames from overflowing stream watch rows (same pattern as the existing `.stream-card-header > div:first-child` fix)
 
 **i18n completeness fixes:**
+
 - localized hardcoded English "Text" / "Voice" channel section headers in `ChannelList.tsx` using new `chat.section_text` / `chat.section_voice` i18n keys (EN + ZH)
 - localized hardcoded voice network diagnostic labels ("GW RTT", "GW Loss", "Media Loss", "stale", "local") in `VoicePanel.tsx` using new `voice.net_label_*` i18n keys (EN + ZH)
 - added overflow/truncation handling to `chat-main-title` (server name) to prevent long names from breaking the chat header
@@ -308,6 +319,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### 2026-04-16 Follow-up Hotfix (External Voice/Stream Media Path)
 
 **Scripts**
+
 - `scripts/dev-up.ps1` TURN external-IP resolution is now hardened for public-domain deployments:
   - resolves public relay IP from `-TurnHost` DNS first, then falls back to public-IP detection
   - rejects private `TURN_EXTERNAL_IP` when `-TurnHost` is public (fails fast instead of silently using LAN IP)
@@ -317,6 +329,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### Startup Reliability Hardening (Docker readiness)
 
 **Scripts**
+
 - `scripts/dev-up.ps1` now validates Docker engine readiness before infra startup.
 - when engine is unavailable, it now best-effort launches Docker Desktop and waits (up to 120s) before failing with a clear action message.
 - when Docker Desktop is alive but backend stays in `starting` (`_ping` timeout / API-version route 500), startup now triggers one automatic recovery attempt (`restart Docker Desktop + wsl --shutdown`) before failing with explicit remediation.
@@ -422,6 +435,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 **Client (`packages/client`)**
 
 **Voice error visibility (blocking bug — now fixed):**
+
 - voice join failures (insecure HTTPS context on mobile HTTP, mic denied, gateway not connected) previously set `status: 'error'` silently — `VoicePanel` returned `null` for error state and `ChatShell` didn't mount `VoicePanel` for error state, so users got no feedback
 - added `getMicUnavailableReason()` guard before `getUserMedia` to immediately surface `insecure_context` error when `navigator.mediaDevices` is unavailable (HTTP on mobile)
 - `VoicePanel` now renders a visible error card with localized message and dismiss button for all three failure modes: insecure context, mic denied, not connected
@@ -430,33 +444,39 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - added five new i18n keys for voice error messages in English and Simplified Chinese
 
 **Mobile layout (sidebar strip down from 232px → 71px):**
+
 - removed the always-visible `account.username_change_hint` paragraph from `AccountPanel` non-edit view
 - `sidebar-footer` is now a flex column with a `sidebar-footer-actions` inner row grouping language switcher + sign-out horizontally at all screen sizes
 - mobile sidebar-bottom: full horizontal scroll rail, all controls compact; channel section labels hidden in chip layout
 - chat area height on mobile went from 432px (y=380) to 681px (y=131) — 58% more vertical space for messages
 
 **Desktop/tablet sidebar footer:**
+
 - language switcher and sign-out button now share a compact horizontal row (no longer full-width stacked)
 - `btn-ghost` global width changed from `100%` to `auto`; full-width restored only where needed (login form)
 - `sidebar-footer` uses flex-column layout with `sidebar-footer-actions` as the inner row
 
 **Channel list section headers:**
+
 - channels now split into Text / Voice groups with labeled section headers in the desktop/tablet sidebar
 - section labels are hidden in mobile chip layout
 - voice channel icon changed from 'V' to '◉' to better differentiate from text channels
 
 **Message grouping:**
+
 - consecutive messages from the same author within 5 minutes are now grouped — repeated author+timestamp header is suppressed for follow-up messages
 - message items use tighter row padding with hover highlight instead of fixed gaps between all items
 - `message-panel` min-width changed from `360px` to `0` (fixes horizontal scroll on narrow mobile)
 
 **Playwright visual audit:**
+
 - `scripts/ui-audit.mjs` captures screenshots across 5 device sizes with layout measurements
 - auth injection fallback for offline API validation
 
 ### Web UI Polish Stage 1 (Web client)
 
 **Client (`packages/client`)**
+
 - introduced a small CSS token system in `app.css` (surfaces/borders/text/radii/focus)
 - normalized `:focus-visible`, disabled, and pressed (`aria-pressed`) UI states for clearer keyboard and control feedback
 - fixed sidebar composition so channels are the scrollable region and presence/voice/footer stay pinned as a stable bottom stack
@@ -465,11 +485,13 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### Mobile Web Load Fix (LAN access)
 
 **Client (`packages/client`)**
+
 - fixed the default API + gateway base URLs to derive from `window.location.hostname` instead of hard-coded `localhost` so opening the web client from a phone/tablet on the LAN no longer fails with a generic `Load failed` fetch error
 
 ### Web UI Polish Stage 2 (Desktop + Mobile)
 
 **Client (`packages/client`)**
+
 - improved small-screen layout: guild list becomes a top rail and channels become horizontal chips for touch-friendly navigation
 - prevented sidebar bottom surfaces (presence/voice/account controls) from pushing chat off-screen by turning them into a horizontal scroll rail on mobile
 - calmed and unified voice/stream surfaces to better match the shared token system without changing runtime behavior
@@ -479,6 +501,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 **Voice channel switch without leaving old channel (ghost participant + orphaned WebRTC)**
 
 **Client (`packages/client`)**
+
 - fixed `joinVoiceChannel` so switching voice channels while already active now sends `end` signals to all current peers before teardown (mirrors `leaveVoiceChannel` behavior)
 - added a best-effort `voice.leave` for the old channel to the gateway before starting mic capture for the new channel — prevents ghost participants and stale room state from persisting on the gateway side
 - added `voice-store.test.ts` regression coverage verifying that switching channels sends `end` to peers and `voice.leave` for the old channel
@@ -486,6 +509,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 **Popup watch lifecycle cancel race (orphaned WebRTC runtime)**
 
 **Client (`packages/client`)**
+
 - fixed a race in `unwatchStream` where `cancelledWatchRequests.delete(streamId)` ran in the `finally` block after the `stream.unwatch` ACK, which could clear the cancel flag before the in-flight `stream.watch` ACK resumed and checked it — the gap allowed `watchStream` to complete normally and create an orphaned runtime with no UI state
 - removed `cancelledWatchRequests.delete(streamId)` from `unwatchStream`'s `finally` block so the cancel flag remains until `watchStream` detects and consumes it
 - added `cancelledWatchRequests.delete(streamId)` to the `stream.watch` ACK failure path and the null-userId path in `watchStream` to prevent stale entries on the rare early-exit cases
@@ -496,12 +520,14 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 **Voice store lifecycle on gateway disconnect (resource leak + stale UI)**
 
 **Client (`packages/client`)**
+
 - added `handleGatewayDisconnected()` to the voice store interface and implementation — calls the existing `teardown()` helper then resets all runtime state to `idle`, preserving local user preferences (inputVolume, playbackVolume, participantPlaybackVolume)
 - gateway store now calls `useVoiceStore.getState().handleGatewayDisconnected()` in both the explicit `disconnect()` path (logout) and the `onError` reconnect path (network drop)
 - before this fix, logging out or losing the network connection while in a voice channel left the mic capture stream running, audio contexts open, and WebRTC peer connections alive — a real resource leak — and after reconnect the voice panel still showed the user as "active" in the channel with dead connections
 - added two regression tests to `gateway-store.test.ts` verifying the voice store is reset on explicit disconnect and on connection error
 
 **Admin app auto-login error handling (AdminApp.tsx)**
+
 - separated auth verification failure from dashboard load failure in the auto-login `useEffect`
 - when the stored password fails auth verification (e.g., admin rotated the password), the invalid password is now cleared from localStorage and the input is reset so the login form does not silently pre-fill with a broken credential
 - when auth succeeds but `loadDashboard()` fails (e.g., API temporarily unavailable), the user remains authenticated and the error is surfaced in the dashboard error area instead of being swallowed
@@ -510,6 +536,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### Popup Playback Hotfixes
 
 **Client (`packages/client`)**
+
 - popup livestream startup now falls back out of indefinite `Starting livestream video...` waits
 - popup autoplay now uses pause recovery and muted fallback so live video keeps rendering under browser autoplay restrictions
 - automatic unmute retry loops were removed so Chrome no longer pauses the popup video repeatedly before user gesture
@@ -517,23 +544,27 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### Livestream Quality Controls
 
 **Protocol / Gateway / DB**
+
 - `stream.start` now accepts optional quality settings for resolution, frame rate, and bitrate
 - gateway persists requested quality into `stream_sessions.metadata`
 - repository and in-memory test paths now preserve quality metadata instead of dropping it
 
 **Client (`packages/client`)**
+
 - `StreamPanel` now lets the broadcaster choose `480p` / `720p` / `1080p` / `1440p`, `15` / `30` / `60` fps, fixed bitrate presets, and a best-effort codec preference before starting screen or camera capture
 - selected quality flows into browser capture constraints and is reflected on the active owned-stream card; codec preference remains client-local and feeds publish-time WebRTC negotiation only
 
 ### Voice Participant Inline Volume Sliders
 
 **Client (`packages/client`)**
+
 - each remote voice participant now shows an inline local playback-volume slider under the display name
 - this reuses the existing per-participant local volume state and does not change voice protocol or gateway behavior
 
 ### Voice Mute Speaking-State Fix
 
 **Client (`packages/client`)**
+
 - voice mute now stops local speaking detection from continuing to report `speaking=true`
 - speaking detection now prefers the actual outbound send stream instead of the raw capture stream
 - muting immediately clears the local speaking indicator and prevents muted clients from re-lighting their speaking state while still muted
@@ -541,6 +572,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 ### Server Control Panel Baseline
 
 **Protocol / API / DB**
+
 - added public/admin system HTTP contracts for:
   - public server config
   - admin password verification
@@ -557,12 +589,14 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - public registration now respects the persisted server setting and returns `403` when self-registration is disabled
 
 **Web / Client**
+
 - the web client now loads public server config before rendering auth/chat
 - the login screen hides registration when public registration is disabled
 - the shared chat shell now shows the admin-configured server name in the top header
 - the web client default dev port is now `80`
 
 **Admin Panel (`apps/admin`)**
+
 - added a dedicated admin-only web app on a separate port (`ADMIN_PORT`, default `5180`)
 - the control panel requires the management password before loading server settings
 - the bootstrap default management password is now `admin`, and untouched legacy default hashes are auto-migrated on first access
@@ -578,12 +612,14 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
   - set per-channel voice quality
 
 **Current Runtime Boundary**
+
 - channel `voiceQuality` is currently an admin-managed persisted channel setting and is exposed through channel data
 - it does not yet change live voice media bitrate/codec behavior in the current P2P voice runtime
 
 ### Bilingual UI (English + 简体中文)
 
 **Client + Admin**
+
 - added i18n infrastructure plus in-UI language switchers
 - translated web client UI and server control panel UI between English and Simplified Chinese
 - language selection persists in `localStorage` (`baker_language`)

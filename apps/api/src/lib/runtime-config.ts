@@ -47,10 +47,24 @@ export interface DeploymentPendingMarker {
   updatedAt: string;
 }
 
+export interface RuntimeSelfRepairSettings {
+  allowContainerRepair: boolean;
+  enabled: boolean;
+  intervalSeconds: number;
+  updatedAt: string;
+}
+
+export interface RuntimeSelfRepairSettingsUpdate {
+  allowContainerRepair?: boolean;
+  enabled?: boolean;
+  intervalSeconds?: number;
+}
+
 type RuntimeEnv = Record<string, string>;
 
 const defaultRuntimeDir = '/var/lib/baker/runtime';
-const defaultStunUrls = 'stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302';
+const defaultStunUrls =
+  'stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302';
 
 export function getRuntimeDir() {
   return process.env.BAKER_RUNTIME_DIR || defaultRuntimeDir;
@@ -66,6 +80,18 @@ export function getDeploymentPendingPath() {
 
 export function getUpdateStatusPath() {
   return join(getRuntimeDir(), 'update-status.json');
+}
+
+export function getRuntimeRepairStatusPath() {
+  return join(getRuntimeDir(), 'runtime-repair-status.json');
+}
+
+export function getRuntimeRepairLockPath() {
+  return join(getRuntimeDir(), 'runtime-repair.lock');
+}
+
+export function getRuntimeSelfRepairSettingsPath() {
+  return join(getRuntimeDir(), 'self-repair.json');
 }
 
 function decodeShellValue(input: string) {
@@ -130,11 +156,18 @@ export function serializeRuntimeEnv(env: RuntimeEnv) {
     .join('\n')}\n`;
 }
 
-async function readRuntimeEnvFromDisk(path = getRuntimeEnvPath()): Promise<RuntimeEnv> {
+async function readRuntimeEnvFromDisk(
+  path = getRuntimeEnvPath(),
+): Promise<RuntimeEnv> {
   try {
     return parseRuntimeEnv(await readFile(path, 'utf8'));
   } catch (err) {
-    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === 'ENOENT'
+    ) {
       return {};
     }
     throw err;
@@ -152,7 +185,9 @@ function readInt(env: RuntimeEnv, key: string, fallback: number) {
 }
 
 function readBoolean(env: RuntimeEnv, key: string, fallback: boolean) {
-  const raw = sourceValue(env, key, fallback ? 'true' : 'false').trim().toLowerCase();
+  const raw = sourceValue(env, key, fallback ? 'true' : 'false')
+    .trim()
+    .toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(raw)) {
     return true;
   }
@@ -162,10 +197,16 @@ function readBoolean(env: RuntimeEnv, key: string, fallback: boolean) {
   return fallback;
 }
 
-export function toDeploymentRuntimeSettings(env: RuntimeEnv): DeploymentRuntimeSettings {
+export function toDeploymentRuntimeSettings(
+  env: RuntimeEnv,
+): DeploymentRuntimeSettings {
   return {
     adminHostPort: readInt(env, 'ADMIN_HTTP_PORT', 3001),
-    allowedHosts: sourceValue(env, 'ALLOWED_HOSTS', sourceValue(env, 'VITE_ALLOWED_HOSTS', '')),
+    allowedHosts: sourceValue(
+      env,
+      'ALLOWED_HOSTS',
+      sourceValue(env, 'VITE_ALLOWED_HOSTS', ''),
+    ),
     sfuAnnouncedIp: sourceValue(env, 'SFU_ANNOUNCED_IP', ''),
     sfuEnableTcp: readBoolean(env, 'SFU_ENABLE_TCP', true),
     sfuRtcMaxPort: readInt(env, 'SFU_RTC_MAX_PORT', 50100),
@@ -188,14 +229,20 @@ export async function readDeploymentRuntimeSettings() {
   return toDeploymentRuntimeSettings(await readRuntimeEnvFromDisk());
 }
 
-function setRuntimeValue(env: RuntimeEnv, key: string, value: string | number | boolean | undefined) {
+function setRuntimeValue(
+  env: RuntimeEnv,
+  key: string,
+  value: string | number | boolean | undefined,
+) {
   if (value === undefined) {
     return;
   }
   env[key] = String(value);
 }
 
-export async function updateDeploymentRuntimeSettings(input: DeploymentRuntimeUpdate) {
+export async function updateDeploymentRuntimeSettings(
+  input: DeploymentRuntimeUpdate,
+) {
   const path = getRuntimeEnvPath();
   const env = await readRuntimeEnvFromDisk(path);
 
@@ -231,16 +278,28 @@ export async function readDeploymentPendingMarker(
   path = getDeploymentPendingPath(),
 ): Promise<DeploymentPendingMarker | null> {
   try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as Partial<DeploymentPendingMarker>;
+    const parsed = JSON.parse(
+      await readFile(path, 'utf8'),
+    ) as Partial<DeploymentPendingMarker>;
     return {
       changedKeys: Array.isArray(parsed.changedKeys)
-        ? parsed.changedKeys.filter((key): key is string => typeof key === 'string')
+        ? parsed.changedKeys.filter(
+            (key): key is string => typeof key === 'string',
+          )
         : [],
       pendingApply: parsed.pendingApply === true,
-      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date(0).toISOString(),
+      updatedAt:
+        typeof parsed.updatedAt === 'string'
+          ? parsed.updatedAt
+          : new Date(0).toISOString(),
     };
   } catch (err) {
-    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === 'ENOENT'
+    ) {
       return null;
     }
     throw err;
@@ -252,19 +311,102 @@ export async function writeDeploymentPendingMarker(
   path = getDeploymentPendingPath(),
 ) {
   const existing = await readDeploymentPendingMarker(path);
-  const mergedKeys = Array.from(new Set([...(existing?.changedKeys ?? []), ...changedKeys])).sort();
+  const mergedKeys = Array.from(
+    new Set([...(existing?.changedKeys ?? []), ...changedKeys]),
+  ).sort();
   await mkdir(dirname(path), { recursive: true });
   await writeFile(
     path,
-    JSON.stringify({ changedKeys: mergedKeys, pendingApply: true, updatedAt: new Date().toISOString() }, null, 2),
+    JSON.stringify(
+      {
+        changedKeys: mergedKeys,
+        pendingApply: true,
+        updatedAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
     { mode: 0o600 },
   );
 }
 
-export async function clearDeploymentPendingMarker(path = getDeploymentPendingPath()) {
+export async function clearDeploymentPendingMarker(
+  path = getDeploymentPendingPath(),
+) {
   await rm(path, { force: true });
 }
 
-export async function hasDeploymentPendingMarker(path = getDeploymentPendingPath()) {
+export async function hasDeploymentPendingMarker(
+  path = getDeploymentPendingPath(),
+) {
   return (await readDeploymentPendingMarker(path))?.pendingApply === true;
+}
+
+function defaultRuntimeSelfRepairSettings(): RuntimeSelfRepairSettings {
+  return {
+    allowContainerRepair: true,
+    enabled: false,
+    intervalSeconds: 60,
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
+export async function readRuntimeSelfRepairSettings(
+  path = getRuntimeSelfRepairSettingsPath(),
+): Promise<RuntimeSelfRepairSettings> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(path, 'utf8'),
+    ) as Partial<RuntimeSelfRepairSettings>;
+    const defaults = defaultRuntimeSelfRepairSettings();
+    const intervalSeconds =
+      Number.isInteger(parsed.intervalSeconds) &&
+      typeof parsed.intervalSeconds === 'number' &&
+      parsed.intervalSeconds >= 30 &&
+      parsed.intervalSeconds <= 86_400
+        ? parsed.intervalSeconds
+        : defaults.intervalSeconds;
+
+    return {
+      allowContainerRepair:
+        typeof parsed.allowContainerRepair === 'boolean'
+          ? parsed.allowContainerRepair
+          : defaults.allowContainerRepair,
+      enabled:
+        typeof parsed.enabled === 'boolean' ? parsed.enabled : defaults.enabled,
+      intervalSeconds,
+      updatedAt:
+        typeof parsed.updatedAt === 'string'
+          ? parsed.updatedAt
+          : defaults.updatedAt,
+    };
+  } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === 'ENOENT'
+    ) {
+      return defaultRuntimeSelfRepairSettings();
+    }
+    throw err;
+  }
+}
+
+export async function updateRuntimeSelfRepairSettings(
+  input: RuntimeSelfRepairSettingsUpdate,
+  path = getRuntimeSelfRepairSettingsPath(),
+) {
+  const current = await readRuntimeSelfRepairSettings(path);
+  const next: RuntimeSelfRepairSettings = {
+    ...current,
+    ...input,
+    updatedAt: new Date().toISOString(),
+  };
+
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(next, null, 2), { mode: 0o600 });
+  await rename(tmpPath, path);
+  return next;
 }

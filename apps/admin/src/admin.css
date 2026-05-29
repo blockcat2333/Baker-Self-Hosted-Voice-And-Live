@@ -1,8 +1,16 @@
 :root {
   color: #f8fafc;
   background:
-    radial-gradient(circle at top left, rgba(234, 88, 12, 0.18), transparent 24%),
-    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.16), transparent 28%),
+    radial-gradient(
+      circle at top left,
+      rgba(234, 88, 12, 0.18),
+      transparent 24%
+    ),
+    radial-gradient(
+      circle at bottom right,
+      rgba(14, 165, 233, 0.16),
+      transparent 28%
+    ),
     #08111d;
   font-family: 'Segoe UI', 'SF Pro Display', sans-serif;
 }
@@ -242,6 +250,77 @@ select {
   padding: 10px;
 }
 
+.admin-runtime-card {
+  align-content: start;
+}
+
+.admin-status-badge {
+  align-self: start;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 999px;
+  color: #cbd5e1;
+  font-size: 12px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.admin-status-badge--healthy {
+  background: rgba(22, 163, 74, 0.16);
+  border-color: rgba(74, 222, 128, 0.36);
+  color: #bbf7d0;
+}
+
+.admin-status-badge--degraded,
+.admin-status-badge--stopped,
+.admin-status-badge--failed {
+  background: rgba(185, 28, 28, 0.16);
+  border-color: rgba(248, 113, 113, 0.38);
+  color: #fecaca;
+}
+
+.admin-status-badge--repairing {
+  background: rgba(14, 165, 233, 0.16);
+  border-color: rgba(56, 189, 248, 0.38);
+  color: #bae6fd;
+}
+
+.admin-status-badge--disabled,
+.admin-status-badge--unknown {
+  background: rgba(100, 116, 139, 0.16);
+  color: #cbd5e1;
+}
+
+.admin-runtime-services {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-runtime-service {
+  align-items: center;
+  background: rgba(2, 6, 23, 0.24);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 10px;
+}
+
+.admin-runtime-service div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-runtime-service strong {
+  color: #e2e8f0;
+}
+
+.admin-runtime-service span:not(.admin-status-badge) {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .admin-channel-list {
   display: grid;
   gap: 12px;
@@ -259,7 +338,10 @@ select {
 .admin-channel-fields {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(220px, 2fr) minmax(120px, 1fr) minmax(140px, 1fr);
+  grid-template-columns: minmax(220px, 2fr) minmax(120px, 1fr) minmax(
+      140px,
+      1fr
+    );
   width: 100%;
 }
 
@@ -310,6 +392,11 @@ select {
   }
 
   .admin-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-runtime-service {
     align-items: stretch;
     flex-direction: column;
   }

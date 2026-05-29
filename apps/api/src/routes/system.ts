@@ -5,10 +5,15 @@ import {
   AdminCreateUserResponseSchema,
   AdminApplyUpdateRequestSchema,
   AdminDeploymentSettingsSchema,
+  AdminRuntimeHealthSchema,
+  AdminRuntimeRepairRequestSchema,
+  AdminRuntimeRepairResultSchema,
+  AdminRuntimeSelfRepairSettingsSchema,
   AdminServerSettingsSchema,
   AdminUpdateDeploymentSettingsRequestSchema,
   AdminUpdateChannelRequestSchema,
   AdminUpdateJobStatusSchema,
+  AdminUpdateRuntimeSelfRepairSettingsRequestSchema,
   AdminUpdateSettingsRequestSchema,
   AdminUpdateVersionsResponseSchema,
   AdminVerifyPasswordRequestSchema,
@@ -28,15 +33,30 @@ import {
   readContainerHostPort,
   type DockerInspectResponse,
 } from '../lib/docker-control';
-import { DEFAULT_WORKSPACE_SLUG, ensureNewUserJoinsDefaultWorkspace } from '../lib/default-workspace';
+import {
+  DEFAULT_WORKSPACE_SLUG,
+  ensureNewUserJoinsDefaultWorkspace,
+} from '../lib/default-workspace';
 import { hashPassword } from '../lib/password';
+import {
+  getRuntimeHealth,
+  isRuntimeRepairRunning,
+  readSelfRepairSettings,
+  repairRuntimeServices,
+  RuntimeRepairLockError,
+  updateSelfRepairSettings,
+} from '../lib/runtime-health';
 import {
   readDeploymentPendingMarker,
   readDeploymentRuntimeSettings,
   updateDeploymentRuntimeSettings,
   type DeploymentRuntimeSettings,
 } from '../lib/runtime-config';
-import { getOrCreateServerSettings, syncWorkspaceServerName, verifyAdminPassword } from '../lib/server-settings';
+import {
+  getOrCreateServerSettings,
+  syncWorkspaceServerName,
+  verifyAdminPassword,
+} from '../lib/server-settings';
 import { listBakerUpdateVersions } from '../lib/update-versions';
 import {
   readUpdateStatus,
@@ -54,9 +74,14 @@ function normalizeUsername(username: string) {
 
 function assertValidUsername(username: string) {
   if (username.length < 2 || username.length > 32) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Username must be between 2 and 32 characters.', {
-      field: 'username',
-    });
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'Username must be between 2 and 32 characters.',
+      {
+        field: 'username',
+      },
+    );
   }
 }
 
@@ -106,11 +131,17 @@ async function requireAdmin(
 
   const valid = await verifyAdminPassword(app.dataAccess, password);
   if (!valid) {
-    throw new ApiError(401, 'INVALID_CREDENTIALS', 'Admin password is incorrect.');
+    throw new ApiError(
+      401,
+      'INVALID_CREDENTIALS',
+      'Admin password is incorrect.',
+    );
   }
 }
 
-async function getWorkspaceState(dataAccess: Pick<DatabaseAccess, 'channels' | 'guilds' | 'serverSettings'>) {
+async function getWorkspaceState(
+  dataAccess: Pick<DatabaseAccess, 'channels' | 'guilds' | 'serverSettings'>,
+) {
   const settings = await getOrCreateServerSettings(dataAccess);
   const guild = await dataAccess.guilds.findBySlug(DEFAULT_WORKSPACE_SLUG);
   const channels = guild ? await dataAccess.channels.listByGuild(guild.id) : [];
@@ -130,10 +161,22 @@ interface SystemRoutesRequest {
 
 interface SystemRoutesApp {
   dataAccess: DatabaseAccess;
-  delete(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
-  get(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
-  patch(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
-  post(path: string, handler: (request: SystemRoutesRequest) => Promise<unknown>): unknown;
+  delete(
+    path: string,
+    handler: (request: SystemRoutesRequest) => Promise<unknown>,
+  ): unknown;
+  get(
+    path: string,
+    handler: (request: SystemRoutesRequest) => Promise<unknown>,
+  ): unknown;
+  patch(
+    path: string,
+    handler: (request: SystemRoutesRequest) => Promise<unknown>,
+  ): unknown;
+  post(
+    path: string,
+    handler: (request: SystemRoutesRequest) => Promise<unknown>,
+  ): unknown;
   publisher: {
     publishMediaModeChanged(mediaMode: 'p2p' | 'sfu'): Promise<void>;
   };
@@ -143,43 +186,82 @@ async function assertSfuAvailable() {
   const env = parseAppEnv();
   let response: Response;
   try {
-    response = await fetch(`${env.MEDIA_INTERNAL_URL}/v1/internal/media/capabilities`, {
-      headers: {
-        'x-baker-internal-secret': env.MEDIA_INTERNAL_SECRET,
+    response = await fetch(
+      `${env.MEDIA_INTERNAL_URL}/v1/internal/media/capabilities`,
+      {
+        headers: {
+          'x-baker-internal-secret': env.MEDIA_INTERNAL_SECRET,
+        },
+        method: 'GET',
       },
-      method: 'GET',
-    });
+    );
   } catch (err) {
-    throw new ApiError(409, 'VALIDATION_ERROR', 'SFU media backend is not reachable.', {
-      cause: err instanceof Error ? err.message : String(err),
-    });
+    throw new ApiError(
+      409,
+      'VALIDATION_ERROR',
+      'SFU media backend is not reachable.',
+      {
+        cause: err instanceof Error ? err.message : String(err),
+      },
+    );
   }
 
   if (!response.ok) {
-    throw new ApiError(409, 'VALIDATION_ERROR', `SFU media backend check failed with HTTP ${response.status}.`);
+    throw new ApiError(
+      409,
+      'VALIDATION_ERROR',
+      `SFU media backend check failed with HTTP ${response.status}.`,
+    );
   }
 
   const capabilities = MediaCapabilitiesSchema.parse(await response.json());
   if (!capabilities.sfu?.available) {
-    throw new ApiError(409, 'VALIDATION_ERROR', 'This media service build does not support SFU mode.');
+    throw new ApiError(
+      409,
+      'VALIDATION_ERROR',
+      'This media service build does not support SFU mode.',
+    );
   }
   if (!capabilities.sfu.configured) {
-    throw new ApiError(409, 'VALIDATION_ERROR', 'SFU mode requires SFU_ANNOUNCED_IP and the SFU RTC port range to be configured.');
+    throw new ApiError(
+      409,
+      'VALIDATION_ERROR',
+      'SFU mode requires SFU_ANNOUNCED_IP and the SFU RTC port range to be configured.',
+    );
   }
 }
 
 function assertValidDeploymentSettings(settings: DeploymentRuntimeSettings) {
   if (settings.turnMinPort > settings.turnMaxPort) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'TURN relay minimum port must be less than or equal to the maximum port.');
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'TURN relay minimum port must be less than or equal to the maximum port.',
+    );
   }
   if (settings.sfuRtcMinPort > settings.sfuRtcMaxPort) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'SFU RTC minimum port must be less than or equal to the maximum port.');
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'SFU RTC minimum port must be less than or equal to the maximum port.',
+    );
   }
   if (settings.turnEnabled && !settings.turnUrls && !settings.turnExternalIp) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'TURN requires TURN URLs or an external IP.');
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'TURN requires TURN URLs or an external IP.',
+    );
   }
-  if (settings.turnEnabled && (!settings.turnUsername || !settings.turnPasswordConfigured)) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'TURN requires a username and password.');
+  if (
+    settings.turnEnabled &&
+    (!settings.turnUsername || !settings.turnPasswordConfigured)
+  ) {
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'TURN requires a username and password.',
+    );
   }
 }
 
@@ -220,31 +302,41 @@ function currentContainerHostPortSettings(
 ) {
   return {
     ...settings,
-    adminHostPort: readContainerHostPort(inspect, 8080) ?? settings.adminHostPort,
+    adminHostPort:
+      readContainerHostPort(inspect, 8080) ?? settings.adminHostPort,
     webHostPort: readContainerHostPort(inspect, 80) ?? settings.webHostPort,
   };
 }
 
 async function getAdminDeploymentSettings() {
   const docker = createDockerEngineClient();
-  const [dockerEnabled, dockerStatus, runtimeSettings, pendingMarker] = await Promise.all([
-    docker.isAvailable(),
-    docker.getStatusMessage(),
-    readDeploymentRuntimeSettings(),
-    readDeploymentPendingMarker(),
-  ]);
+  const [dockerEnabled, dockerStatus, runtimeSettings, pendingMarker] =
+    await Promise.all([
+      docker.isAvailable(),
+      docker.getStatusMessage(),
+      readDeploymentRuntimeSettings(),
+      readDeploymentPendingMarker(),
+    ]);
   const inspect = dockerEnabled ? await docker.inspectCurrentContainer() : null;
   const resolvedSettings = dockerEnabled
-    ? resolveContainerHostPorts(runtimeSettings, inspect, new Set(pendingMarker?.changedKeys ?? []))
+    ? resolveContainerHostPorts(
+        runtimeSettings,
+        inspect,
+        new Set(pendingMarker?.changedKeys ?? []),
+      )
     : runtimeSettings;
 
   return AdminDeploymentSettingsSchema.parse({
     ...resolvedSettings,
-    currentContainerName: inspect?.Name ? inspect.Name.replace(/^\//, '') : null,
+    currentContainerName: inspect?.Name
+      ? inspect.Name.replace(/^\//, '')
+      : null,
     currentImage: inspect?.Config?.Image ?? null,
     dockerEnabled,
     pendingApply: pendingMarker?.pendingApply === true,
-    ...(dockerEnabled ? {} : { currentContainerName: null, currentImage: null }),
+    ...(dockerEnabled
+      ? {}
+      : { currentContainerName: null, currentImage: null }),
     dockerStatus,
   });
 }
@@ -266,7 +358,11 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     const input = AdminVerifyPasswordRequestSchema.parse(request.body);
     const valid = await verifyAdminPassword(app.dataAccess, input.password);
     if (!valid) {
-      throw new ApiError(401, 'INVALID_CREDENTIALS', 'Admin password is incorrect.');
+      throw new ApiError(
+        401,
+        'INVALID_CREDENTIALS',
+        'Admin password is incorrect.',
+      );
     }
     return AdminVerifyPasswordResponseSchema.parse({ ok: true });
   });
@@ -321,13 +417,20 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     );
 
     if (!nextSettings) {
-      throw new ApiError(500, 'INTERNAL_SERVER_ERROR', 'Failed to update server settings.');
+      throw new ApiError(
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Failed to update server settings.',
+      );
     }
 
     if (input.serverName) {
       await syncWorkspaceServerName(app.dataAccess, input.serverName);
     }
-    if (input.mediaMode !== undefined && input.mediaMode !== currentSettings.mediaMode) {
+    if (
+      input.mediaMode !== undefined &&
+      input.mediaMode !== currentSettings.mediaMode
+    ) {
       await app.publisher.publishMediaModeChanged(input.mediaMode);
     }
 
@@ -344,12 +447,13 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
   app.get('/v1/admin/updates/versions', async (request) => {
     await requireAdmin(app, request);
     const docker = createDockerEngineClient();
-    const [dockerEnabled, dockerStatus, containerInfo, versions] = await Promise.all([
-      docker.isAvailable(),
-      docker.getStatusMessage(),
-      docker.getCurrentContainerInfo(),
-      listBakerUpdateVersions(),
-    ]);
+    const [dockerEnabled, dockerStatus, containerInfo, versions] =
+      await Promise.all([
+        docker.isAvailable(),
+        docker.getStatusMessage(),
+        docker.getCurrentContainerInfo(),
+        listBakerUpdateVersions(),
+      ]);
 
     return AdminUpdateVersionsResponseSchema.parse({
       currentImage: containerInfo.currentImage,
@@ -369,9 +473,20 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
   app.post('/v1/admin/updates/apply', async (request) => {
     await requireAdmin(app, request);
     const input = AdminApplyUpdateRequestSchema.parse(request.body);
+    if (await isRuntimeRepairRunning()) {
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Runtime repair is already running.',
+      );
+    }
     const docker = createDockerEngineClient();
     if (!(await docker.isAvailable())) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Docker socket is not mounted; one-click update is unavailable.');
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Docker socket is not mounted; one-click update is unavailable.',
+      );
     }
 
     const [runtimeSettings, pendingMarker, inspect] = await Promise.all([
@@ -390,12 +505,17 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     try {
       const started = await docker.startUpdateHelper({
         desiredSettings: settings,
-        previousSettings: currentContainerHostPortSettings(runtimeSettings, inspect),
+        previousSettings: currentContainerHostPortSettings(
+          runtimeSettings,
+          inspect,
+        ),
         pullPolicy: 'always',
         targetImage,
         targetTag: input.tag,
       });
-      return AdminUpdateJobStatusSchema.parse(await writeStartingUpdateStatus(started));
+      return AdminUpdateJobStatusSchema.parse(
+        await writeStartingUpdateStatus(started),
+      );
     } catch (err) {
       const failed = await writeFailedUpdateStatus({
         error: err instanceof Error ? err.message : String(err),
@@ -413,14 +533,17 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
 
   app.patch('/v1/admin/deployment/settings', async (request) => {
     await requireAdmin(app, request);
-    const input = AdminUpdateDeploymentSettingsRequestSchema.parse(request.body);
+    const input = AdminUpdateDeploymentSettingsRequestSchema.parse(
+      request.body,
+    );
     const current = await readDeploymentRuntimeSettings();
     const next = {
       ...current,
       ...input,
-      turnPasswordConfigured: input.turnPassword !== undefined
-        ? input.turnPassword.length > 0
-        : current.turnPasswordConfigured,
+      turnPasswordConfigured:
+        input.turnPassword !== undefined
+          ? input.turnPassword.length > 0
+          : current.turnPasswordConfigured,
     };
     assertValidDeploymentSettings(next);
     await updateDeploymentRuntimeSettings(input);
@@ -429,9 +552,20 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
 
   app.post('/v1/admin/deployment/apply', async (request) => {
     await requireAdmin(app, request);
+    if (await isRuntimeRepairRunning()) {
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Runtime repair is already running.',
+      );
+    }
     const docker = createDockerEngineClient();
     if (!(await docker.isAvailable())) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Docker socket is not mounted; deployment apply is unavailable.');
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Docker socket is not mounted; deployment apply is unavailable.',
+      );
     }
 
     const [runtimeSettings, pendingMarker, inspect] = await Promise.all([
@@ -444,9 +578,13 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
       inspect,
       new Set(pendingMarker?.changedKeys ?? []),
     );
-    const previousSettings = currentContainerHostPortSettings(runtimeSettings, inspect);
+    const previousSettings = currentContainerHostPortSettings(
+      runtimeSettings,
+      inspect,
+    );
     assertValidDeploymentSettings(desiredSettings);
-    const targetImage = inspect?.Config?.Image ?? `${BAKER_IMAGE_REPOSITORY}:${BAKER_VERSION}`;
+    const targetImage =
+      inspect?.Config?.Image ?? `${BAKER_IMAGE_REPOSITORY}:${BAKER_VERSION}`;
     const targetTag = imageTagFromImage(targetImage);
 
     try {
@@ -457,7 +595,9 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
         targetImage,
         targetTag,
       });
-      return AdminUpdateJobStatusSchema.parse(await writeStartingUpdateStatus(started));
+      return AdminUpdateJobStatusSchema.parse(
+        await writeStartingUpdateStatus(started),
+      );
     } catch (err) {
       const failed = await writeFailedUpdateStatus({
         error: err instanceof Error ? err.message : String(err),
@@ -466,6 +606,55 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
       });
       return AdminUpdateJobStatusSchema.parse(failed);
     }
+  });
+
+  app.get('/v1/admin/runtime/health', async (request) => {
+    await requireAdmin(app, request);
+    return AdminRuntimeHealthSchema.parse(await getRuntimeHealth());
+  });
+
+  app.post('/v1/admin/runtime/repair', async (request) => {
+    await requireAdmin(app, request);
+    const input = AdminRuntimeRepairRequestSchema.parse(request.body ?? {});
+    const updateStatus = await readUpdateStatus();
+    if (updateStatus.status === 'running') {
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Server update or deployment apply is already running.',
+      );
+    }
+
+    try {
+      return AdminRuntimeRepairResultSchema.parse(
+        await repairRuntimeServices({
+          allowContainerRepair: input.allowContainerRepair ?? true,
+          trigger: 'manual',
+        }),
+      );
+    } catch (err) {
+      if (err instanceof RuntimeRepairLockError) {
+        throw new ApiError(409, 'VALIDATION_ERROR', err.message);
+      }
+      throw err;
+    }
+  });
+
+  app.get('/v1/admin/runtime/self-repair', async (request) => {
+    await requireAdmin(app, request);
+    return AdminRuntimeSelfRepairSettingsSchema.parse(
+      await readSelfRepairSettings(),
+    );
+  });
+
+  app.patch('/v1/admin/runtime/self-repair', async (request) => {
+    await requireAdmin(app, request);
+    const input = AdminUpdateRuntimeSelfRepairSettingsRequestSchema.parse(
+      request.body,
+    );
+    return AdminRuntimeSelfRepairSettingsSchema.parse(
+      await updateSelfRepairSettings(input),
+    );
   });
 
   app.get('/v1/admin/workspace', async (request) => {
@@ -482,20 +671,29 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
 
     const existingUser = await app.dataAccess.users.findByEmail(email);
     if (existingUser) {
-      throw new ApiError(400, 'VALIDATION_ERROR', 'Email is already in use.', { field: 'email' });
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Email is already in use.', {
+        field: 'email',
+      });
     }
 
-    const createdUser = await app.dataAccess.withTransaction(async (repositories) => {
-      const settings = await getOrCreateServerSettings(repositories);
-      const user = await repositories.users.create({
-        email,
-        passwordHash: await hashPassword(input.password),
-        username,
-      });
+    const createdUser = await app.dataAccess.withTransaction(
+      async (repositories) => {
+        const settings = await getOrCreateServerSettings(repositories);
+        const user = await repositories.users.create({
+          email,
+          passwordHash: await hashPassword(input.password),
+          username,
+        });
 
-      await ensureNewUserJoinsDefaultWorkspace(repositories, user.id, username, settings.serverName);
-      return user;
-    });
+        await ensureNewUserJoinsDefaultWorkspace(
+          repositories,
+          user.id,
+          username,
+          settings.serverName,
+        );
+        return user;
+      },
+    );
 
     return AdminCreateUserResponseSchema.parse(toAuthUser(createdUser));
   });
@@ -503,12 +701,20 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
   app.post('/v1/admin/channels', async (request) => {
     await requireAdmin(app, request);
     const input = AdminCreateChannelRequestSchema.parse(request.body);
-    const guild = await app.dataAccess.guilds.findBySlug(DEFAULT_WORKSPACE_SLUG);
+    const guild = await app.dataAccess.guilds.findBySlug(
+      DEFAULT_WORKSPACE_SLUG,
+    );
     if (!guild) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Create the first user before managing channels.');
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Create the first user before managing channels.',
+      );
     }
 
-    const existingChannels = await app.dataAccess.channels.listByGuild(guild.id);
+    const existingChannels = await app.dataAccess.channels.listByGuild(
+      guild.id,
+    );
     const channel = await app.dataAccess.channels.create({
       guildId: guild.id,
       name: input.name.trim(),
@@ -538,11 +744,17 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     const updatedChannel = await app.dataAccess.channels.update(channelId, {
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       topic: existingChannel.topic,
-      ...(input.voiceQuality !== undefined ? { voiceQuality: input.voiceQuality } : {}),
+      ...(input.voiceQuality !== undefined
+        ? { voiceQuality: input.voiceQuality }
+        : {}),
     });
 
     if (!updatedChannel) {
-      throw new ApiError(500, 'INTERNAL_SERVER_ERROR', 'Failed to update channel.');
+      throw new ApiError(
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Failed to update channel.',
+      );
     }
 
     return toChannelSummary(updatedChannel);
@@ -562,26 +774,42 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
         throw new ApiError(404, 'NOT_FOUND', 'Channel not found.');
       }
 
-      const siblingChannels = await repositories.channels.listByGuild(existingChannel.guildId);
-      const sameTypeChannels = siblingChannels.filter((channel) => channel.type === existingChannel.type);
+      const siblingChannels = await repositories.channels.listByGuild(
+        existingChannel.guildId,
+      );
+      const sameTypeChannels = siblingChannels.filter(
+        (channel) => channel.type === existingChannel.type,
+      );
       if (sameTypeChannels.length <= 1) {
-        const message = existingChannel.type === 'text'
-          ? 'At least one text channel must remain.'
-          : 'At least one voice channel must remain.';
+        const message =
+          existingChannel.type === 'text'
+            ? 'At least one text channel must remain.'
+            : 'At least one voice channel must remain.';
         throw new ApiError(409, 'VALIDATION_ERROR', message);
       }
 
-      const activeSessions = await repositories.streamSessions.listActiveByChannel(channelId);
+      const activeSessions =
+        await repositories.streamSessions.listActiveByChannel(channelId);
       if (activeSessions.length > 0) {
-        throw new ApiError(409, 'VALIDATION_ERROR', 'Stop active livestreams before deleting this voice channel.');
+        throw new ApiError(
+          409,
+          'VALIDATION_ERROR',
+          'Stop active livestreams before deleting this voice channel.',
+        );
       }
 
       const deletedChannel = await repositories.channels.delete(channelId);
       if (!deletedChannel) {
-        throw new ApiError(500, 'INTERNAL_SERVER_ERROR', 'Failed to delete channel.');
+        throw new ApiError(
+          500,
+          'INTERNAL_SERVER_ERROR',
+          'Failed to delete channel.',
+        );
       }
 
-      const remainingChannels = await repositories.channels.listByGuild(existingChannel.guildId);
+      const remainingChannels = await repositories.channels.listByGuild(
+        existingChannel.guildId,
+      );
       await Promise.all(
         remainingChannels.map((channel, index) => {
           if (channel.position === index) {

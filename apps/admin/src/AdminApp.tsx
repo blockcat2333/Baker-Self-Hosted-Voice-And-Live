@@ -1,8 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
   AdminDeploymentSettings,
+  AdminRuntimeHealth,
+  AdminRuntimeRepairResult,
+  AdminRuntimeSelfRepairSettings,
   AdminServerSettings,
   AdminUpdateJobStatus,
   AdminUpdateVersionsResponse,
@@ -12,6 +15,9 @@ import type {
 import {
   AdminDeploymentSettingsSchema,
   AdminDeleteChannelResponseSchema,
+  AdminRuntimeHealthSchema,
+  AdminRuntimeRepairResultSchema,
+  AdminRuntimeSelfRepairSettingsSchema,
   AdminServerSettingsSchema,
   AdminUpdateJobStatusSchema,
   AdminUpdateVersionsResponseSchema,
@@ -36,7 +42,9 @@ function normalizeApiOrigin(apiBaseUrl?: string): string {
   } catch {
     // Allow relative-ish values by resolving against the current origin.
     try {
-      return new URL(trimmed, window.location.origin).toString().replace(/\/$/, '');
+      return new URL(trimmed, window.location.origin)
+        .toString()
+        .replace(/\/$/, '');
     } catch {
       return '';
     }
@@ -51,10 +59,23 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [error, setError] = useState<string | null>(null);
   const [settings, setSettings] = useState<AdminServerSettings | null>(null);
   const [workspace, setWorkspace] = useState<AdminWorkspaceState | null>(null);
-  const [deployment, setDeployment] = useState<AdminDeploymentSettings | null>(null);
-  const [updateVersions, setUpdateVersions] = useState<AdminUpdateVersionsResponse | null>(null);
+  const [deployment, setDeployment] = useState<AdminDeploymentSettings | null>(
+    null,
+  );
+  const [runtimeHealth, setRuntimeHealth] = useState<AdminRuntimeHealth | null>(
+    null,
+  );
+  const [runtimeRepairResult, setRuntimeRepairResult] =
+    useState<AdminRuntimeRepairResult | null>(null);
+  const [selfRepair, setSelfRepair] =
+    useState<AdminRuntimeSelfRepairSettings | null>(null);
+  const [updateVersions, setUpdateVersions] =
+    useState<AdminUpdateVersionsResponse | null>(null);
   const [selectedUpdateTag, setSelectedUpdateTag] = useState('');
-  const [updateStatus, setUpdateStatus] = useState<AdminUpdateJobStatus | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<AdminUpdateJobStatus | null>(
+    null,
+  );
+  const [isRuntimeLoading, setIsRuntimeLoading] = useState(false);
 
   const [serverName, setServerName] = useState('Baker');
   const [allowPublicRegistration, setAllowPublicRegistration] = useState(true);
@@ -81,14 +102,23 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [sfuEnableTcp, setSfuEnableTcp] = useState(true);
   const [sfuRtcMinPort, setSfuRtcMinPort] = useState('50000');
   const [sfuRtcMaxPort, setSfuRtcMaxPort] = useState('50100');
+  const [selfRepairEnabled, setSelfRepairEnabled] = useState(false);
+  const [selfRepairIntervalSeconds, setSelfRepairIntervalSeconds] =
+    useState('60');
+  const [selfRepairAllowContainerRepair, setSelfRepairAllowContainerRepair] =
+    useState(true);
 
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
 
   const [newChannelName, setNewChannelName] = useState('');
-  const [newChannelType, setNewChannelType] = useState<'text' | 'voice'>('text');
-  const [newChannelVoiceQuality, setNewChannelVoiceQuality] = useState<'high' | 'standard'>('standard');
+  const [newChannelType, setNewChannelType] = useState<'text' | 'voice'>(
+    'text',
+  );
+  const [newChannelVoiceQuality, setNewChannelVoiceQuality] = useState<
+    'high' | 'standard'
+  >('standard');
 
   const apiOrigin = useMemo(() => normalizeApiOrigin(apiBaseUrl), [apiBaseUrl]);
   const channelTypeCounts = useMemo(
@@ -103,7 +133,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     [workspace],
   );
 
-  function applyDeploymentSettingsToForm(nextDeployment: AdminDeploymentSettings) {
+  function applyDeploymentSettingsToForm(
+    nextDeployment: AdminDeploymentSettings,
+  ) {
     setWebHostPort(String(nextDeployment.webHostPort));
     setAdminHostPort(String(nextDeployment.adminHostPort));
     setAllowedHosts(nextDeployment.allowedHosts);
@@ -123,61 +155,114 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setSfuRtcMaxPort(String(nextDeployment.sfuRtcMaxPort));
   }
 
-  async function request<T>(
-    path: string,
-    init: RequestInit,
-    schema: { parse(data: unknown): T },
-    includePassword = true,
-  ): Promise<T> {
-    const response = await fetch(`${apiOrigin}${path}`, {
-      ...init,
-      headers: {
-        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(includePassword && password ? { 'x-admin-password': password } : {}),
-        ...(init.headers ?? {}),
-      },
-    });
-
-    const contentType = response.headers.get('content-type') ?? '';
-    const text = await response.text();
-
-    let json: unknown = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      // ignore; we handle below
-    }
-
-    if (json === null) {
-      const startsWith = text ? JSON.stringify(text.slice(0, 120)) : '(empty)';
-      throw new Error(
-        `Invalid JSON response from server (HTTP ${response.status}, content-type: ${contentType || 'unknown'}). Body starts with: ${startsWith}`,
-      );
-    }
-
-    if (!response.ok) {
-      const message =
-        typeof json === 'object' && json !== null && 'message' in json
-          ? String((json as Record<string, unknown>).message)
-          : `HTTP ${response.status}`;
-      throw new Error(message);
-    }
-
-    return schema.parse(json);
+  function applySelfRepairSettingsToForm(
+    nextSelfRepair: AdminRuntimeSelfRepairSettings,
+  ) {
+    setSelfRepairEnabled(nextSelfRepair.enabled);
+    setSelfRepairIntervalSeconds(String(nextSelfRepair.intervalSeconds));
+    setSelfRepairAllowContainerRepair(nextSelfRepair.allowContainerRepair);
   }
 
+  const request = useCallback(
+    async <T,>(
+      path: string,
+      init: RequestInit,
+      schema: { parse(data: unknown): T },
+      includePassword = true,
+    ): Promise<T> => {
+      const response = await fetch(`${apiOrigin}${path}`, {
+        ...init,
+        headers: {
+          ...(init.body !== undefined
+            ? { 'Content-Type': 'application/json' }
+            : {}),
+          ...(includePassword && password
+            ? { 'x-admin-password': password }
+            : {}),
+          ...(init.headers ?? {}),
+        },
+      });
+
+      const contentType = response.headers.get('content-type') ?? '';
+      const text = await response.text();
+
+      let json: unknown = null;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        // ignore; we handle below
+      }
+
+      if (json === null) {
+        const startsWith = text
+          ? JSON.stringify(text.slice(0, 120))
+          : '(empty)';
+        throw new Error(
+          `Invalid JSON response from server (HTTP ${response.status}, content-type: ${contentType || 'unknown'}). Body starts with: ${startsWith}`,
+        );
+      }
+
+      if (!response.ok) {
+        const message =
+          typeof json === 'object' && json !== null && 'message' in json
+            ? String((json as Record<string, unknown>).message)
+            : `HTTP ${response.status}`;
+        throw new Error(message);
+      }
+
+      return schema.parse(json);
+    },
+    [apiOrigin, password],
+  );
+
   async function loadDashboard() {
-    const [nextSettings, nextWorkspace, nextDeployment, nextUpdateStatus] = await Promise.all([
-      request('/v1/admin/settings', { method: 'GET' }, AdminServerSettingsSchema),
-      request('/v1/admin/workspace', { method: 'GET' }, AdminWorkspaceStateSchema),
-      request('/v1/admin/deployment/settings', { method: 'GET' }, AdminDeploymentSettingsSchema),
-      request('/v1/admin/updates/status', { method: 'GET' }, AdminUpdateJobStatusSchema),
+    const [
+      nextSettings,
+      nextWorkspace,
+      nextDeployment,
+      nextUpdateStatus,
+      nextRuntimeHealth,
+      nextSelfRepair,
+    ] = await Promise.all([
+      request(
+        '/v1/admin/settings',
+        { method: 'GET' },
+        AdminServerSettingsSchema,
+      ),
+      request(
+        '/v1/admin/workspace',
+        { method: 'GET' },
+        AdminWorkspaceStateSchema,
+      ),
+      request(
+        '/v1/admin/deployment/settings',
+        { method: 'GET' },
+        AdminDeploymentSettingsSchema,
+      ),
+      request(
+        '/v1/admin/updates/status',
+        { method: 'GET' },
+        AdminUpdateJobStatusSchema,
+      ),
+      request(
+        '/v1/admin/runtime/health',
+        { method: 'GET' },
+        AdminRuntimeHealthSchema,
+      ),
+      request(
+        '/v1/admin/runtime/self-repair',
+        { method: 'GET' },
+        AdminRuntimeSelfRepairSettingsSchema,
+      ),
     ]);
 
     setSettings(nextSettings);
     setWorkspace(nextWorkspace);
     setDeployment(nextDeployment);
     setUpdateStatus(nextUpdateStatus);
+    setRuntimeHealth(nextRuntimeHealth);
+    setRuntimeRepairResult(nextRuntimeHealth.lastRepair);
+    setSelfRepair(nextSelfRepair);
     setServerName(nextSettings.serverName);
     setAllowPublicRegistration(nextSettings.allowPublicRegistration);
     setWebEnabled(nextSettings.webEnabled);
@@ -185,7 +270,35 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setAppPort(String(nextSettings.appPort));
     setMediaMode(nextSettings.mediaMode);
     applyDeploymentSettingsToForm(nextDeployment);
+    applySelfRepairSettingsToForm(nextSelfRepair);
   }
+
+  const refreshRuntimeHealth = useCallback(async () => {
+    const nextRuntimeHealth = await request(
+      '/v1/admin/runtime/health',
+      { method: 'GET' },
+      AdminRuntimeHealthSchema,
+    );
+    setRuntimeHealth(nextRuntimeHealth);
+    setRuntimeRepairResult(nextRuntimeHealth.lastRepair);
+    return nextRuntimeHealth;
+  }, [request]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshRuntimeHealth().catch((err) => {
+        setError(
+          err instanceof Error ? err.message : t('admin.error_runtime_health'),
+        );
+      });
+    }, 10_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isAuthenticated, refreshRuntimeHealth, t]);
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
@@ -203,7 +316,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         false,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_login_failed'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_login_failed'),
+      );
       setIsAuthenticated(false);
       setIsLoading(false);
       return;
@@ -214,7 +329,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     try {
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_load_dashboard'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_load_dashboard'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -249,7 +366,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       setNewAdminPassword('');
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_save_settings'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_save_settings'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -266,9 +385,13 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         AdminUpdateVersionsResponseSchema,
       );
       setUpdateVersions(response);
-      setSelectedUpdateTag((current) => current || response.versions[0]?.tag || '');
+      setSelectedUpdateTag(
+        (current) => current || response.versions[0]?.tag || '',
+      );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_check_versions'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_check_versions'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -290,7 +413,11 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       return;
     }
 
-    if (!window.confirm(t('admin.confirm_start_update', { tag: selectedUpdateTag }))) {
+    if (
+      !window.confirm(
+        t('admin.confirm_start_update', { tag: selectedUpdateTag }),
+      )
+    ) {
       return;
     }
 
@@ -308,7 +435,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       );
       setUpdateStatus(status);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_start_update'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_start_update'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -349,7 +478,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       setDeployment(nextDeployment);
       applyDeploymentSettingsToForm(nextDeployment);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_save_deployment'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_save_deployment'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -372,9 +503,70 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       setUpdateStatus(status);
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_apply_deployment'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_apply_deployment'),
+      );
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function handleRepairRuntime() {
+    if (!window.confirm(t('admin.confirm_runtime_repair'))) {
+      return;
+    }
+
+    setIsRuntimeLoading(true);
+    setError(null);
+
+    try {
+      const result = await request(
+        '/v1/admin/runtime/repair',
+        {
+          body: JSON.stringify({
+            allowContainerRepair: selfRepairAllowContainerRepair,
+          }),
+          method: 'POST',
+        },
+        AdminRuntimeRepairResultSchema,
+      );
+      setRuntimeRepairResult(result);
+      await refreshRuntimeHealth();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('admin.error_runtime_repair'),
+      );
+    } finally {
+      setIsRuntimeLoading(false);
+    }
+  }
+
+  async function handleSaveSelfRepair(event: React.FormEvent) {
+    event.preventDefault();
+    setIsRuntimeLoading(true);
+    setError(null);
+
+    try {
+      const nextSelfRepair = await request(
+        '/v1/admin/runtime/self-repair',
+        {
+          body: JSON.stringify({
+            allowContainerRepair: selfRepairAllowContainerRepair,
+            enabled: selfRepairEnabled,
+            intervalSeconds: Number(selfRepairIntervalSeconds),
+          }),
+          method: 'PATCH',
+        },
+        AdminRuntimeSelfRepairSettingsSchema,
+      );
+      setSelfRepair(nextSelfRepair);
+      applySelfRepairSettingsToForm(nextSelfRepair);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('admin.error_save_self_repair'),
+      );
+    } finally {
+      setIsRuntimeLoading(false);
     }
   }
 
@@ -401,7 +593,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       setNewUserPassword('');
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_create_user'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_create_user'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -419,7 +613,8 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
           body: JSON.stringify({
             name: newChannelName,
             type: newChannelType,
-            voiceQuality: newChannelType === 'voice' ? newChannelVoiceQuality : 'standard',
+            voiceQuality:
+              newChannelType === 'voice' ? newChannelVoiceQuality : 'standard',
           }),
           method: 'POST',
         },
@@ -430,15 +625,21 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       setNewChannelVoiceQuality('standard');
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_create_channel'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_create_channel'),
+      );
     } finally {
       setIsLoading(false);
     }
   }
 
   async function handleSaveChannel(channel: ChannelSummary) {
-    const nameInput = document.getElementById(`channel-name-${channel.id}`) as HTMLInputElement | null;
-    const qualityInput = document.getElementById(`channel-quality-${channel.id}`) as HTMLSelectElement | null;
+    const nameInput = document.getElementById(
+      `channel-name-${channel.id}`,
+    ) as HTMLInputElement | null;
+    const qualityInput = document.getElementById(
+      `channel-quality-${channel.id}`,
+    ) as HTMLSelectElement | null;
 
     setIsLoading(true);
     setError(null);
@@ -449,7 +650,10 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         {
           body: JSON.stringify({
             name: nameInput?.value ?? channel.name,
-            voiceQuality: channel.type === 'voice' ? (qualityInput?.value ?? channel.voiceQuality) : channel.voiceQuality,
+            voiceQuality:
+              channel.type === 'voice'
+                ? (qualityInput?.value ?? channel.voiceQuality)
+                : channel.voiceQuality,
           }),
           method: 'PATCH',
         },
@@ -457,7 +661,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       );
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_update_channel'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_update_channel'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -482,7 +688,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       return;
     }
 
-    if (!window.confirm(t('admin.confirm_delete_channel', { name: channel.name }))) {
+    if (
+      !window.confirm(t('admin.confirm_delete_channel', { name: channel.name }))
+    ) {
       return;
     }
 
@@ -499,7 +707,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       );
       await loadDashboard();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('admin.error_delete_channel'));
+      setError(
+        err instanceof Error ? err.message : t('admin.error_delete_channel'),
+      );
     } finally {
       setIsLoading(false);
     }
@@ -524,7 +734,11 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
               />
             </label>
             {error ? <p className="admin-error">{error}</p> : null}
-            <button type="submit" className="admin-primary-btn" disabled={isLoading}>
+            <button
+              type="submit"
+              className="admin-primary-btn"
+              disabled={isLoading}
+            >
               {isLoading ? t('admin.checking') : t('admin.open_control_panel')}
             </button>
           </form>
@@ -556,7 +770,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         </div>
       </header>
 
-      {error ? <p className="admin-error admin-error--inline">{error}</p> : null}
+      {error ? (
+        <p className="admin-error admin-error--inline">{error}</p>
+      ) : null}
 
       <div className="admin-grid">
         <section className="admin-card">
@@ -564,31 +780,72 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
           <form className="admin-form" onSubmit={handleSaveSettings}>
             <label className="admin-field">
               <span>{t('admin.server_name')}</span>
-              <input value={serverName} onChange={(event) => setServerName(event.target.value)} required />
+              <input
+                value={serverName}
+                onChange={(event) => setServerName(event.target.value)}
+                required
+              />
             </label>
             <div className="admin-checkbox-row">
-              <label><input type="checkbox" checked={allowPublicRegistration} onChange={(event) => setAllowPublicRegistration(event.target.checked)} /> {t('admin.allow_public_registration')}</label>
-              <label><input type="checkbox" checked={webEnabled} onChange={(event) => setWebEnabled(event.target.checked)} /> {t('admin.enable_web_client')}</label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={allowPublicRegistration}
+                  onChange={(event) =>
+                    setAllowPublicRegistration(event.target.checked)
+                  }
+                />{' '}
+                {t('admin.allow_public_registration')}
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={webEnabled}
+                  onChange={(event) => setWebEnabled(event.target.checked)}
+                />{' '}
+                {t('admin.enable_web_client')}
+              </label>
             </div>
             <div className="admin-inline-grid">
               <label className="admin-field">
                 <span>{t('admin.web_port')}</span>
-                <input type="number" min={1} max={65535} value={webPort} onChange={(event) => setWebPort(event.target.value)} required />
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={webPort}
+                  onChange={(event) => setWebPort(event.target.value)}
+                  required
+                />
               </label>
               <label className="admin-field">
                 <span>{t('admin.app_port')}</span>
-                <input type="number" min={1} max={65535} value={appPort} onChange={(event) => setAppPort(event.target.value)} required />
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={appPort}
+                  onChange={(event) => setAppPort(event.target.value)}
+                  required
+                />
               </label>
             </div>
             <label className="admin-field">
               <span>{t('admin.media_mode')}</span>
-              <select value={mediaMode} onChange={(event) => setMediaMode(event.target.value as 'p2p' | 'sfu')}>
+              <select
+                value={mediaMode}
+                onChange={(event) =>
+                  setMediaMode(event.target.value as 'p2p' | 'sfu')
+                }
+              >
                 <option value="p2p">{t('admin.media_mode_p2p')}</option>
                 <option value="sfu">{t('admin.media_mode_sfu')}</option>
               </select>
             </label>
             {mediaMode === 'sfu' ? (
-              <p className="admin-channel-hint">{t('admin.media_mode_sfu_hint')}</p>
+              <p className="admin-channel-hint">
+                {t('admin.media_mode_sfu_hint')}
+              </p>
             ) : null}
             <label className="admin-field">
               <span>{t('admin.new_management_password')}</span>
@@ -600,15 +857,31 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                 onChange={(event) => setNewAdminPassword(event.target.value)}
               />
             </label>
-            <button type="submit" className="admin-primary-btn" disabled={isLoading}>
+            <button
+              type="submit"
+              className="admin-primary-btn"
+              disabled={isLoading}
+            >
               {t('admin.save_settings')}
             </button>
           </form>
           {settings ? (
             <div className="admin-meta">
-              <span>{t('admin.current_web_port', { port: String(settings.webPort) })}</span>
-              <span>{t('admin.current_app_port', { port: String(settings.appPort) })}</span>
-              <span>{t('admin.current_media_mode', { mode: settings.mediaMode.toUpperCase() })}</span>
+              <span>
+                {t('admin.current_web_port', {
+                  port: String(settings.webPort),
+                })}
+              </span>
+              <span>
+                {t('admin.current_app_port', {
+                  port: String(settings.appPort),
+                })}
+              </span>
+              <span>
+                {t('admin.current_media_mode', {
+                  mode: settings.mediaMode.toUpperCase(),
+                })}
+              </span>
             </div>
           ) : null}
         </section>
@@ -616,53 +889,217 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         <section className="admin-card">
           <h2>{t('admin.server_updates')}</h2>
           <div className="admin-meta">
-            <span>{t('admin.current_version', { version: updateVersions?.currentVersion ?? 'unknown' })}</span>
-            <span>{t('admin.current_image', { image: deployment?.currentImage ?? updateVersions?.currentImage ?? 'unknown' })}</span>
+            <span>
+              {t('admin.current_version', {
+                version: updateVersions?.currentVersion ?? 'unknown',
+              })}
+            </span>
+            <span>
+              {t('admin.current_image', {
+                image:
+                  deployment?.currentImage ??
+                  updateVersions?.currentImage ??
+                  'unknown',
+              })}
+            </span>
           </div>
           {deployment?.dockerEnabled ? null : (
             <p className="admin-channel-hint">
-              {t('admin.docker_socket_unavailable', { status: deployment?.dockerStatus ?? updateVersions?.dockerStatus ?? '' })}
+              {t('admin.docker_socket_unavailable', {
+                status:
+                  deployment?.dockerStatus ??
+                  updateVersions?.dockerStatus ??
+                  '',
+              })}
             </p>
           )}
           <div className="admin-inline-actions">
-            <button type="button" className="admin-secondary-btn" onClick={() => void handleCheckVersions()} disabled={isLoading}>
+            <button
+              type="button"
+              className="admin-secondary-btn"
+              onClick={() => void handleCheckVersions()}
+              disabled={isLoading}
+            >
               {t('admin.check_versions')}
             </button>
-            <button type="button" className="admin-secondary-btn" onClick={() => void refreshUpdateStatus()} disabled={isLoading}>
+            <button
+              type="button"
+              className="admin-secondary-btn"
+              onClick={() => void refreshUpdateStatus()}
+              disabled={isLoading}
+            >
               {t('admin.refresh_status')}
             </button>
           </div>
           <label className="admin-field">
             <span>{t('admin.target_version')}</span>
-            <select value={selectedUpdateTag} onChange={(event) => setSelectedUpdateTag(event.target.value)} disabled={!updateVersions}>
+            <select
+              value={selectedUpdateTag}
+              onChange={(event) => setSelectedUpdateTag(event.target.value)}
+              disabled={!updateVersions}
+            >
               <option value="">{t('admin.target_version_placeholder')}</option>
               {(updateVersions?.versions ?? []).map((version) => (
                 <option key={version.tag} value={version.tag}>
-                  {version.tag}{version.isLatest ? ` (${t('admin.latest_version')})` : ''}
+                  {version.tag}
+                  {version.isLatest ? ` (${t('admin.latest_version')})` : ''}
                 </option>
               ))}
             </select>
           </label>
           {selectedUpdateTag ? (
             <p className="admin-copy">
-              {updateVersions?.versions.find((version) => version.tag === selectedUpdateTag)?.image}
+              {
+                updateVersions?.versions.find(
+                  (version) => version.tag === selectedUpdateTag,
+                )?.image
+              }
             </p>
           ) : null}
           {updateStatus ? (
             <div className="admin-status">
-              <span>{t('admin.update_status', { status: updateStatus.status })}</span>
-              <span>{updateStatus.phase}: {updateStatus.message}</span>
-              {updateStatus.error ? <span className="admin-error">{updateStatus.error}</span> : null}
+              <span>
+                {t('admin.update_status', { status: updateStatus.status })}
+              </span>
+              <span>
+                {updateStatus.phase}: {updateStatus.message}
+              </span>
+              {updateStatus.error ? (
+                <span className="admin-error">{updateStatus.error}</span>
+              ) : null}
             </div>
           ) : null}
           <button
             type="button"
             className="admin-primary-btn"
             onClick={() => void handleStartUpdate()}
-            disabled={isLoading || !selectedUpdateTag || deployment?.dockerEnabled === false}
+            disabled={
+              isLoading ||
+              !selectedUpdateTag ||
+              deployment?.dockerEnabled === false
+            }
           >
             {t('admin.start_update')}
           </button>
+        </section>
+
+        <section className="admin-card admin-runtime-card">
+          <div className="admin-section-header">
+            <div>
+              <h2>{t('admin.runtime_status')}</h2>
+              <p className="admin-copy">{t('admin.runtime_status_copy')}</p>
+            </div>
+            <span
+              className={`admin-status-badge admin-status-badge--${runtimeHealth?.overallStatus ?? 'unknown'}`}
+            >
+              {t(
+                `admin.runtime_overall_${runtimeHealth?.overallStatus ?? 'unknown'}`,
+              )}
+            </span>
+          </div>
+          {runtimeHealth?.supervisorAvailable ? null : (
+            <p className="admin-channel-hint">
+              {t('admin.supervisor_unavailable')}
+            </p>
+          )}
+          <div className="admin-runtime-services">
+            {(runtimeHealth?.services ?? []).map((service) => (
+              <article key={service.name} className="admin-runtime-service">
+                <div>
+                  <strong>{service.label}</strong>
+                  <span>{service.message}</span>
+                </div>
+                <span
+                  className={`admin-status-badge admin-status-badge--${service.status}`}
+                >
+                  {t(`admin.runtime_status_${service.status}`)}
+                </span>
+              </article>
+            ))}
+          </div>
+          <div className="admin-inline-actions">
+            <button
+              type="button"
+              className="admin-secondary-btn"
+              onClick={() => void refreshRuntimeHealth()}
+              disabled={isRuntimeLoading}
+            >
+              {t('admin.refresh_runtime_status')}
+            </button>
+            <button
+              type="button"
+              className="admin-primary-btn"
+              onClick={() => void handleRepairRuntime()}
+              disabled={
+                isRuntimeLoading || runtimeHealth?.repairInProgress === true
+              }
+            >
+              {runtimeHealth?.repairInProgress || isRuntimeLoading
+                ? t('admin.runtime_repair_running')
+                : t('admin.runtime_repair_action')}
+            </button>
+          </div>
+          <form className="admin-form" onSubmit={handleSaveSelfRepair}>
+            <div className="admin-checkbox-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selfRepairEnabled}
+                  onChange={(event) =>
+                    setSelfRepairEnabled(event.target.checked)
+                  }
+                />{' '}
+                {t('admin.self_repair_enabled')}
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selfRepairAllowContainerRepair}
+                  onChange={(event) =>
+                    setSelfRepairAllowContainerRepair(event.target.checked)
+                  }
+                />{' '}
+                {t('admin.self_repair_allow_container')}
+              </label>
+            </div>
+            <label className="admin-field">
+              <span>{t('admin.self_repair_interval')}</span>
+              <input
+                type="number"
+                min={30}
+                max={86400}
+                value={selfRepairIntervalSeconds}
+                onChange={(event) =>
+                  setSelfRepairIntervalSeconds(event.target.value)
+                }
+              />
+            </label>
+            <button
+              type="submit"
+              className="admin-secondary-btn"
+              disabled={isRuntimeLoading}
+            >
+              {t('admin.save_self_repair')}
+            </button>
+          </form>
+          {selfRepair ? (
+            <p className="admin-copy">
+              {t('admin.self_repair_saved_at', { time: selfRepair.updatedAt })}
+            </p>
+          ) : null}
+          {runtimeRepairResult ? (
+            <div className="admin-status">
+              <span>
+                {t('admin.runtime_repair_status', {
+                  status: runtimeRepairResult.status,
+                })}
+              </span>
+              <span>{runtimeRepairResult.message}</span>
+              {runtimeRepairResult.containerRepairStarted ? (
+                <span>{t('admin.runtime_container_repair_started')}</span>
+              ) : null}
+            </div>
+          ) : null}
         </section>
 
         <section className="admin-card">
@@ -670,17 +1107,38 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
           <form className="admin-form" onSubmit={handleCreateUser}>
             <label className="admin-field">
               <span>{t('common.email')}</span>
-              <input type="email" value={newUserEmail} onChange={(event) => setNewUserEmail(event.target.value)} required />
+              <input
+                type="email"
+                value={newUserEmail}
+                onChange={(event) => setNewUserEmail(event.target.value)}
+                required
+              />
             </label>
             <label className="admin-field">
               <span>{t('common.username')}</span>
-              <input value={newUserUsername} onChange={(event) => setNewUserUsername(event.target.value)} minLength={2} maxLength={32} required />
+              <input
+                value={newUserUsername}
+                onChange={(event) => setNewUserUsername(event.target.value)}
+                minLength={2}
+                maxLength={32}
+                required
+              />
             </label>
             <label className="admin-field">
               <span>{t('common.password')}</span>
-              <input type="password" value={newUserPassword} onChange={(event) => setNewUserPassword(event.target.value)} minLength={8} required />
+              <input
+                type="password"
+                value={newUserPassword}
+                onChange={(event) => setNewUserPassword(event.target.value)}
+                minLength={8}
+                required
+              />
             </label>
-            <button type="submit" className="admin-primary-btn" disabled={isLoading}>
+            <button
+              type="submit"
+              className="admin-primary-btn"
+              disabled={isLoading}
+            >
               {t('admin.create_user_action')}
             </button>
           </form>
@@ -691,12 +1149,21 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
           <form className="admin-form" onSubmit={handleCreateChannel}>
             <label className="admin-field">
               <span>{t('admin.channel_name')}</span>
-              <input value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} required />
+              <input
+                value={newChannelName}
+                onChange={(event) => setNewChannelName(event.target.value)}
+                required
+              />
             </label>
             <div className="admin-inline-grid">
               <label className="admin-field">
                 <span>{t('admin.channel_type')}</span>
-                <select value={newChannelType} onChange={(event) => setNewChannelType(event.target.value as 'text' | 'voice')}>
+                <select
+                  value={newChannelType}
+                  onChange={(event) =>
+                    setNewChannelType(event.target.value as 'text' | 'voice')
+                  }
+                >
                   <option value="text">{t('admin.channel_type_text')}</option>
                   <option value="voice">{t('admin.channel_type_voice')}</option>
                 </select>
@@ -705,15 +1172,25 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                 <span>{t('admin.voice_quality')}</span>
                 <select
                   value={newChannelVoiceQuality}
-                  onChange={(event) => setNewChannelVoiceQuality(event.target.value as 'high' | 'standard')}
+                  onChange={(event) =>
+                    setNewChannelVoiceQuality(
+                      event.target.value as 'high' | 'standard',
+                    )
+                  }
                   disabled={newChannelType !== 'voice'}
                 >
-                  <option value="standard">{t('admin.voice_quality_standard')}</option>
+                  <option value="standard">
+                    {t('admin.voice_quality_standard')}
+                  </option>
                   <option value="high">{t('admin.voice_quality_high')}</option>
                 </select>
               </label>
             </div>
-            <button type="submit" className="admin-primary-btn" disabled={isLoading}>
+            <button
+              type="submit"
+              className="admin-primary-btn"
+              disabled={isLoading}
+            >
               {t('admin.create_channel_action')}
             </button>
           </form>
@@ -726,47 +1203,98 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
             <h2>{t('admin.deployment_settings')}</h2>
             <p className="admin-copy">{t('admin.deployment_settings_copy')}</p>
           </div>
-          {deployment?.pendingApply ? <span className="admin-pending-badge">{t('admin.pending_apply')}</span> : null}
+          {deployment?.pendingApply ? (
+            <span className="admin-pending-badge">
+              {t('admin.pending_apply')}
+            </span>
+          ) : null}
         </div>
         <form className="admin-form" onSubmit={handleSaveDeploymentSettings}>
           <div className="admin-inline-grid admin-inline-grid--wide">
             <label className="admin-field">
               <span>{t('admin.web_host_port')}</span>
-              <input type="number" min={1} max={65535} value={webHostPort} onChange={(event) => setWebHostPort(event.target.value)} required />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={webHostPort}
+                onChange={(event) => setWebHostPort(event.target.value)}
+                required
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.admin_host_port')}</span>
-              <input type="number" min={1} max={65535} value={adminHostPort} onChange={(event) => setAdminHostPort(event.target.value)} required />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={adminHostPort}
+                onChange={(event) => setAdminHostPort(event.target.value)}
+                required
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.allowed_hosts')}</span>
-              <input value={allowedHosts} onChange={(event) => setAllowedHosts(event.target.value)} placeholder={t('admin.allowed_hosts_placeholder')} />
+              <input
+                value={allowedHosts}
+                onChange={(event) => setAllowedHosts(event.target.value)}
+                placeholder={t('admin.allowed_hosts_placeholder')}
+              />
             </label>
           </div>
           <label className="admin-field">
             <span>{t('admin.stun_urls')}</span>
-            <input value={stunUrls} onChange={(event) => setStunUrls(event.target.value)} />
+            <input
+              value={stunUrls}
+              onChange={(event) => setStunUrls(event.target.value)}
+            />
           </label>
           <div className="admin-checkbox-row">
-            <label><input type="checkbox" checked={turnEnabled} onChange={(event) => setTurnEnabled(event.target.checked)} /> {t('admin.turn_enabled')}</label>
-            <label><input type="checkbox" checked={sfuEnableTcp} onChange={(event) => setSfuEnableTcp(event.target.checked)} /> {t('admin.sfu_enable_tcp')}</label>
+            <label>
+              <input
+                type="checkbox"
+                checked={turnEnabled}
+                onChange={(event) => setTurnEnabled(event.target.checked)}
+              />{' '}
+              {t('admin.turn_enabled')}
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={sfuEnableTcp}
+                onChange={(event) => setSfuEnableTcp(event.target.checked)}
+              />{' '}
+              {t('admin.sfu_enable_tcp')}
+            </label>
           </div>
           <div className="admin-inline-grid admin-inline-grid--wide">
             <label className="admin-field">
               <span>{t('admin.turn_urls')}</span>
-              <input value={turnUrls} onChange={(event) => setTurnUrls(event.target.value)} />
+              <input
+                value={turnUrls}
+                onChange={(event) => setTurnUrls(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_external_ip')}</span>
-              <input value={turnExternalIp} onChange={(event) => setTurnExternalIp(event.target.value)} />
+              <input
+                value={turnExternalIp}
+                onChange={(event) => setTurnExternalIp(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_realm')}</span>
-              <input value={turnRealm} onChange={(event) => setTurnRealm(event.target.value)} />
+              <input
+                value={turnRealm}
+                onChange={(event) => setTurnRealm(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_username')}</span>
-              <input value={turnUsername} onChange={(event) => setTurnUsername(event.target.value)} />
+              <input
+                value={turnUsername}
+                onChange={(event) => setTurnUsername(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_password')}</span>
@@ -774,36 +1302,77 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                 type="password"
                 value={turnPassword}
                 onChange={(event) => setTurnPassword(event.target.value)}
-                placeholder={deployment?.turnPasswordConfigured ? t('admin.secret_configured_placeholder') : ''}
+                placeholder={
+                  deployment?.turnPasswordConfigured
+                    ? t('admin.secret_configured_placeholder')
+                    : ''
+                }
               />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_port')}</span>
-              <input type="number" min={1} max={65535} value={turnPort} onChange={(event) => setTurnPort(event.target.value)} />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={turnPort}
+                onChange={(event) => setTurnPort(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_min_port')}</span>
-              <input type="number" min={1} max={65535} value={turnMinPort} onChange={(event) => setTurnMinPort(event.target.value)} />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={turnMinPort}
+                onChange={(event) => setTurnMinPort(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.turn_max_port')}</span>
-              <input type="number" min={1} max={65535} value={turnMaxPort} onChange={(event) => setTurnMaxPort(event.target.value)} />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={turnMaxPort}
+                onChange={(event) => setTurnMaxPort(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.sfu_announced_ip')}</span>
-              <input value={sfuAnnouncedIp} onChange={(event) => setSfuAnnouncedIp(event.target.value)} />
+              <input
+                value={sfuAnnouncedIp}
+                onChange={(event) => setSfuAnnouncedIp(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.sfu_rtc_min_port')}</span>
-              <input type="number" min={1} max={65535} value={sfuRtcMinPort} onChange={(event) => setSfuRtcMinPort(event.target.value)} />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={sfuRtcMinPort}
+                onChange={(event) => setSfuRtcMinPort(event.target.value)}
+              />
             </label>
             <label className="admin-field">
               <span>{t('admin.sfu_rtc_max_port')}</span>
-              <input type="number" min={1} max={65535} value={sfuRtcMaxPort} onChange={(event) => setSfuRtcMaxPort(event.target.value)} />
+              <input
+                type="number"
+                min={1}
+                max={65535}
+                value={sfuRtcMaxPort}
+                onChange={(event) => setSfuRtcMaxPort(event.target.value)}
+              />
             </label>
           </div>
           <div className="admin-inline-actions">
-            <button type="submit" className="admin-primary-btn" disabled={isLoading}>
+            <button
+              type="submit"
+              className="admin-primary-btn"
+              disabled={isLoading}
+            >
               {t('admin.save_deployment_settings')}
             </button>
             <button
@@ -829,7 +1398,10 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                 <div className="admin-channel-fields">
                   <label className="admin-field">
                     <span>{t('admin.field_name')}</span>
-                    <input id={`channel-name-${channel.id}`} defaultValue={channel.name} />
+                    <input
+                      id={`channel-name-${channel.id}`}
+                      defaultValue={channel.name}
+                    />
                   </label>
                   <label className="admin-field">
                     <span>{t('admin.field_type')}</span>
@@ -837,27 +1409,44 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                   </label>
                   <label className="admin-field">
                     <span>{t('admin.voice_quality')}</span>
-                    <select id={`channel-quality-${channel.id}`} defaultValue={channel.voiceQuality} disabled={channel.type !== 'voice'}>
-                      <option value="standard">{t('admin.voice_quality_standard')}</option>
-                      <option value="high">{t('admin.voice_quality_high')}</option>
+                    <select
+                      id={`channel-quality-${channel.id}`}
+                      defaultValue={channel.voiceQuality}
+                      disabled={channel.type !== 'voice'}
+                    >
+                      <option value="standard">
+                        {t('admin.voice_quality_standard')}
+                      </option>
+                      <option value="high">
+                        {t('admin.voice_quality_high')}
+                      </option>
                     </select>
                   </label>
                 </div>
                 <div className="admin-channel-actions">
-                  <button type="button" className="admin-secondary-btn" onClick={() => void handleSaveChannel(channel)} disabled={isLoading}>
+                  <button
+                    type="button"
+                    className="admin-secondary-btn"
+                    onClick={() => void handleSaveChannel(channel)}
+                    disabled={isLoading}
+                  >
                     {t('admin.save_channel')}
                   </button>
                   <button
                     type="button"
                     className="admin-danger-btn"
                     onClick={() => void handleDeleteChannel(channel)}
-                    disabled={isLoading || getDeleteBlockReason(channel) !== null}
+                    disabled={
+                      isLoading || getDeleteBlockReason(channel) !== null
+                    }
                   >
                     {t('admin.delete_channel_action')}
                   </button>
                 </div>
                 {getDeleteBlockReason(channel) ? (
-                  <p className="admin-channel-hint">{getDeleteBlockReason(channel)}</p>
+                  <p className="admin-channel-hint">
+                    {getDeleteBlockReason(channel)}
+                  </p>
                 ) : null}
               </article>
             ))}

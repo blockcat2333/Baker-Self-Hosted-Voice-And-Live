@@ -19,7 +19,10 @@ describe('api app', () => {
     });
 
     const health = await app.inject({ method: 'GET', url: '/health' });
-    const manifest = await app.inject({ method: 'GET', url: '/v1/meta/services' });
+    const manifest = await app.inject({
+      method: 'GET',
+      url: '/v1/meta/services',
+    });
 
     expect(health.statusCode).toBe(200);
     expect(manifest.statusCode).toBe(200);
@@ -71,7 +74,9 @@ describe('api app', () => {
     expect(registeredSession.user.email).toBe('staff@example.com');
 
     const meResponse = await app.inject({
-      headers: { authorization: `Bearer ${registeredSession.tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${registeredSession.tokens.accessToken}`,
+      },
       method: 'GET',
       url: '/v1/auth/me',
     });
@@ -80,7 +85,9 @@ describe('api app', () => {
     expect(meResponse.json().username).toBe('Staff');
 
     const updateMeResponse = await app.inject({
-      headers: { authorization: `Bearer ${registeredSession.tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${registeredSession.tokens.accessToken}`,
+      },
       method: 'PATCH',
       payload: { username: 'Staff Renamed' },
       url: '/v1/auth/me',
@@ -90,7 +97,9 @@ describe('api app', () => {
     expect(updateMeResponse.json().username).toBe('Staff Renamed');
 
     const meAfterUpdateResponse = await app.inject({
-      headers: { authorization: `Bearer ${registeredSession.tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${registeredSession.tokens.accessToken}`,
+      },
       method: 'GET',
       url: '/v1/auth/me',
     });
@@ -100,7 +109,9 @@ describe('api app', () => {
 
     // First user lands in the shared default workspace with one 'general' channel.
     const guildsResponse = await app.inject({
-      headers: { authorization: `Bearer ${registeredSession.tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${registeredSession.tokens.accessToken}`,
+      },
       method: 'GET',
       url: '/v1/guilds',
     });
@@ -111,14 +122,18 @@ describe('api app', () => {
     expect(guildsResponse.json()[0].name).toBe('Baker');
 
     const channelsResponse = await app.inject({
-      headers: { authorization: `Bearer ${registeredSession.tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${registeredSession.tokens.accessToken}`,
+      },
       method: 'GET',
       url: `/v1/guilds/${guildId}/channels`,
     });
 
     expect(channelsResponse.statusCode).toBe(200);
     expect(channelsResponse.json()).toHaveLength(2);
-    const generalChannel = channelsResponse.json().find((c: { name: string }) => c.name === 'general');
+    const generalChannel = channelsResponse
+      .json()
+      .find((c: { name: string }) => c.name === 'general');
     expect(generalChannel).toBeDefined();
     const channelId = generalChannel.id as string;
 
@@ -151,7 +166,9 @@ describe('api app', () => {
     // ── Message exchange across users ─────────────────────────────────────────
 
     const sendMessageResponse = await app.inject({
-      headers: { authorization: `Bearer ${registeredSession.tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${registeredSession.tokens.accessToken}`,
+      },
       method: 'POST',
       payload: { content: 'hello baker' },
       url: `/v1/channels/${channelId}/messages`,
@@ -189,7 +206,9 @@ describe('api app', () => {
     expect(refreshResponse.statusCode).toBe(200);
 
     const logoutResponse = await app.inject({
-      headers: { authorization: `Bearer ${loginResponse.json().tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${loginResponse.json().tokens.accessToken}`,
+      },
       method: 'POST',
       url: '/v1/auth/logout',
     });
@@ -198,7 +217,9 @@ describe('api app', () => {
     expect(logoutResponse.json()).toEqual({ ok: true });
 
     const meAfterLogoutResponse = await app.inject({
-      headers: { authorization: `Bearer ${loginResponse.json().tokens.accessToken}` },
+      headers: {
+        authorization: `Bearer ${loginResponse.json().tokens.accessToken}`,
+      },
       method: 'GET',
       url: '/v1/auth/me',
     });
@@ -335,8 +356,13 @@ describe('api app', () => {
 
     expect(channelsResponse.statusCode).toBe(200);
     expect(
-      channelsResponse.json().some((channel: { name: string; voiceQuality: string }) =>
-        channel.name === 'Ops Voice Updated' && channel.voiceQuality === 'standard'),
+      channelsResponse
+        .json()
+        .some(
+          (channel: { name: string; voiceQuality: string }) =>
+            channel.name === 'Ops Voice Updated' &&
+            channel.voiceQuality === 'standard',
+        ),
     ).toBe(true);
 
     const publicConfigResponse = await app.inject({
@@ -355,7 +381,10 @@ describe('api app', () => {
 
     expect(manifestResponse.statusCode).toBe(200);
     expect(
-      manifestResponse.json().services.find((service: { name: string }) => service.name === 'web')?.url,
+      manifestResponse
+        .json()
+        .services.find((service: { name: string }) => service.name === 'web')
+        ?.url,
     ).toBe('http://localhost:8080');
 
     await app.close();
@@ -363,20 +392,23 @@ describe('api app', () => {
 
   it('validates and publishes admin media mode changes', async () => {
     const publishMediaModeChanged = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      json: async () => ({
-        deviceSwitch: true,
-        metrics: true,
-        sfu: {
-          available: true,
-          configured: true,
-          requiredAnnouncedIp: true,
-        },
-        simulcast: false,
-        speakerSelection: true,
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          deviceSwitch: true,
+          metrics: true,
+          sfu: {
+            available: true,
+            configured: true,
+            requiredAnnouncedIp: true,
+          },
+          simulcast: false,
+          speakerSelection: true,
+        }),
+        ok: true,
       }),
-      ok: true,
-    }));
+    );
 
     const app = buildApiApp({
       dataAccess: createInMemoryDataAccess(),
@@ -410,20 +442,23 @@ describe('api app', () => {
   });
 
   it('rejects sfu media mode when media capabilities are not configured', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      json: async () => ({
-        deviceSwitch: true,
-        metrics: true,
-        sfu: {
-          available: true,
-          configured: false,
-          requiredAnnouncedIp: true,
-        },
-        simulcast: false,
-        speakerSelection: true,
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        json: async () => ({
+          deviceSwitch: true,
+          metrics: true,
+          sfu: {
+            available: true,
+            configured: false,
+            requiredAnnouncedIp: true,
+          },
+          simulcast: false,
+          speakerSelection: true,
+        }),
+        ok: true,
       }),
-      ok: true,
-    }));
+    );
 
     const app = buildApiApp({
       dataAccess: createInMemoryDataAccess(),
@@ -504,6 +539,84 @@ describe('api app', () => {
     }
   });
 
+  it('serves runtime health, repair status, and self-repair settings without supervisor access', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-runtime-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    try {
+      const healthResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'GET',
+        url: '/v1/admin/runtime/health',
+      });
+
+      expect(healthResponse.statusCode).toBe(200);
+      expect(healthResponse.json()).toMatchObject({
+        dockerEnabled: false,
+        repairInProgress: false,
+        supervisorAvailable: false,
+      });
+      expect(
+        healthResponse
+          .json()
+          .services.find((service: { name: string }) => service.name === 'turn')
+          ?.status,
+      ).toBe('disabled');
+
+      const selfRepairResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'GET',
+        url: '/v1/admin/runtime/self-repair',
+      });
+
+      expect(selfRepairResponse.statusCode).toBe(200);
+      expect(selfRepairResponse.json()).toMatchObject({
+        allowContainerRepair: true,
+        enabled: false,
+        intervalSeconds: 60,
+      });
+
+      const updateSelfRepairResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'PATCH',
+        payload: {
+          allowContainerRepair: false,
+          enabled: true,
+          intervalSeconds: 120,
+        },
+        url: '/v1/admin/runtime/self-repair',
+      });
+
+      expect(updateSelfRepairResponse.statusCode).toBe(200);
+      expect(updateSelfRepairResponse.json()).toMatchObject({
+        allowContainerRepair: false,
+        enabled: true,
+        intervalSeconds: 120,
+      });
+
+      const repairResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'POST',
+        payload: { allowContainerRepair: false },
+        url: '/v1/admin/runtime/repair',
+      });
+
+      expect(repairResponse.statusCode).toBe(200);
+      expect(repairResponse.json()).toMatchObject({
+        containerRepairStarted: false,
+        status: 'failed',
+        trigger: 'manual',
+      });
+    } finally {
+      await app.close();
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it('supports admin channel deletion constraints and position compaction', async () => {
     const dataAccess = createInMemoryDataAccess();
     const app = buildApiApp({ dataAccess });
@@ -575,15 +688,17 @@ describe('api app', () => {
 
     expect(workspaceAfterDeletes.statusCode).toBe(200);
     expect(
-      workspaceAfterDeletes.json().channels.map((channel: { position: number }) => channel.position),
+      workspaceAfterDeletes
+        .json()
+        .channels.map((channel: { position: number }) => channel.position),
     ).toEqual([0, 1]);
 
-    const remainingTextChannel = workspaceAfterDeletes.json().channels.find(
-      (channel: { type: string }) => channel.type === 'text',
-    );
-    const remainingVoiceChannel = workspaceAfterDeletes.json().channels.find(
-      (channel: { type: string }) => channel.type === 'voice',
-    );
+    const remainingTextChannel = workspaceAfterDeletes
+      .json()
+      .channels.find((channel: { type: string }) => channel.type === 'text');
+    const remainingVoiceChannel = workspaceAfterDeletes
+      .json()
+      .channels.find((channel: { type: string }) => channel.type === 'voice');
 
     const deleteLastTextResponse = await app.inject({
       headers: { 'x-admin-password': 'admin' },
@@ -592,7 +707,9 @@ describe('api app', () => {
     });
 
     expect(deleteLastTextResponse.statusCode).toBe(409);
-    expect(deleteLastTextResponse.json().message).toBe('At least one text channel must remain.');
+    expect(deleteLastTextResponse.json().message).toBe(
+      'At least one text channel must remain.',
+    );
 
     const deleteLastVoiceResponse = await app.inject({
       headers: { 'x-admin-password': 'admin' },
@@ -601,7 +718,9 @@ describe('api app', () => {
     });
 
     expect(deleteLastVoiceResponse.statusCode).toBe(409);
-    expect(deleteLastVoiceResponse.json().message).toBe('At least one voice channel must remain.');
+    expect(deleteLastVoiceResponse.json().message).toBe(
+      'At least one voice channel must remain.',
+    );
 
     const createBlockedVoiceChannelResponse = await app.inject({
       headers: { 'x-admin-password': 'admin' },
@@ -614,7 +733,8 @@ describe('api app', () => {
     });
 
     expect(createBlockedVoiceChannelResponse.statusCode).toBe(200);
-    const blockedVoiceChannelId = createBlockedVoiceChannelResponse.json().id as string;
+    const blockedVoiceChannelId = createBlockedVoiceChannelResponse.json()
+      .id as string;
 
     await dataAccess.streamSessions.create({
       channelId: blockedVoiceChannelId,
@@ -622,7 +742,9 @@ describe('api app', () => {
       id: 'stream-session-1',
       sourceType: 'camera',
     });
-    await dataAccess.streamSessions.updateStatus('stream-session-1', 'live', { startedAt: new Date() });
+    await dataAccess.streamSessions.updateStatus('stream-session-1', 'live', {
+      startedAt: new Date(),
+    });
 
     const deleteBlockedVoiceResponse = await app.inject({
       headers: { 'x-admin-password': 'admin' },
@@ -631,9 +753,15 @@ describe('api app', () => {
     });
 
     expect(deleteBlockedVoiceResponse.statusCode).toBe(409);
-    expect(deleteBlockedVoiceResponse.json().message).toBe('Stop active livestreams before deleting this voice channel.');
+    expect(deleteBlockedVoiceResponse.json().message).toBe(
+      'Stop active livestreams before deleting this voice channel.',
+    );
 
-    await dataAccess.streamSessions.updateStatus('stream-session-1', 'stopping', { endedAt: new Date() });
+    await dataAccess.streamSessions.updateStatus(
+      'stream-session-1',
+      'stopping',
+      { endedAt: new Date() },
+    );
 
     const deleteUnblockedVoiceResponse = await app.inject({
       headers: { 'x-admin-password': 'admin' },

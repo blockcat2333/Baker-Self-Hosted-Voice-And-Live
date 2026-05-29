@@ -4,7 +4,13 @@ import { AdminCreateUserRequestSchema, AuthUserSchema } from './auth';
 import { ChannelSummarySchema } from './guild';
 import { MediaTransportModeSchema } from '../media/signaling';
 
-export const ServiceNameSchema = z.enum(['api', 'gateway', 'media', 'web', 'desktop']);
+export const ServiceNameSchema = z.enum([
+  'api',
+  'gateway',
+  'media',
+  'web',
+  'desktop',
+]);
 
 export const HealthResponseSchema = z.object({
   service: ServiceNameSchema,
@@ -67,7 +73,11 @@ export const AdminUpdateVersionsResponseSchema = z.object({
 });
 
 export const AdminApplyUpdateRequestSchema = z.object({
-  tag: z.string().min(1).max(128).regex(/^[A-Za-z0-9_.-]+$/),
+  tag: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9_.-]+$/),
 });
 
 export const AdminUpdateJobStatusSchema = z.object({
@@ -81,6 +91,101 @@ export const AdminUpdateJobStatusSchema = z.object({
   targetImage: z.string().nullable(),
   targetTag: z.string().nullable(),
   updatedAt: z.string().datetime(),
+});
+
+export const AdminRuntimeManagedServiceNameSchema = z.enum([
+  'postgres',
+  'redis',
+  'media',
+  'api',
+  'gateway',
+  'caddy',
+  'turn',
+]);
+
+export const AdminRuntimeOverallStatusSchema = z.enum([
+  'healthy',
+  'degraded',
+  'repairing',
+  'unknown',
+]);
+export const AdminRuntimeServiceStatusSchema = z.enum([
+  'healthy',
+  'degraded',
+  'stopped',
+  'disabled',
+  'repairing',
+  'unknown',
+]);
+
+export const AdminRuntimeProbeSchema = z.object({
+  checked: z.boolean(),
+  error: z.string().nullable(),
+  ok: z.boolean().nullable(),
+  responseTimeMs: z.number().int().nonnegative().nullable(),
+});
+
+export const AdminRuntimeSupervisorStatusSchema = z.object({
+  available: z.boolean(),
+  detail: z.string().nullable(),
+  state: z.string().nullable(),
+});
+
+export const AdminRuntimeServiceHealthSchema = z.object({
+  label: z.string().min(1),
+  message: z.string().min(1),
+  name: AdminRuntimeManagedServiceNameSchema,
+  probe: AdminRuntimeProbeSchema,
+  required: z.boolean(),
+  status: AdminRuntimeServiceStatusSchema,
+  supervisor: AdminRuntimeSupervisorStatusSchema,
+});
+
+export const AdminRuntimeRepairActionSchema = z.object({
+  action: z.string().min(1),
+  finishedAt: z.string().datetime(),
+  message: z.string().min(1),
+  service: AdminRuntimeManagedServiceNameSchema,
+  startedAt: z.string().datetime(),
+  status: z.enum(['succeeded', 'failed', 'skipped']),
+});
+
+export const AdminRuntimeRepairResultSchema = z.object({
+  actions: z.array(AdminRuntimeRepairActionSchema),
+  completedAt: z.string().datetime(),
+  containerRepairStarted: z.boolean(),
+  message: z.string().min(1),
+  startedAt: z.string().datetime(),
+  status: z.enum(['succeeded', 'failed', 'partial', 'skipped']),
+  trigger: z.enum(['manual', 'self']),
+});
+
+export const AdminRuntimeHealthSchema = z.object({
+  checkedAt: z.string().datetime(),
+  dockerEnabled: z.boolean(),
+  dockerStatus: z.string().nullable(),
+  lastRepair: AdminRuntimeRepairResultSchema.nullable(),
+  overallStatus: AdminRuntimeOverallStatusSchema,
+  repairInProgress: z.boolean(),
+  services: z.array(AdminRuntimeServiceHealthSchema),
+  supervisorAvailable: z.boolean(),
+});
+
+export const AdminRuntimeRepairRequestSchema = z.object({
+  allowContainerRepair: z.boolean().optional(),
+});
+
+export const AdminRuntimeSelfRepairSettingsSchema = z.object({
+  allowContainerRepair: z.boolean(),
+  enabled: z.boolean(),
+  intervalSeconds: z.number().int().min(30).max(86_400),
+  updatedAt: z.string().datetime(),
+});
+
+export const AdminUpdateRuntimeSelfRepairSettingsRequestSchema = z.object({
+  allowContainerRepair: z.boolean().optional(),
+  enabled: z.boolean().optional(),
+  intervalSeconds: z.number().int().min(30).max(86_400).optional(),
 });
 
 export const AdminDeploymentSettingsSchema = z.object({
@@ -162,18 +267,72 @@ export type HealthResponse = z.infer<typeof HealthResponseSchema>;
 export type ServiceManifest = z.infer<typeof ServiceManifestSchema>;
 export type ServiceName = z.infer<typeof ServiceNameSchema>;
 export type PublicServerConfig = z.infer<typeof PublicServerConfigSchema>;
-export type AdminVerifyPasswordRequest = z.infer<typeof AdminVerifyPasswordRequestSchema>;
-export type AdminVerifyPasswordResponse = z.infer<typeof AdminVerifyPasswordResponseSchema>;
-export type AdminDeleteChannelResponse = z.infer<typeof AdminDeleteChannelResponseSchema>;
+export type AdminVerifyPasswordRequest = z.infer<
+  typeof AdminVerifyPasswordRequestSchema
+>;
+export type AdminVerifyPasswordResponse = z.infer<
+  typeof AdminVerifyPasswordResponseSchema
+>;
+export type AdminDeleteChannelResponse = z.infer<
+  typeof AdminDeleteChannelResponseSchema
+>;
 export type AdminServerSettings = z.infer<typeof AdminServerSettingsSchema>;
 export type AdminUpdateVersion = z.infer<typeof AdminUpdateVersionSchema>;
-export type AdminUpdateVersionsResponse = z.infer<typeof AdminUpdateVersionsResponseSchema>;
-export type AdminApplyUpdateRequest = z.infer<typeof AdminApplyUpdateRequestSchema>;
+export type AdminUpdateVersionsResponse = z.infer<
+  typeof AdminUpdateVersionsResponseSchema
+>;
+export type AdminApplyUpdateRequest = z.infer<
+  typeof AdminApplyUpdateRequestSchema
+>;
 export type AdminUpdateJobStatus = z.infer<typeof AdminUpdateJobStatusSchema>;
-export type AdminDeploymentSettings = z.infer<typeof AdminDeploymentSettingsSchema>;
-export type AdminUpdateDeploymentSettingsRequest = z.infer<typeof AdminUpdateDeploymentSettingsRequestSchema>;
+export type AdminRuntimeManagedServiceName = z.infer<
+  typeof AdminRuntimeManagedServiceNameSchema
+>;
+export type AdminRuntimeOverallStatus = z.infer<
+  typeof AdminRuntimeOverallStatusSchema
+>;
+export type AdminRuntimeServiceStatus = z.infer<
+  typeof AdminRuntimeServiceStatusSchema
+>;
+export type AdminRuntimeProbe = z.infer<typeof AdminRuntimeProbeSchema>;
+export type AdminRuntimeSupervisorStatus = z.infer<
+  typeof AdminRuntimeSupervisorStatusSchema
+>;
+export type AdminRuntimeServiceHealth = z.infer<
+  typeof AdminRuntimeServiceHealthSchema
+>;
+export type AdminRuntimeRepairAction = z.infer<
+  typeof AdminRuntimeRepairActionSchema
+>;
+export type AdminRuntimeRepairResult = z.infer<
+  typeof AdminRuntimeRepairResultSchema
+>;
+export type AdminRuntimeHealth = z.infer<typeof AdminRuntimeHealthSchema>;
+export type AdminRuntimeRepairRequest = z.infer<
+  typeof AdminRuntimeRepairRequestSchema
+>;
+export type AdminRuntimeSelfRepairSettings = z.infer<
+  typeof AdminRuntimeSelfRepairSettingsSchema
+>;
+export type AdminUpdateRuntimeSelfRepairSettingsRequest = z.infer<
+  typeof AdminUpdateRuntimeSelfRepairSettingsRequestSchema
+>;
+export type AdminDeploymentSettings = z.infer<
+  typeof AdminDeploymentSettingsSchema
+>;
+export type AdminUpdateDeploymentSettingsRequest = z.infer<
+  typeof AdminUpdateDeploymentSettingsRequestSchema
+>;
 export type AdminWorkspaceState = z.infer<typeof AdminWorkspaceStateSchema>;
-export type AdminUpdateSettingsRequest = z.infer<typeof AdminUpdateSettingsRequestSchema>;
-export type AdminCreateChannelRequest = z.infer<typeof AdminCreateChannelRequestSchema>;
-export type AdminUpdateChannelRequest = z.infer<typeof AdminUpdateChannelRequestSchema>;
-export type AdminCreateUserResponse = z.infer<typeof AdminCreateUserResponseSchema>;
+export type AdminUpdateSettingsRequest = z.infer<
+  typeof AdminUpdateSettingsRequestSchema
+>;
+export type AdminCreateChannelRequest = z.infer<
+  typeof AdminCreateChannelRequestSchema
+>;
+export type AdminUpdateChannelRequest = z.infer<
+  typeof AdminUpdateChannelRequestSchema
+>;
+export type AdminCreateUserResponse = z.infer<
+  typeof AdminCreateUserResponseSchema
+>;

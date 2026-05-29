@@ -76,7 +76,7 @@ docker logs baker
 
 如果你想始终跟随最新滚动版本，也可以把 `1.0.5` 换成 `latest`。
 
-`/var/run/docker.sock` 挂载只用于管理后台的一键更新和部署设置应用。没有这个挂载时，Baker 仍然可以正常运行，但更新需要在 Docker 宿主机上手动执行。
+`/var/run/docker.sock` 挂载用于管理后台的一键更新、部署设置应用，以及容器级兜底修复。没有这个挂载时，Baker 仍然可以正常运行，管理后台也仍可通过 all-in-one 容器内的 Supervisor 检查和重启内置服务，但镜像更新和容器重建需要在 Docker 宿主机上手动执行。
 
 ## 管理后台一键更新
 
@@ -89,6 +89,14 @@ docker logs baker
 - 如果新容器健康检查失败，自动回滚到旧容器
 
 管理后台也提供了精选部署设置，不再需要手动改 Docker 参数：Web/Admin 宿主机端口、允许的 Host、STUN 地址、TURN 开关和中继端口、TURN 凭据、SFU 公网 IP、SFU RTC 端口范围。密码字段只允许写入，API 不会回显明文。
+
+## 运行状态与自我修复
+
+管理后台包含运行状态卡片，会检查 all-in-one 容器里的 PostgreSQL、Redis、API、Gateway、Media、Caddy Web/Admin 路由，以及可选的 TURN 中继。`TURN_ENABLED=false` 时，TURN 会显示为未启用，不会被视为故障。
+
+如果有内置服务异常，可以点击“修复服务”。Baker 会按依赖顺序只重启异常的 Supervisor 服务。挂载了 Docker socket 且启用了容器级兜底修复时，如果服务级重启后仍不健康，Baker 会用当前镜像启动同一个 update helper 来重建当前容器，不会拉取新的镜像 tag。
+
+自我修复模式的设置保存在 `/var/lib/baker/runtime`，管理后台页面关闭后仍会在容器内继续运行。默认检查间隔为 60 秒，可以在 30 秒到 24 小时之间调整。
 
 ### Docker Desktop 图形界面填写示例
 
@@ -112,7 +120,6 @@ docker logs baker
 - 环境变量：本地默认体验时先全部留空
 
 示例截图：
-
 
 容器启动后：
 

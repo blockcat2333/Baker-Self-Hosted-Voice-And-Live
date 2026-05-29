@@ -78,7 +78,7 @@ The first boot prints the admin password once. All runtime secrets, Redis data, 
 
 If you want to follow the newest rolling image instead of pinning this release, replace `1.0.5` with `latest`.
 
-The Docker socket mount is required only for the admin panel's one-click update and deployment-settings apply buttons. Without it, Baker still runs normally, but updates must be performed manually from the Docker host.
+The Docker socket mount is required for the admin panel's one-click update, deployment-settings apply, and container-level repair fallback. Without it, Baker still runs normally, and the admin panel can still inspect and restart bundled services through the all-in-one supervisor, but image updates and container rebuilds must be performed manually from the Docker host.
 
 ## Admin One-Click Updates
 
@@ -91,6 +91,14 @@ When `/var/run/docker.sock` is mounted, the admin panel can:
 - roll back automatically if the replacement container fails its health check
 
 The admin panel also exposes selected deployment settings that previously required changing Docker arguments manually: Web/Admin host ports, allowed hosts, STUN URLs, TURN enablement and relay ports, TURN credentials, SFU announced IP, and SFU RTC port ranges. Password fields are write-only and are never returned by the API.
+
+## Runtime Status and Self-Repair
+
+The admin panel includes a runtime status card for the all-in-one container. It checks PostgreSQL, Redis, API, Gateway, Media, Caddy Web/Admin routing, and the optional TURN relay. TURN is shown as disabled when `TURN_ENABLED=false` and is not treated as a failure.
+
+If a bundled service is unhealthy, use **Repair Services** to restart only the affected supervisor programs in dependency order. When Docker socket access is mounted and container fallback repair is enabled, Baker can also start the same update helper used by deployment applies to rebuild the current container from its current image without pulling a new tag.
+
+Self-repair mode stores its settings under `/var/lib/baker/runtime` and continues running inside the container even when the admin page is closed. The default interval is 60 seconds, and it can be adjusted from 30 seconds to 24 hours.
 
 ### Docker Desktop Walkthrough
 

@@ -1,5 +1,28 @@
 # Project History
 
+## 2026-05-30
+
+### Baker 1.0.6 server and 1.0.6a desktop release prep
+
+What changed:
+
+- bumped the server release line and non-desktop workspace package metadata to `1.0.6`
+- reset the desktop client release label to `1.0.6a`
+- prepared Windows installer naming for `Baker-Setup-1.0.6a-x64.exe`
+- updated the English and Chinese deployment docs to use `blockcat233/baker:1.0.6`
+
+Why:
+
+- `1.0.6` packages the latest runtime status, self-repair, and deployment hardening work into a new server image line
+- the desktop client label resets to `a` for the new server version line
+
+Validation:
+
+- `pnpm typecheck`
+- `pnpm lint`
+- `pnpm test` (164 tests)
+- `pnpm build`
+
 ## 2026-05-26
 
 ### Baker Desktop 1.0.5b update picker release

@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.5
+  blockcat233/baker:1.0.6
 ```
 
 4. 读取首次启动打印出来的管理后台密码：
@@ -107,7 +107,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.5
+  blockcat233/baker:1.0.6
 ```
 
 然后进入管理后台，把“服务器设置 -> 媒体模式”切到 `sfu`。当前语音和直播会立即按新模式重连，文字聊天连接会保持在线。
@@ -129,7 +129,7 @@ docker run -d \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.5
+  blockcat233/baker:1.0.6
 ```
 
 如果要给真实用户用，Web 入口前面仍然需要配好 HTTPS。
@@ -174,7 +174,7 @@ docker run -d \
 常见升级步骤：
 
 ```bash
-docker pull blockcat233/baker:1.0.5
+docker pull blockcat233/baker:1.0.6
 docker rm -f baker
 ```
 

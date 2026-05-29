@@ -48,6 +48,18 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-30 Baker 1.0.6 Release Prep
+
+- bumped the server release line and all non-desktop workspace package metadata to `1.0.6`
+- reset the desktop client release label to `1.0.6a`
+- updated the Windows installer artifact name to `Baker-Setup-1.0.6a-x64.exe`
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.6`
+- validation completed:
+  - `pnpm typecheck`
+  - `pnpm lint`
+  - `pnpm test` (164 tests)
+  - `pnpm build`
+
 ### 2026-05-29 Control Panel Runtime Status and Self-Repair
 
 - added admin runtime health endpoints for PostgreSQL, Redis, API, Gateway, Media, Caddy Web/Admin routing, and optional TURN

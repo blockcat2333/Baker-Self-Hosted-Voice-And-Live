@@ -25,7 +25,7 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 当前状态
 
-- 当前发布线：服务端 `1.0.5`；桌面客户端 `1.0.5b`
+- 当前发布线：服务端 `1.0.6`；桌面客户端 `1.0.6a`
 - 当前已经完成并验证到 Milestone 5 的稳定性与部署加固阶段
 - 单仓库包含 Web、桌面壳层、管理后台、API、Gateway 和 Media 边界服务
 - 已实现认证、聊天、在线状态、语音、直播信令、弹窗观看和服务端设置
@@ -34,8 +34,8 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 版本规则
 
-- 服务端发布使用纯数字版本号，例如 `1.0.5`，Docker 镜像为 `blockcat233/baker:1.0.5`。
-- 客户端发布标签使用服务端版本号加一个字母，从 `a` 开始，例如 `1.0.5a`、`1.0.5b`。
+- 服务端发布使用纯数字版本号，例如 `1.0.6`，Docker 镜像为 `blockcat233/baker:1.0.6`。
+- 客户端发布标签使用服务端版本号加一个字母，从 `a` 开始，例如 `1.0.6a`、`1.0.6b`。
 - 只更新客户端时递增末尾字母；服务端大版本更新时递增数字版本，并把客户端字母重置为 `a`。
 - 仓库包元数据仍保持 semver 兼容；带字母的客户端标签用于客户端发布说明和客户端构建产物。
 
@@ -62,7 +62,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.5
+  blockcat233/baker:1.0.6
 
 docker logs baker
 ```
@@ -74,7 +74,7 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
-如果你想始终跟随最新滚动版本，也可以把 `1.0.5` 换成 `latest`。
+如果你想始终跟随最新滚动版本，也可以把 `1.0.6` 换成 `latest`。
 
 `/var/run/docker.sock` 挂载用于管理后台的一键更新、部署设置应用，以及容器级兜底修复。没有这个挂载时，Baker 仍然可以正常运行，管理后台也仍可通过 all-in-one 容器内的 Supervisor 检查和重启内置服务，但镜像更新和容器重建需要在 Docker 宿主机上手动执行。
 
@@ -102,7 +102,7 @@ docker logs baker
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
 
-- 镜像：`blockcat233/baker:1.0.5`
+- 镜像：`blockcat233/baker:1.0.6`
 - 容器名：`baker` 或 `baker-test`
 - 端口：
   - 宿主机 `3000` -> 容器 `80/tcp`
@@ -162,7 +162,7 @@ docker run -d \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.5
+  blockcat233/baker:1.0.6
 ```
 
 如果没有显式设置 `TURN_URLS`，Baker 会根据 `TURN_EXTERNAL_IP` 和 `TURN_PORT` 自动生成；如果你希望客户端拿到固定域名形式的 TURN 地址，也可以自己显式设置 `TURN_URLS`。
@@ -191,7 +191,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.5
+  blockcat233/baker:1.0.6
 ```
 
 然后进入管理后台，在“服务器设置 -> 媒体模式”里从 `p2p` 切换到 `sfu`。切换会立即重建当前语音和直播媒体会话，但不会断开文字聊天 WebSocket。如果 SFU 公网 IP 或端口范围没有配置好，管理 API 会明确拒绝切换，而不是静默退回 P2P。

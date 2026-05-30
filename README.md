@@ -27,7 +27,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.0.5`; desktop client `1.0.5b`
+- Release line: server `1.0.6`; desktop client `1.0.6a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented

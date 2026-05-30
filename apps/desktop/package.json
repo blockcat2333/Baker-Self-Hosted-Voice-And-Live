@@ -1,6 +1,6 @@
 {
   "name": "@baker/desktop",
-  "version": "1.0.5b",
+  "version": "1.0.6a",
   "private": true,
   "type": "module",
   "scripts": {
@@ -34,7 +34,7 @@
   "build": {
     "appId": "com.blockcat2333.baker",
     "productName": "Baker",
-    "artifactName": "${productName}-Setup-1.0.5b-${arch}.${ext}",
+    "artifactName": "${productName}-Setup-1.0.6a-${arch}.${ext}",
     "directories": {
       "output": "release"
     },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAuthStore } from '../auth/auth-store';
@@ -11,6 +11,83 @@ import {
   toVoiceVolumePercent,
 } from './voice-audio';
 import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
+
+interface VoiceControlsState {
+  channelId: string | null;
+  isConnecting: boolean;
+  isDesktop: boolean;
+  isDesktopMusicCaptureAvailable: boolean;
+  isMuted: boolean;
+  playbackVolume: number;
+  publishedMusic: ReturnType<typeof useMusicStore.getState>['publishedMusic'];
+  handleLeave(): void;
+  handleMusicShareToggle(): void;
+  handleMute(): void;
+  setPlaybackVolume(volume: number): void;
+}
+
+function useVoiceControls(): VoiceControlsState {
+  const status = useVoiceStore((s) => s.status);
+  const channelId = useVoiceStore((s) => s.channelId);
+  const isMuted = useVoiceStore((s) => s.isMuted);
+  const playbackVolume = useVoiceStore((s) => s.playbackVolume);
+  const setPlaybackVolume = useVoiceStore((s) => s.setPlaybackVolume);
+  const leaveVoiceChannel = useVoiceStore((s) => s.leaveVoiceChannel);
+  const toggleMute = useVoiceStore((s) => s.toggleMute);
+  const disconnectCurrentStream = useStreamStore((s) => s.disconnectCurrentStream);
+  const isDesktopMusicCaptureAvailable = useMusicStore((s) => s.isDesktopCaptureAvailable);
+  const publishedMusic = useMusicStore((s) => s.publishedMusic);
+  const refreshDesktopCaptureAvailability = useMusicStore((s) => s.refreshDesktopCaptureAvailability);
+  const startMusicShare = useMusicStore((s) => s.startMusicShare);
+  const stopMusicShare = useMusicStore((s) => s.stopMusicShare);
+  const isDesktop = typeof window !== 'undefined' && window.bakerDesktop?.platform === 'desktop';
+
+  useEffect(() => {
+    refreshDesktopCaptureAvailability();
+  }, [refreshDesktopCaptureAvailability]);
+
+  const isConnecting =
+    status === 'requesting_mic' || status === 'joining' || status === 'reconnecting' || status === 'leaving';
+
+  function handleLeave() {
+    void (async () => {
+      await stopMusicShare(sendCommandAwaitAck);
+      await disconnectCurrentStream(sendCommandAwaitAck);
+      await leaveVoiceChannel(sendCommandAwaitAck);
+    })();
+  }
+
+  function handleMute() {
+    toggleMute(sendRawCommand);
+  }
+
+  function handleMusicShareToggle() {
+    if (!channelId || isConnecting) {
+      return;
+    }
+
+    if (publishedMusic) {
+      void stopMusicShare(sendCommandAwaitAck);
+      return;
+    }
+
+    void startMusicShare(channelId, sendCommandAwaitAck, sendRawCommand);
+  }
+
+  return {
+    channelId,
+    handleLeave,
+    handleMusicShareToggle,
+    handleMute,
+    isConnecting,
+    isDesktop,
+    isDesktopMusicCaptureAvailable,
+    isMuted,
+    playbackVolume,
+    publishedMusic,
+    setPlaybackVolume,
+  };
+}
 
 export function VoiceAudioDeviceControls() {
   const { t } = useTranslation();
@@ -110,6 +187,166 @@ export function VoiceAudioDeviceControls() {
   );
 }
 
+export interface VoiceChannelViewProps {
+  channelId: string;
+  channelName: string;
+}
+
+export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewProps) {
+  const { t } = useTranslation();
+  const connectedChannelId = useVoiceStore((s) => s.channelId);
+  const participants = useVoiceStore((s) => s.participants);
+  const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
+  const voiceRosterByChannel = useGatewayStore((s) => s.voiceRosterByChannel);
+  const presenceMap = useGatewayStore((s) => s.presenceMap);
+  const myUserId = useAuthStore((s) => s.user?.id ?? null);
+  const visibleParticipants = connectedChannelId === channelId ? participants : (voiceRosterByChannel[channelId] ?? []);
+
+  return (
+    <section className="voice-channel-view" aria-label={channelName}>
+      <div className="voice-channel-view-header">
+        <div>
+          <p className="chat-main-eyebrow">{t('chat.section_voice')}</p>
+          <h2 className="voice-channel-view-title">{channelName}</h2>
+        </div>
+        <div className="voice-channel-view-meta">
+          <span className="voice-channel-view-dot" aria-hidden="true" />
+          <span>{t('voice.member_count', { count: visibleParticipants.length })}</span>
+          <span>{t('voice.public_channel')}</span>
+        </div>
+      </div>
+
+      {visibleParticipants.length > 0 ? (
+        <ul className="voice-channel-view-members">
+          {visibleParticipants.map((participant) => {
+            const isMe = participant.userId === myUserId;
+            const displayName = isMe ? t('common.you') : (presenceMap[participant.userId]?.username ?? participant.userId);
+            const isSpeaking = speakingUserIds.has(participant.userId);
+
+            return (
+              <li
+                key={participant.sessionId}
+                className={[
+                  'voice-channel-view-member',
+                  participant.isMuted ? 'voice-channel-view-member--muted' : '',
+                  isSpeaking ? 'voice-channel-view-member--speaking' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <span className="voice-channel-view-avatar" aria-hidden="true">
+                  {displayName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="voice-channel-view-member-name">{displayName}</span>
+                {participant.isMuted ? <span className="voice-channel-view-badge">{t('voice.badge_muted')}</span> : null}
+                {isSpeaking && !participant.isMuted ? (
+                  <span className="voice-channel-view-badge">{t('voice.badge_speaking')}</span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      <div className="voice-channel-empty">
+        <div className="voice-channel-empty-icon" aria-hidden="true">VC</div>
+        <h3>{t('voice.channel_welcome_title', { channel: channelName })}</h3>
+        <p>{t('voice.channel_welcome_copy')}</p>
+      </div>
+    </section>
+  );
+}
+
+export function VoiceBottomControlBar() {
+  const { t } = useTranslation();
+  const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
+  const controls = useVoiceControls();
+  const lastAudiblePlaybackVolumeRef = useRef(1);
+
+  useEffect(() => {
+    if (controls.playbackVolume > 0) {
+      lastAudiblePlaybackVolumeRef.current = controls.playbackVolume;
+    }
+  }, [controls.playbackVolume]);
+
+  if (!controls.channelId) return null;
+
+  const isSpeakerMuted = controls.playbackVolume === 0;
+  const latencyLabel = gatewayRttMs === null ? '--' : `${Math.max(0, Math.round(gatewayRttMs))}ms`;
+
+  function handleSpeakerToggle() {
+    if (controls.isConnecting) return;
+    if (isSpeakerMuted) {
+      controls.setPlaybackVolume(lastAudiblePlaybackVolumeRef.current || 1);
+      return;
+    }
+    controls.setPlaybackVolume(0);
+  }
+
+  return (
+    <div className="voice-bottom-bar" role="region" aria-label={t('voice.controls_aria')}>
+      <div className="voice-bottom-status">
+        <span className="voice-bottom-status-dot" aria-hidden="true" />
+        <span>{controls.isConnecting ? t('voice.status_connecting') : t('voice.connected_short')}</span>
+        <span className="voice-bottom-divider" aria-hidden="true" />
+        <span>{t('voice.latency_label', { latency: latencyLabel })}</span>
+        <span className="voice-bottom-divider" aria-hidden="true" />
+        <span>{t('voice.encryption_enabled')}</span>
+      </div>
+
+      <div className="voice-bottom-actions">
+        <button
+          type="button"
+          className={`btn-ghost voice-bottom-btn${controls.isMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
+          onClick={controls.handleMute}
+          disabled={controls.isConnecting}
+          title={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
+        >
+          <span aria-hidden="true">{controls.isMuted ? 'M-' : 'M+'}</span>
+          <span>{controls.isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}</span>
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost voice-bottom-btn${isSpeakerMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
+          onClick={handleSpeakerToggle}
+          disabled={controls.isConnecting}
+          title={isSpeakerMuted ? t('voice.speaker_on_title') : t('voice.speaker_off_title')}
+        >
+          <span aria-hidden="true">{isSpeakerMuted ? 'S-' : 'S+'}</span>
+          <span>{isSpeakerMuted ? t('voice.speaker_muted_label') : t('voice.speaker_on_label')}</span>
+        </button>
+        <button
+          type="button"
+          className="btn-ghost voice-bottom-btn"
+          onClick={controls.handleMusicShareToggle}
+          disabled={
+            controls.isConnecting ||
+            !controls.isDesktop ||
+            (!controls.publishedMusic && !controls.isDesktopMusicCaptureAvailable) ||
+            controls.publishedMusic?.status === 'capturing' ||
+            controls.publishedMusic?.status === 'starting' ||
+            controls.publishedMusic?.status === 'stopping'
+          }
+          title={controls.isDesktopMusicCaptureAvailable ? t('voice.music_share_title') : t('voice.music_share_unavailable_title')}
+        >
+          <span aria-hidden="true">MU</span>
+          <span>{controls.publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}</span>
+        </button>
+        <button
+          type="button"
+          className="btn-ghost voice-bottom-btn voice-bottom-btn--leave"
+          onClick={controls.handleLeave}
+          disabled={controls.isConnecting}
+          title={t('voice.leave_title')}
+        >
+          <span aria-hidden="true">X</span>
+          <span>{t('voice.leave')}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function VoicePanel() {
   const { t } = useTranslation();
   const status = useVoiceStore((s) => s.status);
@@ -121,29 +358,18 @@ export function VoicePanel() {
   const peerNetwork = useVoiceStore((s) => s.peerNetwork);
   const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
   const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
-  const isMuted = useVoiceStore((s) => s.isMuted);
   const inputVolume = useVoiceStore((s) => s.inputVolume);
-  const playbackVolume = useVoiceStore((s) => s.playbackVolume);
   const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
   const setInputVolume = useVoiceStore((s) => s.setInputVolume);
-  const setPlaybackVolume = useVoiceStore((s) => s.setPlaybackVolume);
   const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
-  const leaveVoiceChannel = useVoiceStore((s) => s.leaveVoiceChannel);
   const clearError = useVoiceStore((s) => s.clearError);
-  const toggleMute = useVoiceStore((s) => s.toggleMute);
-  const disconnectCurrentStream = useStreamStore((s) => s.disconnectCurrentStream);
   const musicError = useMusicStore((s) => s.error);
-  const isDesktopMusicCaptureAvailable = useMusicStore((s) => s.isDesktopCaptureAvailable);
   const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
-  const publishedMusic = useMusicStore((s) => s.publishedMusic);
-  const refreshDesktopCaptureAvailability = useMusicStore((s) => s.refreshDesktopCaptureAvailability);
   const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
-  const startMusicShare = useMusicStore((s) => s.startMusicShare);
-  const stopMusicShare = useMusicStore((s) => s.stopMusicShare);
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
   const presenceMap = useGatewayStore((s) => s.presenceMap);
   const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
-  const isDesktop = typeof window !== 'undefined' && window.bakerDesktop?.platform === 'desktop';
+  const controls = useVoiceControls();
 
   const participantNameById = useMemo(() => {
     const names: Record<string, string> = {};
@@ -156,10 +382,6 @@ export function VoicePanel() {
     }
     return names;
   }, [myUserId, participants, presenceMap, t]);
-
-  useEffect(() => {
-    refreshDesktopCaptureAvailability();
-  }, [refreshDesktopCaptureAvailability]);
 
   if (status === 'idle') return null;
 
@@ -195,40 +417,12 @@ export function VoicePanel() {
 
   if (!channelId) return null;
 
-  const isConnecting =
-    status === 'requesting_mic' || status === 'joining' || status === 'reconnecting' || status === 'leaving';
-
-  function handleLeave() {
-    void (async () => {
-      await stopMusicShare(sendCommandAwaitAck);
-      await disconnectCurrentStream(sendCommandAwaitAck);
-      await leaveVoiceChannel(sendCommandAwaitAck);
-    })();
-  }
-
-  function handleMute() {
-    toggleMute(sendRawCommand);
-  }
-
-  function handleMusicShareToggle() {
-    if (!channelId || isConnecting) {
-      return;
-    }
-
-    if (publishedMusic) {
-      void stopMusicShare(sendCommandAwaitAck);
-      return;
-    }
-
-    void startMusicShare(channelId, sendCommandAwaitAck, sendRawCommand);
-  }
-
   return (
     <div className="voice-panel">
       <div className="voice-panel-header">
         <span className="voice-panel-icon">VC</span>
         <span className="voice-panel-label">
-          {isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
+          {controls.isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
         </span>
       </div>
 
@@ -262,10 +456,10 @@ export function VoicePanel() {
               className="voice-volume-slider"
               min={0}
               max={100}
-              value={Math.round(playbackVolume * 100)}
-              onChange={(event) => setPlaybackVolume(Number(event.target.value) / 100)}
+              value={Math.round(controls.playbackVolume * 100)}
+              onChange={(event) => controls.setPlaybackVolume(Number(event.target.value) / 100)}
             />
-            <span className="voice-volume-value">{toVoiceVolumePercent(playbackVolume)}%</span>
+            <span className="voice-volume-value">{toVoiceVolumePercent(controls.playbackVolume)}%</span>
           </div>
         </label>
 
@@ -375,41 +569,41 @@ export function VoicePanel() {
       </ul>
 
       <div className="voice-panel-controls">
-        {isDesktop ? (
+        {controls.isDesktop ? (
           <button
             type="button"
             className="btn-ghost voice-music-btn"
-            onClick={handleMusicShareToggle}
+            onClick={controls.handleMusicShareToggle}
             disabled={
-              isConnecting ||
-              (!publishedMusic && !isDesktopMusicCaptureAvailable) ||
-              publishedMusic?.status === 'capturing' ||
-              publishedMusic?.status === 'starting' ||
-              publishedMusic?.status === 'stopping'
+              controls.isConnecting ||
+              (!controls.publishedMusic && !controls.isDesktopMusicCaptureAvailable) ||
+              controls.publishedMusic?.status === 'capturing' ||
+              controls.publishedMusic?.status === 'starting' ||
+              controls.publishedMusic?.status === 'stopping'
             }
             title={
-              isDesktopMusicCaptureAvailable
+              controls.isDesktopMusicCaptureAvailable
                 ? t('voice.music_share_title')
                 : t('voice.music_share_unavailable_title')
             }
           >
-            {publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}
+            {controls.publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}
           </button>
         ) : null}
         <button
           type="button"
-          className={`btn-ghost voice-mute-btn${isMuted ? ' voice-mute-btn--muted' : ''}`}
-          onClick={handleMute}
-          disabled={isConnecting}
-          title={isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
+          className={`btn-ghost voice-mute-btn${controls.isMuted ? ' voice-mute-btn--muted' : ''}`}
+          onClick={controls.handleMute}
+          disabled={controls.isConnecting}
+          title={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
         >
-          {isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}
+          {controls.isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}
         </button>
         <button
           type="button"
           className="btn-ghost voice-leave-btn"
-          onClick={handleLeave}
-          disabled={isConnecting}
+          onClick={controls.handleLeave}
+          disabled={controls.isConnecting}
           title={t('voice.leave_title')}
         >
           {t('voice.leave')}

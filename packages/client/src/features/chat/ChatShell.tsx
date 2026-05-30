@@ -9,7 +9,7 @@ import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
-import { VoicePanel } from '../voice/VoicePanel';
+import { VoiceBottomControlBar, VoiceChannelView, VoicePanel } from '../voice/VoicePanel';
 import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
 import { GuildList } from './GuildList';
@@ -27,9 +27,15 @@ export interface ChatShellProps {
   versionWarning?: string | null;
 }
 
+type MainChannelSelection = {
+  channelId: string | null;
+  kind: 'text' | 'voice';
+};
+
 export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, versionWarning }: ChatShellProps) {
   const { t } = useTranslation();
   const activeGuildId = useChatStore((s) => s.activeGuildId);
+  const channelsByGuild = useChatStore((s) => s.channelsByGuild);
   const loadGuilds = useChatStore((s) => s.loadGuilds);
   const loadChannels = useChatStore((s) => s.loadChannels);
   const activeChannelId = useChatStore((s) => s.activeChannelId);
@@ -50,6 +56,10 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [mainChannelSelection, setMainChannelSelection] = useState<MainChannelSelection>({
+    channelId: null,
+    kind: 'text',
+  });
   const previousActiveChannelIdRef = useRef<string | null>(null);
 
   // Load guilds once on mount
@@ -77,8 +87,9 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
     previousActiveChannelIdRef.current = activeChannelId;
   }, [activeChannelId, switchChannel]);
 
-  // After picking a text channel from mobile Channels tab, jump to Chat.
-  function handleNavigateAfterChannelPick(kind: 'text' | 'voice') {
+  // Keep the main pane selection UI-only so voice channels never become the active text channel.
+  function handleNavigateAfterChannelPick(kind: 'text' | 'voice', channelId: string) {
+    setMainChannelSelection({ channelId, kind });
     if (kind === 'text') {
       setMobileTab('chat');
     } else {
@@ -112,6 +123,11 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
   const showVoicePanel = isVoiceActive;
   const hasAnyStream = !!ownedStream || Object.keys(watchedStreamsById).length > 0;
   const voiceHasContent = showVoicePanel || hasAnyStream;
+  const activeGuildChannels = activeGuildId ? (channelsByGuild[activeGuildId] ?? []) : [];
+  const selectedVoiceChannel =
+    mainChannelSelection.kind === 'voice'
+      ? activeGuildChannels.find((channel) => channel.id === mainChannelSelection.channelId && channel.type === 'voice')
+      : null;
 
   return (
     <div className="chat-shell" data-mobile-tab={mobileTab}>
@@ -186,13 +202,18 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
         {chatError && <div className="chat-error" data-on-mobile="chat">{chatError}</div>}
 
         <div className="chat-main-body">
-          <div className="chat-main-pane chat-main-pane--messages" data-on-mobile="chat">
-            <MessagePanel api={api} />
+          <div className="chat-main-pane chat-main-pane--messages" data-on-mobile="chat voice">
+            {selectedVoiceChannel ? (
+              <VoiceChannelView channelId={selectedVoiceChannel.id} channelName={selectedVoiceChannel.name} />
+            ) : (
+              <MessagePanel api={api} />
+            )}
           </div>
           <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
             <StreamPanel />
           </div>
         </div>
+        <VoiceBottomControlBar />
       </main>
 
       <MobileTabBar

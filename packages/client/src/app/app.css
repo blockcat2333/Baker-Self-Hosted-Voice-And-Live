@@ -1047,6 +1047,7 @@ body {
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -2403,12 +2404,14 @@ body {
   background: rgba(2, 6, 23, 0.5);
   border-left: 1px solid rgba(148, 163, 184, 0.12);
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  flex-shrink: 0;
   gap: 16px;
   max-width: 440px;
+  min-height: 0;
   min-width: 320px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 16px;
   width: clamp(340px, 28vw, 420px);
 }
@@ -2526,6 +2529,14 @@ body {
   display: flex;
   gap: 10px;
   justify-content: space-between;
+}
+
+.stream-card--owned .stream-card-actions {
+  align-items: stretch;
+}
+
+.stream-card--owned .stream-card-actions .stream-action-btn {
+  flex: 1 1 132px;
 }
 
 .stream-card-header > div:first-child,
@@ -2690,6 +2701,88 @@ body {
 
 .stream-action-btn--primary:hover {
   background: rgba(59, 130, 246, 0.12);
+}
+
+.stream-start-btn {
+  justify-self: stretch;
+  min-height: 44px;
+  width: 100%;
+}
+
+.stream-share-dialog-backdrop {
+  align-items: center;
+  background: rgba(2, 6, 23, 0.68);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 55;
+}
+
+.stream-share-dialog {
+  background: rgba(10, 17, 32, 0.98);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.42);
+  display: grid;
+  gap: 16px;
+  max-height: min(720px, calc(100svh - 40px));
+  max-width: 560px;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 18px;
+  width: min(560px, calc(100vw - 40px));
+}
+
+.stream-share-dialog-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.stream-share-dialog-kicker {
+  display: inline-flex;
+  margin-bottom: 8px;
+}
+
+.stream-share-dialog-title,
+.stream-share-dialog-copy {
+  margin: 0;
+}
+
+.stream-share-dialog-title {
+  color: var(--text-0);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.stream-share-dialog-copy {
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+.stream-share-dialog-close {
+  flex: 0 0 auto;
+}
+
+.stream-share-dialog-body {
+  display: grid;
+  gap: 12px;
+}
+
+.stream-share-dialog-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stream-share-dialog-actions .stream-action-btn {
+  width: 100%;
 }
 
 .stream-volume-control {

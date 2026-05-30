@@ -465,6 +465,20 @@ export function VoicePanel() {
   const channelsByGuild = useChatStore((s) => s.channelsByGuild);
   const controls = useVoiceControls();
 
+  useEffect(() => {
+    if (!musicError) return;
+
+    const timeoutId = window.setTimeout(() => {
+      if (useMusicStore.getState().error === musicError) {
+        useMusicStore.setState({ error: null });
+      }
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [musicError]);
+
   const participantNameById = useMemo(() => {
     const names: Record<string, string> = {};
     for (const participant of participants) {

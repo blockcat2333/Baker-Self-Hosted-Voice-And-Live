@@ -334,6 +334,8 @@ export function StreamPanel() {
   const [streamCodecPreference, setStreamCodecPreference] = useState<StreamCodecPreference>(
     DEFAULT_STREAM_CODEC_PREFERENCE,
   );
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isOwnedHealthOpen, setIsOwnedHealthOpen] = useState(false);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const voiceStatus = useVoiceStore((s) => s.status);
   const ownedStream = useStreamStore((s) => s.ownedStream);
@@ -396,6 +398,16 @@ export function StreamPanel() {
     }
 
     void startSharing(voiceChannelId, streamQuality, 'camera', sendCommandAwaitAck, sendRawCommand, streamCodecPreference);
+  }
+
+  function handleShareScreenFromDialog() {
+    setIsShareDialogOpen(false);
+    handleShareScreen();
+  }
+
+  function handleShareCameraFromDialog() {
+    setIsShareDialogOpen(false);
+    handleShareCamera();
   }
 
   function renderCameraSourceControl(disabled: boolean) {
@@ -463,13 +475,13 @@ export function StreamPanel() {
       {error && <p className={'stream-panel-error'}>{error}</p>}
 
       <div className={'stream-panel-stack'}>
-        <StreamSection
-          className={'stream-section--watching'}
-          countLabel={watchingCountLabel}
-          title={t('stream.section_watching_title')}
-          description={t('stream.section_watching_description')}
-        >
-          {watchedStreamsInChannel.length > 0 ? (
+        {watchedStreamsInChannel.length > 0 ? (
+          <StreamSection
+            className={'stream-section--watching'}
+            countLabel={watchingCountLabel}
+            title={t('stream.section_watching_title')}
+            description={t('stream.section_watching_description')}
+          >
             <div className={'stream-watch-status-list'}>
               {watchedStreamsInChannel.map((stream) => (
                 <article key={stream.streamId} className={'stream-watch-row'}>
@@ -541,12 +553,8 @@ export function StreamPanel() {
                 </article>
               ))}
             </div>
-          ) : (
-            <div className={'stream-empty stream-empty--compact'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_watching_none')}</p>
-            </div>
-          )}
-        </StreamSection>
+          </StreamSection>
+        ) : null}
 
         <StreamSection
           className={'stream-section--owned'}
@@ -572,8 +580,15 @@ export function StreamPanel() {
                 ? renderCameraSourceControl(ownedStream.status !== 'live' || isSwitchingCamera)
                 : null}
               <StreamVideo muted stream={ownedStream.localPreviewStream} />
-              <OwnedStreamHealthPanel ownedStream={ownedStream} />
               <div className={'stream-card-actions'}>
+                <button
+                  type={'button'}
+                  className={'btn-ghost stream-action-btn'}
+                  onClick={() => setIsOwnedHealthOpen((current) => !current)}
+                  aria-expanded={isOwnedHealthOpen}
+                >
+                  {isOwnedHealthOpen ? t('stream.action_hide_stream_details') : t('stream.action_show_stream_details')}
+                </button>
                 <button
                   type={'button'}
                   className={'btn-ghost stream-action-btn'}
@@ -585,10 +600,93 @@ export function StreamPanel() {
                   {t('stream.action_stop_sharing')}
                 </button>
               </div>
+              {isOwnedHealthOpen ? <OwnedStreamHealthPanel ownedStream={ownedStream} /> : null}
             </article>
           ) : canShare ? (
             <div className={'stream-empty stream-empty--actions'}>
               <p className={'stream-empty-copy'}>{t('stream.section_owned_empty')}</p>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-action-btn stream-action-btn--primary stream-start-btn'}
+                onClick={() => setIsShareDialogOpen(true)}
+              >
+                {t('stream.action_start_stream')}
+              </button>
+            </div>
+          ) : (
+            <div className={'stream-empty'}>
+              <p className={'stream-empty-copy'}>{t('stream.section_owned_join_voice')}</p>
+            </div>
+          )}
+        </StreamSection>
+
+        {availableStreams.length > 0 ? (
+          <StreamSection
+            className={'stream-section--available'}
+            countLabel={availableCountLabel}
+            title={t('stream.section_available_title')}
+            description={t('stream.section_available_description')}
+          >
+            <div className={'stream-available-list'}>
+              {availableStreams.map((stream) => (
+                <article key={stream.streamId} className={'stream-card stream-card--available'}>
+                  <div className={'stream-card-header'}>
+                    <div>
+                      <h3 className={'stream-card-title'}>{userLabel(stream.hostUserId)}</h3>
+                      <p className={'stream-card-subtitle'}>
+                        {sourceLabel(t, stream.sourceType)} | {t('stream.viewer_count', { count: stream.viewers.length })}
+                      </p>
+                    </div>
+                    <span className={'stream-pill'}>{t('stream.pill_live')}</span>
+                  </div>
+                  <div className={'stream-card-actions'}>
+                    <span className={'stream-card-meta'}>{t('stream.section_available_opens_in_popup')}</span>
+                    <button
+                      type={'button'}
+                      className={'btn-ghost stream-action-btn stream-action-btn--primary'}
+                      onClick={() => handleWatch(stream.streamId)}
+                    >
+                      {t('stream.action_watch_stream')}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </StreamSection>
+        ) : null}
+      </div>
+
+      {canShare && isShareDialogOpen ? (
+        <div
+          className={'stream-share-dialog-backdrop'}
+          role={'presentation'}
+          onMouseDown={() => setIsShareDialogOpen(false)}
+        >
+          <section
+            className={'stream-share-dialog'}
+            role={'dialog'}
+            aria-modal={'true'}
+            aria-labelledby={'stream-share-dialog-title'}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className={'stream-share-dialog-header'}>
+              <div>
+                <p className={'stream-panel-icon stream-share-dialog-kicker'}>LIVE</p>
+                <h2 id={'stream-share-dialog-title'} className={'stream-share-dialog-title'}>
+                  {t('stream.share_dialog_title')}
+                </h2>
+                <p className={'stream-share-dialog-copy'}>{t('stream.share_dialog_description')}</p>
+              </div>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-share-dialog-close'}
+                onClick={() => setIsShareDialogOpen(false)}
+              >
+                {t('stream.share_dialog_close')}
+              </button>
+            </header>
+
+            <div className={'stream-share-dialog-body'}>
               <div className={'stream-quality-controls'}>
                 <label className={'stream-quality-field'}>
                   <span className={'stream-quality-label'}>{t('stream.quality_resolution')}</span>
@@ -663,61 +761,28 @@ export function StreamPanel() {
                 </label>
               </div>
               {renderCameraSourceControl(isSwitchingCamera)}
-              <div className={'stream-share-actions'}>
-                <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={handleShareScreen}>
-                  {t('stream.action_share_screen')}
-                </button>
-                <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={handleShareCamera}>
-                  {t('stream.action_share_camera')}
-                </button>
-              </div>
             </div>
-          ) : (
-            <div className={'stream-empty'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_owned_join_voice')}</p>
-            </div>
-          )}
-        </StreamSection>
 
-        <StreamSection
-          className={'stream-section--available'}
-          countLabel={availableStreams.length > 0 ? availableCountLabel : undefined}
-          title={t('stream.section_available_title')}
-          description={t('stream.section_available_description')}
-        >
-          {availableStreams.length > 0 ? (
-            <div className={'stream-available-list'}>
-              {availableStreams.map((stream) => (
-                <article key={stream.streamId} className={'stream-card stream-card--available'}>
-                  <div className={'stream-card-header'}>
-                    <div>
-                      <h3 className={'stream-card-title'}>{userLabel(stream.hostUserId)}</h3>
-                      <p className={'stream-card-subtitle'}>
-                        {sourceLabel(t, stream.sourceType)} | {t('stream.viewer_count', { count: stream.viewers.length })}
-                      </p>
-                    </div>
-                    <span className={'stream-pill'}>{t('stream.pill_live')}</span>
-                  </div>
-                  <div className={'stream-card-actions'}>
-                    <span className={'stream-card-meta'}>{t('stream.section_available_opens_in_popup')}</span>
-                    <button
-                      type={'button'}
-                      className={'btn-ghost stream-action-btn stream-action-btn--primary'}
-                      onClick={() => handleWatch(stream.streamId)}
-                    >
-                      {t('stream.action_watch_stream')}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <div className={'stream-empty'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_available_none')}</p>
-            </div>
-          )}
-        </StreamSection>
-      </div>
+            <footer className={'stream-share-dialog-actions'}>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-action-btn'}
+                onClick={handleShareScreenFromDialog}
+              >
+                {t('stream.action_share_screen')}
+              </button>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-action-btn stream-action-btn--primary'}
+                onClick={handleShareCameraFromDialog}
+                disabled={isSwitchingCamera}
+              >
+                {t('stream.action_share_camera')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </aside>
   );
 }

@@ -6,10 +6,8 @@ import { sendCommandAwaitAck, sendRawCommand, useGatewayStore } from '../gateway
 import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useMusicStore } from '../music/music-store';
 import { useStreamStore } from '../stream/stream-store';
-import {
-  DEFAULT_VOICE_PARTICIPANT_VOLUME,
-  toVoiceVolumePercent,
-} from './voice-audio';
+import { useChatStore } from '../chat/chat-store';
+import { toVoiceVolumePercent } from './voice-audio';
 import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
 
 interface VoiceControlsState {
@@ -347,6 +345,105 @@ export function VoiceBottomControlBar() {
   );
 }
 
+export function VoiceSidebarVolumeControls() {
+  const { t } = useTranslation();
+  const channelId = useVoiceStore((s) => s.channelId);
+  const inputVolume = useVoiceStore((s) => s.inputVolume);
+  const setInputVolume = useVoiceStore((s) => s.setInputVolume);
+  const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
+  const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
+  const controls = useVoiceControls();
+  const [expandedVolumeControl, setExpandedVolumeControl] = useState<'input' | 'music' | 'output' | null>(null);
+
+  if (!channelId) return null;
+
+  function toggleVolumeControl(control: 'input' | 'music' | 'output') {
+    setExpandedVolumeControl((current) => (current === control ? null : control));
+  }
+
+  return (
+    <div className="voice-sidebar-volume-controls">
+      <div className="voice-audio-toggle-row" aria-label={t('common.volume')}>
+        <button
+          type="button"
+          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'input' ? ' voice-audio-toggle--active' : ''}`}
+          onClick={() => toggleVolumeControl('input')}
+          aria-pressed={expandedVolumeControl === 'input'}
+        >
+          {t('voice.mic_input')}
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'output' ? ' voice-audio-toggle--active' : ''}`}
+          onClick={() => toggleVolumeControl('output')}
+          aria-pressed={expandedVolumeControl === 'output'}
+        >
+          {t('voice.playback')}
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'music' ? ' voice-audio-toggle--active' : ''}`}
+          onClick={() => toggleVolumeControl('music')}
+          aria-pressed={expandedVolumeControl === 'music'}
+        >
+          {t('voice.shared_music')}
+        </button>
+      </div>
+
+      {expandedVolumeControl === 'input' ? (
+        <label className="voice-audio-control voice-audio-control--expanded voice-sidebar-volume-popover">
+          <span className="voice-audio-control-label">{t('voice.mic_input')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={200}
+              value={Math.round(inputVolume * 100)}
+              onChange={(event) => setInputVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{Math.round(inputVolume * 100)}%</span>
+          </div>
+        </label>
+      ) : null}
+
+      {expandedVolumeControl === 'output' ? (
+        <label className="voice-audio-control voice-audio-control--expanded voice-sidebar-volume-popover">
+          <span className="voice-audio-control-label">{t('voice.playback')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={100}
+              value={Math.round(controls.playbackVolume * 100)}
+              onChange={(event) => controls.setPlaybackVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{toVoiceVolumePercent(controls.playbackVolume)}%</span>
+          </div>
+        </label>
+      ) : null}
+
+      {expandedVolumeControl === 'music' ? (
+        <label className="voice-audio-control voice-audio-control--expanded voice-sidebar-volume-popover">
+          <span className="voice-audio-control-label">{t('voice.shared_music')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={100}
+              value={Math.round(musicPlaybackVolume * 100)}
+              onChange={(event) => setMusicPlaybackVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{toVoiceVolumePercent(musicPlaybackVolume)}%</span>
+          </div>
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
 export function VoicePanel() {
   const { t } = useTranslation();
   const status = useVoiceStore((s) => s.status);
@@ -358,30 +455,27 @@ export function VoicePanel() {
   const peerNetwork = useVoiceStore((s) => s.peerNetwork);
   const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
   const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
-  const inputVolume = useVoiceStore((s) => s.inputVolume);
-  const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
-  const setInputVolume = useVoiceStore((s) => s.setInputVolume);
-  const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
   const clearError = useVoiceStore((s) => s.clearError);
   const musicError = useMusicStore((s) => s.error);
-  const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
-  const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
+  const myUsername = useAuthStore((s) => s.user?.username ?? null);
   const presenceMap = useGatewayStore((s) => s.presenceMap);
   const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
+  const activeGuildId = useChatStore((s) => s.activeGuildId);
+  const channelsByGuild = useChatStore((s) => s.channelsByGuild);
   const controls = useVoiceControls();
 
   const participantNameById = useMemo(() => {
     const names: Record<string, string> = {};
     for (const participant of participants) {
       if (participant.userId === myUserId) {
-        names[participant.userId] = t('common.you');
+        names[participant.userId] = myUsername ?? t('common.you');
         continue;
       }
       names[participant.userId] = presenceMap[participant.userId]?.username ?? participant.userId;
     }
     return names;
-  }, [myUserId, participants, presenceMap, t]);
+  }, [myUserId, myUsername, participants, presenceMap, t]);
 
   if (status === 'idle') return null;
 
@@ -417,13 +511,25 @@ export function VoicePanel() {
 
   if (!channelId) return null;
 
+  const channelName =
+    (activeGuildId ? channelsByGuild[activeGuildId]?.find((channel) => channel.id === channelId)?.name : null) ??
+    channelId;
+
   return (
     <div className="voice-panel">
       <div className="voice-panel-header">
-        <span className="voice-panel-icon">VC</span>
-        <span className="voice-panel-label">
-          {controls.isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
-        </span>
+        <div className="voice-panel-heading">
+          <span className="voice-panel-icon">VC</span>
+          <span className="voice-panel-label">
+            {controls.isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
+          </span>
+        </div>
+        <span className="voice-panel-member-count">{participants.length}</span>
+      </div>
+
+      <div className="voice-panel-channel" title={channelName}>
+        <span className="voice-panel-channel-dot" aria-hidden="true" />
+        <span>{channelName}</span>
       </div>
 
       {connectionIssue ? (
@@ -431,53 +537,6 @@ export function VoicePanel() {
           {t('voice.error_connection_issue')}
         </p>
       ) : null}
-
-      <div className="voice-audio-controls">
-        <label className="voice-audio-control">
-          <span className="voice-audio-control-label">{t('voice.mic_input')}</span>
-          <div className="voice-audio-control-row">
-            <input
-              type="range"
-              className="voice-volume-slider"
-              min={0}
-              max={200}
-              value={Math.round(inputVolume * 100)}
-              onChange={(event) => setInputVolume(Number(event.target.value) / 100)}
-            />
-            <span className="voice-volume-value">{Math.round(inputVolume * 100)}%</span>
-          </div>
-        </label>
-
-        <label className="voice-audio-control">
-          <span className="voice-audio-control-label">{t('voice.playback')}</span>
-          <div className="voice-audio-control-row">
-            <input
-              type="range"
-              className="voice-volume-slider"
-              min={0}
-              max={100}
-              value={Math.round(controls.playbackVolume * 100)}
-              onChange={(event) => controls.setPlaybackVolume(Number(event.target.value) / 100)}
-            />
-            <span className="voice-volume-value">{toVoiceVolumePercent(controls.playbackVolume)}%</span>
-          </div>
-        </label>
-
-        <label className="voice-audio-control">
-          <span className="voice-audio-control-label">{t('voice.shared_music')}</span>
-          <div className="voice-audio-control-row">
-            <input
-              type="range"
-              className="voice-volume-slider"
-              min={0}
-              max={100}
-              value={Math.round(musicPlaybackVolume * 100)}
-              onChange={(event) => setMusicPlaybackVolume(Number(event.target.value) / 100)}
-            />
-            <span className="voice-volume-value">{toVoiceVolumePercent(musicPlaybackVolume)}%</span>
-          </div>
-        </label>
-      </div>
 
       {musicError ? (
         <p className="voice-panel-warning" role="alert">
@@ -490,7 +549,6 @@ export function VoicePanel() {
           const isMe = participant.userId === myUserId;
           const isSpeaking = speakingUserIds.has(participant.userId);
           const displayName = participantNameById[participant.userId] ?? participant.userId;
-          const participantVolume = participantPlaybackVolume[participant.userId] ?? DEFAULT_VOICE_PARTICIPANT_VOLUME;
           const connState = peerNetwork[participant.userId]?.connectionState;
           const connSuffix = connState && connState !== 'connected' ? ` [${connState}]` : '';
           const networkSnapshot = voiceNetworkByChannel[channelId]?.[participant.userId];
@@ -526,16 +584,13 @@ export function VoicePanel() {
               ]
                 .filter(Boolean)
                 .join(' ')}
+              title={netLabel}
             >
               <div className="voice-participant-row">
                 <span className="voice-participant-name" title={displayName}>
                   {displayName}
                 </span>
-                {!isMe ? (
-                  <span className="voice-participant-volume">
-                    {toVoiceVolumePercent(participantVolume)}%
-                  </span>
-                ) : null}
+                {isMe ? <span className="voice-participant-badge">{t('common.you')}</span> : null}
                 {participant.isMuted ? (
                   <span className="voice-participant-badge">{t('voice.badge_muted')}</span>
                 ) : null}
@@ -543,72 +598,11 @@ export function VoicePanel() {
                   <span className="voice-participant-badge">{t('voice.badge_speaking')}</span>
                 ) : null}
               </div>
-              <div className="voice-participant-meta-row">
-                <span className="voice-participant-net" title={netLabel}>
-                  {netLabel}
-                </span>
-              </div>
-              {!isMe ? (
-                <label className="voice-participant-slider-row">
-                  <span className="voice-participant-slider-label">{t('voice.volume')}</span>
-                  <input
-                    type="range"
-                    className="voice-volume-slider"
-                    min={0}
-                    max={100}
-                    value={Math.round(participantVolume * 100)}
-                    onChange={(event) =>
-                      setParticipantPlaybackVolume(participant.userId, Number(event.target.value) / 100)
-                    }
-                  />
-                </label>
-              ) : null}
             </li>
           );
         })}
       </ul>
 
-      <div className="voice-panel-controls">
-        {controls.isDesktop ? (
-          <button
-            type="button"
-            className="btn-ghost voice-music-btn"
-            onClick={controls.handleMusicShareToggle}
-            disabled={
-              controls.isConnecting ||
-              (!controls.publishedMusic && !controls.isDesktopMusicCaptureAvailable) ||
-              controls.publishedMusic?.status === 'capturing' ||
-              controls.publishedMusic?.status === 'starting' ||
-              controls.publishedMusic?.status === 'stopping'
-            }
-            title={
-              controls.isDesktopMusicCaptureAvailable
-                ? t('voice.music_share_title')
-                : t('voice.music_share_unavailable_title')
-            }
-          >
-            {controls.publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className={`btn-ghost voice-mute-btn${controls.isMuted ? ' voice-mute-btn--muted' : ''}`}
-          onClick={controls.handleMute}
-          disabled={controls.isConnecting}
-          title={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
-        >
-          {controls.isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}
-        </button>
-        <button
-          type="button"
-          className="btn-ghost voice-leave-btn"
-          onClick={controls.handleLeave}
-          disabled={controls.isConnecting}
-          title={t('voice.leave_title')}
-        >
-          {t('voice.leave')}
-        </button>
-      </div>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
-import { VoiceBottomControlBar, VoiceChannelView, VoicePanel } from '../voice/VoicePanel';
+import { VoiceBottomControlBar, VoiceChannelView, VoicePanel, VoiceSidebarVolumeControls } from '../voice/VoicePanel';
 import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
 import { GuildList } from './GuildList';
@@ -167,6 +167,7 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
               >
                 {t('settings.open')}
               </button>
+              <VoiceSidebarVolumeControls />
             </div>
           </div>
         </div>

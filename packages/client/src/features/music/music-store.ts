@@ -18,6 +18,7 @@ import {
 import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
+import { loadNumberPreference, saveNumberPreference } from '../preferences/client-preferences';
 import {
   canCaptureDesktopMusic,
   captureDesktopMusicStream,
@@ -127,7 +128,7 @@ function emptyState(): Pick<
     error: null,
     isDesktopCaptureAvailable: canCaptureDesktopMusic(),
     listeningById: {},
-    playbackVolume: DEFAULT_MUSIC_PLAYBACK_VOLUME,
+    playbackVolume: loadNumberPreference('musicPlaybackVolume', DEFAULT_MUSIC_PLAYBACK_VOLUME, clampMusicPlaybackVolume),
     publishedMusic: null,
     roomStateByChannel: {},
   };
@@ -783,7 +784,9 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   setPlaybackVolume(volume) {
-    set({ playbackVolume: clampMusicPlaybackVolume(volume) });
+    const clampedVolume = clampMusicPlaybackVolume(volume);
+    set({ playbackVolume: clampedVolume });
+    saveNumberPreference('musicPlaybackVolume', clampedVolume);
     syncRemoteAudioVolumes();
   },
 

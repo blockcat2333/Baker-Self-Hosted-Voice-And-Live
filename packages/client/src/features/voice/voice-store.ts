@@ -34,6 +34,7 @@ import {
   applyPreferredAudioOutputDevice,
   buildPreferredAudioInputConstraints,
 } from '../media/audio-device-store';
+import { loadNumberPreference, saveNumberPreference } from '../preferences/client-preferences';
 import {
   clampVoiceInputVolume,
   clampVoicePlaybackVolume,
@@ -821,8 +822,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   isMuted: false,
   error: null,
   connectionIssue: null,
-  inputVolume: DEFAULT_VOICE_INPUT_VOLUME,
-  playbackVolume: DEFAULT_VOICE_PLAYBACK_VOLUME,
+  inputVolume: loadNumberPreference('voiceInputVolume', DEFAULT_VOICE_INPUT_VOLUME, clampVoiceInputVolume),
+  playbackVolume: loadNumberPreference('voicePlaybackVolume', DEFAULT_VOICE_PLAYBACK_VOLUME, clampVoicePlaybackVolume),
   participantPlaybackVolume: {},
   localMediaSelfLossPct: null,
   localMediaSelfUpdatedAt: null,
@@ -1115,6 +1116,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   setInputVolume(volume) {
     const clampedVolume = clampVoiceInputVolume(volume);
     set({ inputVolume: clampedVolume });
+    saveNumberPreference('voiceInputVolume', clampedVolume);
     if (micGainNode) {
       micGainNode.gain.value = clampedVolume;
     }
@@ -1123,6 +1125,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   setPlaybackVolume(volume) {
     const clampedVolume = clampVoicePlaybackVolume(volume);
     set({ playbackVolume: clampedVolume });
+    saveNumberPreference('voicePlaybackVolume', clampedVolume);
     syncRemoteAudioElementVolumes();
   },
 

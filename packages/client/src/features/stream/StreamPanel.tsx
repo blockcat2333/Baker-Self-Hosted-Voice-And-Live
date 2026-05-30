@@ -8,6 +8,12 @@ import './stream-ui.css';
 import { useAuthStore } from '../auth/auth-store';
 import { sendCommandAwaitAck, sendRawCommand } from '../gateway/gateway-store';
 import { useGatewayStore } from '../gateway/gateway-store';
+import {
+  loadStreamQualityPreference,
+  loadStringOptionPreference,
+  saveClientPreferencesPatch,
+  saveStreamQualityPreference,
+} from '../preferences/client-preferences';
 import { useVoiceStore } from '../voice/voice-store';
 import { closeStreamPopup, ensureStreamPopupWindow } from './stream-popup-controller';
 import {
@@ -330,9 +336,15 @@ function StreamSection({
 
 export function StreamPanel() {
   const { t } = useTranslation();
-  const [streamQuality, setStreamQuality] = useState(DEFAULT_STREAM_QUALITY);
+  const [streamQuality, setStreamQuality] = useState(() =>
+    loadStreamQualityPreference(DEFAULT_STREAM_QUALITY, {
+      bitrates: STREAM_BITRATE_OPTIONS,
+      frameRates: STREAM_FRAME_RATE_OPTIONS,
+      resolutions: STREAM_RESOLUTION_OPTIONS,
+    }),
+  );
   const [streamCodecPreference, setStreamCodecPreference] = useState<StreamCodecPreference>(
-    DEFAULT_STREAM_CODEC_PREFERENCE,
+    () => loadStringOptionPreference('streamCodecPreference', DEFAULT_STREAM_CODEC_PREFERENCE, STREAM_CODEC_OPTIONS),
   );
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [isOwnedHealthOpen, setIsOwnedHealthOpen] = useState(false);
@@ -408,6 +420,17 @@ export function StreamPanel() {
   function handleShareCameraFromDialog() {
     setIsShareDialogOpen(false);
     handleShareCamera();
+  }
+
+  function handleStreamQualityChange(patch: Partial<StreamQualitySettings>) {
+    const nextQuality = { ...streamQuality, ...patch };
+    setStreamQuality(nextQuality);
+    saveStreamQualityPreference(nextQuality);
+  }
+
+  function handleStreamCodecPreferenceChange(codecPreference: StreamCodecPreference) {
+    setStreamCodecPreference(codecPreference);
+    saveClientPreferencesPatch({ streamCodecPreference: codecPreference });
   }
 
   function renderCameraSourceControl(disabled: boolean) {
@@ -694,10 +717,9 @@ export function StreamPanel() {
                     className={'stream-quality-select'}
                     value={streamQuality.resolution}
                     onChange={(event) =>
-                      setStreamQuality((current) => ({
-                        ...current,
+                      handleStreamQualityChange({
                         resolution: event.target.value as StreamQualitySettings['resolution'],
-                      }))
+                      })
                     }
                   >
                     {STREAM_RESOLUTION_OPTIONS.map((resolution) => (
@@ -713,10 +735,9 @@ export function StreamPanel() {
                     className={'stream-quality-select'}
                     value={String(streamQuality.frameRate)}
                     onChange={(event) =>
-                      setStreamQuality((current) => ({
-                        ...current,
+                      handleStreamQualityChange({
                         frameRate: Number(event.target.value) as StreamQualitySettings['frameRate'],
-                      }))
+                      })
                     }
                   >
                     {STREAM_FRAME_RATE_OPTIONS.map((frameRate) => (
@@ -732,10 +753,9 @@ export function StreamPanel() {
                     className={'stream-quality-select'}
                     value={String(streamQuality.bitrateKbps)}
                     onChange={(event) =>
-                      setStreamQuality((current) => ({
-                        ...current,
+                      handleStreamQualityChange({
                         bitrateKbps: Number(event.target.value) as StreamQualitySettings['bitrateKbps'],
-                      }))
+                      })
                     }
                   >
                     {STREAM_BITRATE_OPTIONS.map((bitrate) => (
@@ -750,7 +770,9 @@ export function StreamPanel() {
                   <select
                     className={'stream-quality-select'}
                     value={streamCodecPreference}
-                    onChange={(event) => setStreamCodecPreference(event.target.value as StreamCodecPreference)}
+                    onChange={(event) =>
+                      handleStreamCodecPreferenceChange(event.target.value as StreamCodecPreference)
+                    }
                   >
                     {STREAM_CODEC_OPTIONS.map((codecPreference) => (
                       <option key={codecPreference} value={codecPreference}>

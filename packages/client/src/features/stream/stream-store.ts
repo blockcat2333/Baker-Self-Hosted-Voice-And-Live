@@ -21,6 +21,10 @@ import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
 import {
+  loadSelectedCameraKeyPreference,
+  saveSelectedCameraKeyPreference,
+} from '../preferences/client-preferences';
+import {
   buildCameraCaptureConstraints,
   captureScreenStream,
   clampStreamPlaybackVolume,
@@ -303,7 +307,7 @@ function emptyState(): Pick<
     isSwitchingCamera: false,
     ownedStream: null,
     roomStateByChannel: {},
-    selectedCameraKey: null,
+    selectedCameraKey: loadSelectedCameraKeyPreference(),
     watchedStreamsById: {},
   };
 }
@@ -1294,13 +1298,18 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
     const options = await listAvailableCameraOptions(get().selectedCameraKey);
 
-    set((state) => ({
-      cameraOptions: options,
-      isRefreshingCameras: false,
-      selectedCameraKey: options.some((option) => option.key === state.selectedCameraKey)
+    set((state) => {
+      const selectedCameraKey = options.some((option) => option.key === state.selectedCameraKey)
         ? state.selectedCameraKey
-        : (options[0]?.key ?? null),
-    }));
+        : (options[0]?.key ?? null);
+      saveSelectedCameraKeyPreference(selectedCameraKey);
+
+      return {
+        cameraOptions: options,
+        isRefreshingCameras: false,
+        selectedCameraKey,
+      };
+    });
   },
 
   async selectCamera(cameraKey) {
@@ -1316,6 +1325,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     }
 
     set({ error: null, selectedCameraKey: cameraKey });
+    saveSelectedCameraKeyPreference(cameraKey);
 
     if (!ownedRuntime || ownedRuntime.sourceType !== 'camera' || get().ownedStream?.sourceType !== 'camera') {
       return;
@@ -1371,6 +1381,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         isSwitchingCamera: false,
         selectedCameraKey: previousCameraKey,
       });
+      saveSelectedCameraKeyPreference(previousCameraKey);
     }
   },
 

@@ -19,6 +19,7 @@
     "infra:down": "docker compose down",
     "infra:up": "docker compose up -d postgres redis",
     "lint": "turbo run lint",
+    "release:check": "node scripts/check-release-consistency.mjs",
     "test": "vitest run",
     "typecheck": "turbo run typecheck"
   },

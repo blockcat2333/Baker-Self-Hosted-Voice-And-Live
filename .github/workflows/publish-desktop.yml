@@ -16,23 +16,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Classify release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -ne 'tag') {
+            "is_desktop_tag=true" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          if ($env:GITHUB_REF_NAME -match '^v[0-9]+\.[0-9]+\.[0-9]+[a-z]$') {
+            "is_desktop_tag=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "is_desktop_tag=false" >> $env:GITHUB_OUTPUT
+            "Skipping desktop publish for non-desktop tag $env:GITHUB_REF_NAME."
+          }
+
       - name: Set up Node
+        if: steps.release_tag.outputs.is_desktop_tag == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
 
       - name: Set up pnpm
+        if: steps.release_tag.outputs.is_desktop_tag == 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
 
       - name: Install dependencies
+        if: steps.release_tag.outputs.is_desktop_tag == 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build Windows desktop
+        if: steps.release_tag.outputs.is_desktop_tag == 'true'
         run: pnpm --filter @baker/desktop dist:win
 
       - name: Upload desktop assets
+        if: steps.release_tag.outputs.is_desktop_tag == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: |

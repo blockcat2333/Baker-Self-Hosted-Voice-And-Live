@@ -40,6 +40,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 - Client release labels follow the server version plus a letter, starting at `a`: `1.0.6a`, `1.0.6b`, and so on.
 - Client-only updates advance the trailing letter. Server releases advance the numeric version and reset the client letter to `a`.
 - Package metadata stays semver-compatible for tooling; the lettered client label is used for client distribution notes and assets.
+- Before tagging a release, run `pnpm release:check` and follow the [Release Checklist](docs/release-checklist.md).
 
 ## Start Here If You Are New
 

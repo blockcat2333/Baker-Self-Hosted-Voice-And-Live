@@ -27,7 +27,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.0.6`; desktop client `1.0.6a`
+- Release line: server `1.0.7`; desktop client `1.0.7a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -36,8 +36,8 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Versioning
 
-- Server releases use numeric tags such as `1.0.6` and Docker images such as `blockcat233/baker:1.0.6`.
-- Client release labels follow the server version plus a letter, starting at `a`: `1.0.6a`, `1.0.6b`, and so on.
+- Server releases use numeric tags such as `1.0.7` and Docker images such as `blockcat233/baker:1.0.7`.
+- Client release labels follow the server version plus a letter, starting at `a`: `1.0.7a`, `1.0.7b`, and so on.
 - Client-only updates advance the trailing letter. Server releases advance the numeric version and reset the client letter to `a`.
 - Package metadata stays semver-compatible for tooling; the lettered client label is used for client distribution notes and assets.
 - Before tagging a release, run `pnpm release:check` and follow the [Release Checklist](docs/release-checklist.md).
@@ -65,7 +65,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.6
+  blockcat233/baker:1.0.7
 
 docker logs baker
 ```
@@ -77,7 +77,7 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-If you want to follow the newest rolling image instead of pinning this release, replace `1.0.6` with `latest`.
+If you want to follow the newest rolling image instead of pinning this release, replace `1.0.7` with `latest`.
 
 The Docker socket mount is required for the admin panel's one-click update, deployment-settings apply, and container-level repair fallback. Without it, Baker still runs normally, and the admin panel can still inspect and restart bundled services through the all-in-one supervisor, but image updates and container rebuilds must be performed manually from the Docker host.
 
@@ -105,7 +105,7 @@ Self-repair mode stores its settings under `/var/lib/baker/runtime` and continue
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:1.0.6`
+- Image: `blockcat233/baker:1.0.7`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -163,7 +163,7 @@ docker run -d \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.6
+  blockcat233/baker:1.0.7
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
@@ -192,7 +192,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.6
+  blockcat233/baker:1.0.7
 ```
 
 Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.

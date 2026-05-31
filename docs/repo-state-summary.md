@@ -180,6 +180,8 @@ Migration state:
   - auth session lifecycle plus authenticated username update wiring and bootstrap recovery (`me -> refresh -> me`); browser tokens now use `sessionStorage`, and logout can revoke the active server session
 - `packages/client/src/features/voice/voice-store.ts`
   - voice session lifecycle plus local mic gain, global playback volume, per-participant playback volume controls, reconnect hardening (`restart_ice` + auto rejoin after gateway reconnect), preserved mute intent across reconnect, gateway-ready join guard, local media-loss aggregation/self-report, and join/leave/mute/unmute sound cues
+- `packages/client/src/features/preferences/client-preferences.ts`
+  - local browser preference persistence for voice volume, music playback volume, selected camera, stream quality, and stream codec choices under `baker_client_preferences_v1`
 - `packages/client/src/features/voice/voice-sfx.ts`
   - synthesized Web Audio cue playback for mute/unmute and self/peer join/leave
 - `packages/client/src/features/stream/stream-store.ts`
@@ -189,7 +191,7 @@ Migration state:
 - `packages/client/src/features/stream/stream-media.test.ts`
   - helper coverage for stream playback-volume, stream capture constraint behavior, and quality-based capture presets
 - `packages/client/src/features/voice/VoicePanel.tsx`
-  - voice controls, active-call input/playback volume sliders, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
+  - voice channel view, compact joined-voice bottom control bar, active-call input/playback volume controls, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
 - `packages/client/src/features/chat/MobileTabBar.tsx`
   - phone-width bottom navigation for `Channels` / `Chat` / `Voice` / `More`, including active-voice notification state
 - `packages/client/src/features/chat/ChannelList.tsx`
@@ -199,7 +201,7 @@ Migration state:
 - `packages/client/src/features/voice/voice-audio.test.ts`
   - helper coverage for voice volume normalization behavior
 - `packages/client/src/features/stream/StreamPanel.tsx`
-  - main-window stream control/status surface with `Your Stream`, `Watching`, and `Available Streams` sections plus pre-publish quality selectors (resolution/fps/bitrate/codec) and broadcaster health diagnostics
+  - main-window stream control/status surface with `Your Stream`, `Watching`, and `Available Streams` sections plus a focused share dialog, persisted pre-publish quality selectors (resolution/fps/bitrate/codec), and collapsible broadcaster health diagnostics
 - `packages/sdk/src/webrtc/webrtc-manager.ts`
   - peer-connection helper with optional offer-time sender bitrate/degradation-preference application via `RTCRtpSender.setParameters`, best-effort publish codec-preference ordering via `setCodecPreferences`, peer sample stats, inbound video receive stats, and outbound sample stats for voice self-loss plus broadcaster diagnostics
 - `packages/client/src/features/stream/StreamPopupHost.tsx`

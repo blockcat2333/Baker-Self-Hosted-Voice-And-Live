@@ -48,6 +48,23 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-05-31 Baker 1.0.7 Server and 1.0.7a Desktop/Web Release Prep
+
+- confirmed `Client voice UI rework and local preferences (#4)` changes the browser client UI through `packages/client` voice, stream, chat-shell, CSS, and i18n updates
+- bumped the server release line and all non-desktop workspace package metadata to `1.0.7`
+- reset the desktop/client release label to `1.0.7a`
+- updated the Windows installer artifact name to `Baker-Setup-1.0.7a-x64.exe`
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.7`
+- packaged the web UI rework in the release notes:
+  - voice channels now have a fuller channel view plus compact bottom controls for joined voice state
+  - stream start flow now opens a focused share dialog and keeps stream diagnostics collapsible
+  - client-side voice, stream, camera, codec, and music preferences persist locally under `baker_client_preferences_v1`
+- validation completed:
+  - `node scripts/check-release-consistency.mjs`
+  - `npm exec --yes --package=pnpm@9.15.0 -- pnpm typecheck`
+  - `npm exec --yes --package=pnpm@9.15.0 -- pnpm lint`
+  - `corepack pnpm test` (169 tests)
+
 ### 2026-05-30 Baker 1.0.6 Release Prep
 
 - bumped the server release line and all non-desktop workspace package metadata to `1.0.6`

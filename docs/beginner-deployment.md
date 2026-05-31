@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.6
+  blockcat233/baker:1.0.7
 ```
 
 4. Read the first admin password:
@@ -108,7 +108,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.6
+  blockcat233/baker:1.0.7
 ```
 
 Then open the admin panel and change **Server settings -> Media mode** to `sfu`. Existing voice and livestream sessions reconnect immediately in the new mode, while text chat remains connected.
@@ -130,7 +130,7 @@ docker run -d \
   -e TURN_PASSWORD=change-this \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.6
+  blockcat233/baker:1.0.7
 ```
 
 You still need to place HTTPS in front of the web app for real users.
@@ -175,7 +175,7 @@ If you keep the same Docker volume, you can recreate the container without losin
 Typical upgrade flow:
 
 ```bash
-docker pull blockcat233/baker:1.0.6
+docker pull blockcat233/baker:1.0.7
 docker rm -f baker
 ```
 

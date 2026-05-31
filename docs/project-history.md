@@ -1,5 +1,29 @@
 # Project History
 
+## 2026-05-31
+
+### Baker 1.0.7 server and 1.0.7a desktop/web release prep
+
+What changed:
+
+- confirmed `Client voice UI rework and local preferences (#4)` changes the browser client UI, including voice, stream, chat-shell, styling, and localized copy
+- bumped the server release line and non-desktop workspace package metadata to `1.0.7`
+- reset the desktop/client release label to `1.0.7a`
+- prepared Windows installer naming for `Baker-Setup-1.0.7a-x64.exe`
+- updated the English and Chinese deployment docs to use `blockcat233/baker:1.0.7`
+
+Why:
+
+- the client voice UI rework materially changes the web app experience, so it needs a new server image line and matching client installer label
+- `1.0.7` packages the refreshed voice channel surface, compact joined-voice controls, streamlined stream-start dialog, visual polish, and local client preference persistence
+
+Validation:
+
+- `node scripts/check-release-consistency.mjs`
+- `npm exec --yes --package=pnpm@9.15.0 -- pnpm typecheck`
+- `npm exec --yes --package=pnpm@9.15.0 -- pnpm lint`
+- `corepack pnpm test` (169 tests)
+
 ## 2026-05-30
 
 ### Baker 1.0.6 server and 1.0.6a desktop release prep

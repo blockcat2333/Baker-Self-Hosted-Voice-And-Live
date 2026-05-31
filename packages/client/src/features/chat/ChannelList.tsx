@@ -9,7 +9,7 @@ import { useVoiceStore } from '../voice/voice-store';
 import { useChatStore } from './chat-store';
 
 export interface ChannelListProps {
-  onAfterPick?: (kind: 'text' | 'voice') => void;
+  onAfterPick?: (kind: 'text' | 'voice', channelId: string) => void;
 }
 
 export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
@@ -34,19 +34,19 @@ export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
     if (channelId !== activeChannelId) {
       setActiveChannel(channelId);
     }
-    onAfterPick?.('text');
+    onAfterPick?.('text', channelId);
   }
 
   async function handleVoiceSelect(channelId: string) {
     if (channelId === voiceChannelId) {
-      onAfterPick?.('voice');
+      onAfterPick?.('voice', channelId);
       return;
     }
     if (ownedStream || Object.keys(watchedStreamsById).length > 0) {
       await disconnectCurrentStream(sendCommandAwaitAck);
     }
     void joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
-    onAfterPick?.('voice');
+    onAfterPick?.('voice', channelId);
   }
 
   const textChannels = channels.filter((c) => c.type !== 'voice');

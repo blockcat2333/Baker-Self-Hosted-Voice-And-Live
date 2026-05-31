@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useAuthStore } from '../auth/auth-store';
@@ -6,11 +6,86 @@ import { sendCommandAwaitAck, sendRawCommand, useGatewayStore } from '../gateway
 import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useMusicStore } from '../music/music-store';
 import { useStreamStore } from '../stream/stream-store';
-import {
-  DEFAULT_VOICE_PARTICIPANT_VOLUME,
-  toVoiceVolumePercent,
-} from './voice-audio';
+import { useChatStore } from '../chat/chat-store';
+import { toVoiceVolumePercent } from './voice-audio';
 import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
+
+interface VoiceControlsState {
+  channelId: string | null;
+  isConnecting: boolean;
+  isDesktop: boolean;
+  isDesktopMusicCaptureAvailable: boolean;
+  isMuted: boolean;
+  playbackVolume: number;
+  publishedMusic: ReturnType<typeof useMusicStore.getState>['publishedMusic'];
+  handleLeave(): void;
+  handleMusicShareToggle(): void;
+  handleMute(): void;
+  setPlaybackVolume(volume: number): void;
+}
+
+function useVoiceControls(): VoiceControlsState {
+  const status = useVoiceStore((s) => s.status);
+  const channelId = useVoiceStore((s) => s.channelId);
+  const isMuted = useVoiceStore((s) => s.isMuted);
+  const playbackVolume = useVoiceStore((s) => s.playbackVolume);
+  const setPlaybackVolume = useVoiceStore((s) => s.setPlaybackVolume);
+  const leaveVoiceChannel = useVoiceStore((s) => s.leaveVoiceChannel);
+  const toggleMute = useVoiceStore((s) => s.toggleMute);
+  const disconnectCurrentStream = useStreamStore((s) => s.disconnectCurrentStream);
+  const isDesktopMusicCaptureAvailable = useMusicStore((s) => s.isDesktopCaptureAvailable);
+  const publishedMusic = useMusicStore((s) => s.publishedMusic);
+  const refreshDesktopCaptureAvailability = useMusicStore((s) => s.refreshDesktopCaptureAvailability);
+  const startMusicShare = useMusicStore((s) => s.startMusicShare);
+  const stopMusicShare = useMusicStore((s) => s.stopMusicShare);
+  const isDesktop = typeof window !== 'undefined' && window.bakerDesktop?.platform === 'desktop';
+
+  useEffect(() => {
+    refreshDesktopCaptureAvailability();
+  }, [refreshDesktopCaptureAvailability]);
+
+  const isConnecting =
+    status === 'requesting_mic' || status === 'joining' || status === 'reconnecting' || status === 'leaving';
+
+  function handleLeave() {
+    void (async () => {
+      await stopMusicShare(sendCommandAwaitAck);
+      await disconnectCurrentStream(sendCommandAwaitAck);
+      await leaveVoiceChannel(sendCommandAwaitAck);
+    })();
+  }
+
+  function handleMute() {
+    toggleMute(sendRawCommand);
+  }
+
+  function handleMusicShareToggle() {
+    if (!channelId || isConnecting) {
+      return;
+    }
+
+    if (publishedMusic) {
+      void stopMusicShare(sendCommandAwaitAck);
+      return;
+    }
+
+    void startMusicShare(channelId, sendCommandAwaitAck, sendRawCommand);
+  }
+
+  return {
+    channelId,
+    handleLeave,
+    handleMusicShareToggle,
+    handleMute,
+    isConnecting,
+    isDesktop,
+    isDesktopMusicCaptureAvailable,
+    isMuted,
+    playbackVolume,
+    publishedMusic,
+    setPlaybackVolume,
+  };
+}
 
 export function VoiceAudioDeviceControls() {
   const { t } = useTranslation();
@@ -110,6 +185,265 @@ export function VoiceAudioDeviceControls() {
   );
 }
 
+export interface VoiceChannelViewProps {
+  channelId: string;
+  channelName: string;
+}
+
+export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewProps) {
+  const { t } = useTranslation();
+  const connectedChannelId = useVoiceStore((s) => s.channelId);
+  const participants = useVoiceStore((s) => s.participants);
+  const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
+  const voiceRosterByChannel = useGatewayStore((s) => s.voiceRosterByChannel);
+  const presenceMap = useGatewayStore((s) => s.presenceMap);
+  const myUserId = useAuthStore((s) => s.user?.id ?? null);
+  const visibleParticipants = connectedChannelId === channelId ? participants : (voiceRosterByChannel[channelId] ?? []);
+
+  return (
+    <section className="voice-channel-view" aria-label={channelName}>
+      <div className="voice-channel-view-header">
+        <div>
+          <p className="chat-main-eyebrow">{t('chat.section_voice')}</p>
+          <h2 className="voice-channel-view-title">{channelName}</h2>
+        </div>
+        <div className="voice-channel-view-meta">
+          <span className="voice-channel-view-dot" aria-hidden="true" />
+          <span>{t('voice.member_count', { count: visibleParticipants.length })}</span>
+          <span>{t('voice.public_channel')}</span>
+        </div>
+      </div>
+
+      {visibleParticipants.length > 0 ? (
+        <ul className="voice-channel-view-members">
+          {visibleParticipants.map((participant) => {
+            const isMe = participant.userId === myUserId;
+            const displayName = isMe ? t('common.you') : (presenceMap[participant.userId]?.username ?? participant.userId);
+            const isSpeaking = speakingUserIds.has(participant.userId);
+
+            return (
+              <li
+                key={participant.sessionId}
+                className={[
+                  'voice-channel-view-member',
+                  participant.isMuted ? 'voice-channel-view-member--muted' : '',
+                  isSpeaking ? 'voice-channel-view-member--speaking' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+              >
+                <span className="voice-channel-view-avatar" aria-hidden="true">
+                  {displayName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="voice-channel-view-member-name">{displayName}</span>
+                {participant.isMuted ? <span className="voice-channel-view-badge">{t('voice.badge_muted')}</span> : null}
+                {isSpeaking && !participant.isMuted ? (
+                  <span className="voice-channel-view-badge">{t('voice.badge_speaking')}</span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      <div className="voice-channel-empty">
+        <div className="voice-channel-empty-icon" aria-hidden="true">VC</div>
+        <h3>{t('voice.channel_welcome_title', { channel: channelName })}</h3>
+        <p>{t('voice.channel_welcome_copy')}</p>
+      </div>
+    </section>
+  );
+}
+
+export function VoiceBottomControlBar() {
+  const { t } = useTranslation();
+  const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
+  const controls = useVoiceControls();
+  const lastAudiblePlaybackVolumeRef = useRef(1);
+
+  useEffect(() => {
+    if (controls.playbackVolume > 0) {
+      lastAudiblePlaybackVolumeRef.current = controls.playbackVolume;
+    }
+  }, [controls.playbackVolume]);
+
+  if (!controls.channelId) return null;
+
+  const isSpeakerMuted = controls.playbackVolume === 0;
+  const latencyLabel = gatewayRttMs === null ? '--' : `${Math.max(0, Math.round(gatewayRttMs))}ms`;
+
+  function handleSpeakerToggle() {
+    if (controls.isConnecting) return;
+    if (isSpeakerMuted) {
+      controls.setPlaybackVolume(lastAudiblePlaybackVolumeRef.current || 1);
+      return;
+    }
+    controls.setPlaybackVolume(0);
+  }
+
+  return (
+    <div className="voice-bottom-bar" role="region" aria-label={t('voice.controls_aria')}>
+      <div className="voice-bottom-status">
+        <span className="voice-bottom-status-dot" aria-hidden="true" />
+        <span>{controls.isConnecting ? t('voice.status_connecting') : t('voice.connected_short')}</span>
+        <span className="voice-bottom-divider" aria-hidden="true" />
+        <span>{t('voice.latency_label', { latency: latencyLabel })}</span>
+        <span className="voice-bottom-divider" aria-hidden="true" />
+        <span>{t('voice.encryption_enabled')}</span>
+      </div>
+
+      <div className="voice-bottom-actions">
+        <button
+          type="button"
+          className={`btn-ghost voice-bottom-btn${controls.isMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
+          onClick={controls.handleMute}
+          disabled={controls.isConnecting}
+          title={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
+        >
+          <span aria-hidden="true">{controls.isMuted ? 'M-' : 'M+'}</span>
+          <span>{controls.isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}</span>
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost voice-bottom-btn${isSpeakerMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
+          onClick={handleSpeakerToggle}
+          disabled={controls.isConnecting}
+          title={isSpeakerMuted ? t('voice.speaker_on_title') : t('voice.speaker_off_title')}
+        >
+          <span aria-hidden="true">{isSpeakerMuted ? 'S-' : 'S+'}</span>
+          <span>{isSpeakerMuted ? t('voice.speaker_muted_label') : t('voice.speaker_on_label')}</span>
+        </button>
+        <button
+          type="button"
+          className="btn-ghost voice-bottom-btn"
+          onClick={controls.handleMusicShareToggle}
+          disabled={
+            controls.isConnecting ||
+            !controls.isDesktop ||
+            (!controls.publishedMusic && !controls.isDesktopMusicCaptureAvailable) ||
+            controls.publishedMusic?.status === 'capturing' ||
+            controls.publishedMusic?.status === 'starting' ||
+            controls.publishedMusic?.status === 'stopping'
+          }
+          title={controls.isDesktopMusicCaptureAvailable ? t('voice.music_share_title') : t('voice.music_share_unavailable_title')}
+        >
+          <span aria-hidden="true">MU</span>
+          <span>{controls.publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}</span>
+        </button>
+        <button
+          type="button"
+          className="btn-ghost voice-bottom-btn voice-bottom-btn--leave"
+          onClick={controls.handleLeave}
+          disabled={controls.isConnecting}
+          title={t('voice.leave_title')}
+        >
+          <span aria-hidden="true">X</span>
+          <span>{t('voice.leave')}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function VoiceSidebarVolumeControls() {
+  const { t } = useTranslation();
+  const channelId = useVoiceStore((s) => s.channelId);
+  const inputVolume = useVoiceStore((s) => s.inputVolume);
+  const setInputVolume = useVoiceStore((s) => s.setInputVolume);
+  const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
+  const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
+  const controls = useVoiceControls();
+  const [expandedVolumeControl, setExpandedVolumeControl] = useState<'input' | 'music' | 'output' | null>(null);
+
+  if (!channelId) return null;
+
+  function toggleVolumeControl(control: 'input' | 'music' | 'output') {
+    setExpandedVolumeControl((current) => (current === control ? null : control));
+  }
+
+  return (
+    <div className="voice-sidebar-volume-controls">
+      <div className="voice-audio-toggle-row" aria-label={t('common.volume')}>
+        <button
+          type="button"
+          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'input' ? ' voice-audio-toggle--active' : ''}`}
+          onClick={() => toggleVolumeControl('input')}
+          aria-pressed={expandedVolumeControl === 'input'}
+        >
+          {t('voice.mic_input')}
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'output' ? ' voice-audio-toggle--active' : ''}`}
+          onClick={() => toggleVolumeControl('output')}
+          aria-pressed={expandedVolumeControl === 'output'}
+        >
+          {t('voice.playback')}
+        </button>
+        <button
+          type="button"
+          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'music' ? ' voice-audio-toggle--active' : ''}`}
+          onClick={() => toggleVolumeControl('music')}
+          aria-pressed={expandedVolumeControl === 'music'}
+        >
+          {t('voice.shared_music')}
+        </button>
+      </div>
+
+      {expandedVolumeControl === 'input' ? (
+        <label className="voice-audio-control voice-audio-control--expanded voice-sidebar-volume-popover">
+          <span className="voice-audio-control-label">{t('voice.mic_input')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={200}
+              value={Math.round(inputVolume * 100)}
+              onChange={(event) => setInputVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{Math.round(inputVolume * 100)}%</span>
+          </div>
+        </label>
+      ) : null}
+
+      {expandedVolumeControl === 'output' ? (
+        <label className="voice-audio-control voice-audio-control--expanded voice-sidebar-volume-popover">
+          <span className="voice-audio-control-label">{t('voice.playback')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={100}
+              value={Math.round(controls.playbackVolume * 100)}
+              onChange={(event) => controls.setPlaybackVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{toVoiceVolumePercent(controls.playbackVolume)}%</span>
+          </div>
+        </label>
+      ) : null}
+
+      {expandedVolumeControl === 'music' ? (
+        <label className="voice-audio-control voice-audio-control--expanded voice-sidebar-volume-popover">
+          <span className="voice-audio-control-label">{t('voice.shared_music')}</span>
+          <div className="voice-audio-control-row">
+            <input
+              type="range"
+              className="voice-volume-slider"
+              min={0}
+              max={100}
+              value={Math.round(musicPlaybackVolume * 100)}
+              onChange={(event) => setMusicPlaybackVolume(Number(event.target.value) / 100)}
+            />
+            <span className="voice-volume-value">{toVoiceVolumePercent(musicPlaybackVolume)}%</span>
+          </div>
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
 export function VoicePanel() {
   const { t } = useTranslation();
   const status = useVoiceStore((s) => s.status);
@@ -121,45 +455,41 @@ export function VoicePanel() {
   const peerNetwork = useVoiceStore((s) => s.peerNetwork);
   const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
   const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
-  const isMuted = useVoiceStore((s) => s.isMuted);
-  const inputVolume = useVoiceStore((s) => s.inputVolume);
-  const playbackVolume = useVoiceStore((s) => s.playbackVolume);
-  const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
-  const setInputVolume = useVoiceStore((s) => s.setInputVolume);
-  const setPlaybackVolume = useVoiceStore((s) => s.setPlaybackVolume);
-  const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
-  const leaveVoiceChannel = useVoiceStore((s) => s.leaveVoiceChannel);
   const clearError = useVoiceStore((s) => s.clearError);
-  const toggleMute = useVoiceStore((s) => s.toggleMute);
-  const disconnectCurrentStream = useStreamStore((s) => s.disconnectCurrentStream);
   const musicError = useMusicStore((s) => s.error);
-  const isDesktopMusicCaptureAvailable = useMusicStore((s) => s.isDesktopCaptureAvailable);
-  const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
-  const publishedMusic = useMusicStore((s) => s.publishedMusic);
-  const refreshDesktopCaptureAvailability = useMusicStore((s) => s.refreshDesktopCaptureAvailability);
-  const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
-  const startMusicShare = useMusicStore((s) => s.startMusicShare);
-  const stopMusicShare = useMusicStore((s) => s.stopMusicShare);
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
+  const myUsername = useAuthStore((s) => s.user?.username ?? null);
   const presenceMap = useGatewayStore((s) => s.presenceMap);
   const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
-  const isDesktop = typeof window !== 'undefined' && window.bakerDesktop?.platform === 'desktop';
+  const activeGuildId = useChatStore((s) => s.activeGuildId);
+  const channelsByGuild = useChatStore((s) => s.channelsByGuild);
+  const controls = useVoiceControls();
+
+  useEffect(() => {
+    if (!musicError) return;
+
+    const timeoutId = window.setTimeout(() => {
+      if (useMusicStore.getState().error === musicError) {
+        useMusicStore.setState({ error: null });
+      }
+    }, 5000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [musicError]);
 
   const participantNameById = useMemo(() => {
     const names: Record<string, string> = {};
     for (const participant of participants) {
       if (participant.userId === myUserId) {
-        names[participant.userId] = t('common.you');
+        names[participant.userId] = myUsername ?? t('common.you');
         continue;
       }
       names[participant.userId] = presenceMap[participant.userId]?.username ?? participant.userId;
     }
     return names;
-  }, [myUserId, participants, presenceMap, t]);
-
-  useEffect(() => {
-    refreshDesktopCaptureAvailability();
-  }, [refreshDesktopCaptureAvailability]);
+  }, [myUserId, myUsername, participants, presenceMap, t]);
 
   if (status === 'idle') return null;
 
@@ -195,41 +525,25 @@ export function VoicePanel() {
 
   if (!channelId) return null;
 
-  const isConnecting =
-    status === 'requesting_mic' || status === 'joining' || status === 'reconnecting' || status === 'leaving';
-
-  function handleLeave() {
-    void (async () => {
-      await stopMusicShare(sendCommandAwaitAck);
-      await disconnectCurrentStream(sendCommandAwaitAck);
-      await leaveVoiceChannel(sendCommandAwaitAck);
-    })();
-  }
-
-  function handleMute() {
-    toggleMute(sendRawCommand);
-  }
-
-  function handleMusicShareToggle() {
-    if (!channelId || isConnecting) {
-      return;
-    }
-
-    if (publishedMusic) {
-      void stopMusicShare(sendCommandAwaitAck);
-      return;
-    }
-
-    void startMusicShare(channelId, sendCommandAwaitAck, sendRawCommand);
-  }
+  const channelName =
+    (activeGuildId ? channelsByGuild[activeGuildId]?.find((channel) => channel.id === channelId)?.name : null) ??
+    channelId;
 
   return (
     <div className="voice-panel">
       <div className="voice-panel-header">
-        <span className="voice-panel-icon">VC</span>
-        <span className="voice-panel-label">
-          {isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
-        </span>
+        <div className="voice-panel-heading">
+          <span className="voice-panel-icon">VC</span>
+          <span className="voice-panel-label">
+            {controls.isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
+          </span>
+        </div>
+        <span className="voice-panel-member-count">{participants.length}</span>
+      </div>
+
+      <div className="voice-panel-channel" title={channelName}>
+        <span className="voice-panel-channel-dot" aria-hidden="true" />
+        <span>{channelName}</span>
       </div>
 
       {connectionIssue ? (
@@ -237,53 +551,6 @@ export function VoicePanel() {
           {t('voice.error_connection_issue')}
         </p>
       ) : null}
-
-      <div className="voice-audio-controls">
-        <label className="voice-audio-control">
-          <span className="voice-audio-control-label">{t('voice.mic_input')}</span>
-          <div className="voice-audio-control-row">
-            <input
-              type="range"
-              className="voice-volume-slider"
-              min={0}
-              max={200}
-              value={Math.round(inputVolume * 100)}
-              onChange={(event) => setInputVolume(Number(event.target.value) / 100)}
-            />
-            <span className="voice-volume-value">{Math.round(inputVolume * 100)}%</span>
-          </div>
-        </label>
-
-        <label className="voice-audio-control">
-          <span className="voice-audio-control-label">{t('voice.playback')}</span>
-          <div className="voice-audio-control-row">
-            <input
-              type="range"
-              className="voice-volume-slider"
-              min={0}
-              max={100}
-              value={Math.round(playbackVolume * 100)}
-              onChange={(event) => setPlaybackVolume(Number(event.target.value) / 100)}
-            />
-            <span className="voice-volume-value">{toVoiceVolumePercent(playbackVolume)}%</span>
-          </div>
-        </label>
-
-        <label className="voice-audio-control">
-          <span className="voice-audio-control-label">{t('voice.shared_music')}</span>
-          <div className="voice-audio-control-row">
-            <input
-              type="range"
-              className="voice-volume-slider"
-              min={0}
-              max={100}
-              value={Math.round(musicPlaybackVolume * 100)}
-              onChange={(event) => setMusicPlaybackVolume(Number(event.target.value) / 100)}
-            />
-            <span className="voice-volume-value">{toVoiceVolumePercent(musicPlaybackVolume)}%</span>
-          </div>
-        </label>
-      </div>
 
       {musicError ? (
         <p className="voice-panel-warning" role="alert">
@@ -296,7 +563,6 @@ export function VoicePanel() {
           const isMe = participant.userId === myUserId;
           const isSpeaking = speakingUserIds.has(participant.userId);
           const displayName = participantNameById[participant.userId] ?? participant.userId;
-          const participantVolume = participantPlaybackVolume[participant.userId] ?? DEFAULT_VOICE_PARTICIPANT_VOLUME;
           const connState = peerNetwork[participant.userId]?.connectionState;
           const connSuffix = connState && connState !== 'connected' ? ` [${connState}]` : '';
           const networkSnapshot = voiceNetworkByChannel[channelId]?.[participant.userId];
@@ -332,16 +598,13 @@ export function VoicePanel() {
               ]
                 .filter(Boolean)
                 .join(' ')}
+              title={netLabel}
             >
               <div className="voice-participant-row">
                 <span className="voice-participant-name" title={displayName}>
                   {displayName}
                 </span>
-                {!isMe ? (
-                  <span className="voice-participant-volume">
-                    {toVoiceVolumePercent(participantVolume)}%
-                  </span>
-                ) : null}
+                {isMe ? <span className="voice-participant-badge">{t('common.you')}</span> : null}
                 {participant.isMuted ? (
                   <span className="voice-participant-badge">{t('voice.badge_muted')}</span>
                 ) : null}
@@ -349,72 +612,11 @@ export function VoicePanel() {
                   <span className="voice-participant-badge">{t('voice.badge_speaking')}</span>
                 ) : null}
               </div>
-              <div className="voice-participant-meta-row">
-                <span className="voice-participant-net" title={netLabel}>
-                  {netLabel}
-                </span>
-              </div>
-              {!isMe ? (
-                <label className="voice-participant-slider-row">
-                  <span className="voice-participant-slider-label">{t('voice.volume')}</span>
-                  <input
-                    type="range"
-                    className="voice-volume-slider"
-                    min={0}
-                    max={100}
-                    value={Math.round(participantVolume * 100)}
-                    onChange={(event) =>
-                      setParticipantPlaybackVolume(participant.userId, Number(event.target.value) / 100)
-                    }
-                  />
-                </label>
-              ) : null}
             </li>
           );
         })}
       </ul>
 
-      <div className="voice-panel-controls">
-        {isDesktop ? (
-          <button
-            type="button"
-            className="btn-ghost voice-music-btn"
-            onClick={handleMusicShareToggle}
-            disabled={
-              isConnecting ||
-              (!publishedMusic && !isDesktopMusicCaptureAvailable) ||
-              publishedMusic?.status === 'capturing' ||
-              publishedMusic?.status === 'starting' ||
-              publishedMusic?.status === 'stopping'
-            }
-            title={
-              isDesktopMusicCaptureAvailable
-                ? t('voice.music_share_title')
-                : t('voice.music_share_unavailable_title')
-            }
-          >
-            {publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          className={`btn-ghost voice-mute-btn${isMuted ? ' voice-mute-btn--muted' : ''}`}
-          onClick={handleMute}
-          disabled={isConnecting}
-          title={isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
-        >
-          {isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}
-        </button>
-        <button
-          type="button"
-          className="btn-ghost voice-leave-btn"
-          onClick={handleLeave}
-          disabled={isConnecting}
-          title={t('voice.leave_title')}
-        >
-          {t('voice.leave')}
-        </button>
-      </div>
     </div>
   );
 }

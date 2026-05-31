@@ -8,6 +8,12 @@ import './stream-ui.css';
 import { useAuthStore } from '../auth/auth-store';
 import { sendCommandAwaitAck, sendRawCommand } from '../gateway/gateway-store';
 import { useGatewayStore } from '../gateway/gateway-store';
+import {
+  loadStreamQualityPreference,
+  loadStringOptionPreference,
+  saveClientPreferencesPatch,
+  saveStreamQualityPreference,
+} from '../preferences/client-preferences';
 import { useVoiceStore } from '../voice/voice-store';
 import { closeStreamPopup, ensureStreamPopupWindow } from './stream-popup-controller';
 import {
@@ -330,10 +336,18 @@ function StreamSection({
 
 export function StreamPanel() {
   const { t } = useTranslation();
-  const [streamQuality, setStreamQuality] = useState(DEFAULT_STREAM_QUALITY);
-  const [streamCodecPreference, setStreamCodecPreference] = useState<StreamCodecPreference>(
-    DEFAULT_STREAM_CODEC_PREFERENCE,
+  const [streamQuality, setStreamQuality] = useState(() =>
+    loadStreamQualityPreference(DEFAULT_STREAM_QUALITY, {
+      bitrates: STREAM_BITRATE_OPTIONS,
+      frameRates: STREAM_FRAME_RATE_OPTIONS,
+      resolutions: STREAM_RESOLUTION_OPTIONS,
+    }),
   );
+  const [streamCodecPreference, setStreamCodecPreference] = useState<StreamCodecPreference>(
+    () => loadStringOptionPreference('streamCodecPreference', DEFAULT_STREAM_CODEC_PREFERENCE, STREAM_CODEC_OPTIONS),
+  );
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isOwnedHealthOpen, setIsOwnedHealthOpen] = useState(false);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const voiceStatus = useVoiceStore((s) => s.status);
   const ownedStream = useStreamStore((s) => s.ownedStream);
@@ -396,6 +410,27 @@ export function StreamPanel() {
     }
 
     void startSharing(voiceChannelId, streamQuality, 'camera', sendCommandAwaitAck, sendRawCommand, streamCodecPreference);
+  }
+
+  function handleShareScreenFromDialog() {
+    setIsShareDialogOpen(false);
+    handleShareScreen();
+  }
+
+  function handleShareCameraFromDialog() {
+    setIsShareDialogOpen(false);
+    handleShareCamera();
+  }
+
+  function handleStreamQualityChange(patch: Partial<StreamQualitySettings>) {
+    const nextQuality = { ...streamQuality, ...patch };
+    setStreamQuality(nextQuality);
+    saveStreamQualityPreference(nextQuality);
+  }
+
+  function handleStreamCodecPreferenceChange(codecPreference: StreamCodecPreference) {
+    setStreamCodecPreference(codecPreference);
+    saveClientPreferencesPatch({ streamCodecPreference: codecPreference });
   }
 
   function renderCameraSourceControl(disabled: boolean) {
@@ -463,13 +498,13 @@ export function StreamPanel() {
       {error && <p className={'stream-panel-error'}>{error}</p>}
 
       <div className={'stream-panel-stack'}>
-        <StreamSection
-          className={'stream-section--watching'}
-          countLabel={watchingCountLabel}
-          title={t('stream.section_watching_title')}
-          description={t('stream.section_watching_description')}
-        >
-          {watchedStreamsInChannel.length > 0 ? (
+        {watchedStreamsInChannel.length > 0 ? (
+          <StreamSection
+            className={'stream-section--watching'}
+            countLabel={watchingCountLabel}
+            title={t('stream.section_watching_title')}
+            description={t('stream.section_watching_description')}
+          >
             <div className={'stream-watch-status-list'}>
               {watchedStreamsInChannel.map((stream) => (
                 <article key={stream.streamId} className={'stream-watch-row'}>
@@ -541,12 +576,8 @@ export function StreamPanel() {
                 </article>
               ))}
             </div>
-          ) : (
-            <div className={'stream-empty stream-empty--compact'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_watching_none')}</p>
-            </div>
-          )}
-        </StreamSection>
+          </StreamSection>
+        ) : null}
 
         <StreamSection
           className={'stream-section--owned'}
@@ -572,8 +603,15 @@ export function StreamPanel() {
                 ? renderCameraSourceControl(ownedStream.status !== 'live' || isSwitchingCamera)
                 : null}
               <StreamVideo muted stream={ownedStream.localPreviewStream} />
-              <OwnedStreamHealthPanel ownedStream={ownedStream} />
               <div className={'stream-card-actions'}>
+                <button
+                  type={'button'}
+                  className={'btn-ghost stream-action-btn'}
+                  onClick={() => setIsOwnedHealthOpen((current) => !current)}
+                  aria-expanded={isOwnedHealthOpen}
+                >
+                  {isOwnedHealthOpen ? t('stream.action_hide_stream_details') : t('stream.action_show_stream_details')}
+                </button>
                 <button
                   type={'button'}
                   className={'btn-ghost stream-action-btn'}
@@ -585,92 +623,18 @@ export function StreamPanel() {
                   {t('stream.action_stop_sharing')}
                 </button>
               </div>
+              {isOwnedHealthOpen ? <OwnedStreamHealthPanel ownedStream={ownedStream} /> : null}
             </article>
           ) : canShare ? (
             <div className={'stream-empty stream-empty--actions'}>
               <p className={'stream-empty-copy'}>{t('stream.section_owned_empty')}</p>
-              <div className={'stream-quality-controls'}>
-                <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_resolution')}</span>
-                  <select
-                    className={'stream-quality-select'}
-                    value={streamQuality.resolution}
-                    onChange={(event) =>
-                      setStreamQuality((current) => ({
-                        ...current,
-                        resolution: event.target.value as StreamQualitySettings['resolution'],
-                      }))
-                    }
-                  >
-                    {STREAM_RESOLUTION_OPTIONS.map((resolution) => (
-                      <option key={resolution} value={resolution}>
-                        {resolution}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_frame_rate')}</span>
-                  <select
-                    className={'stream-quality-select'}
-                    value={String(streamQuality.frameRate)}
-                    onChange={(event) =>
-                      setStreamQuality((current) => ({
-                        ...current,
-                        frameRate: Number(event.target.value) as StreamQualitySettings['frameRate'],
-                      }))
-                    }
-                  >
-                    {STREAM_FRAME_RATE_OPTIONS.map((frameRate) => (
-                      <option key={frameRate} value={frameRate}>
-                        {frameRate} FPS
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_bitrate')}</span>
-                  <select
-                    className={'stream-quality-select'}
-                    value={String(streamQuality.bitrateKbps)}
-                    onChange={(event) =>
-                      setStreamQuality((current) => ({
-                        ...current,
-                        bitrateKbps: Number(event.target.value) as StreamQualitySettings['bitrateKbps'],
-                      }))
-                    }
-                  >
-                    {STREAM_BITRATE_OPTIONS.map((bitrate) => (
-                      <option key={bitrate} value={bitrate}>
-                        {bitrate} kbps
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_codec')}</span>
-                  <select
-                    className={'stream-quality-select'}
-                    value={streamCodecPreference}
-                    onChange={(event) => setStreamCodecPreference(event.target.value as StreamCodecPreference)}
-                  >
-                    {STREAM_CODEC_OPTIONS.map((codecPreference) => (
-                      <option key={codecPreference} value={codecPreference}>
-                        {codecPreferenceLabel(t, codecPreference)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {renderCameraSourceControl(isSwitchingCamera)}
-              <div className={'stream-share-actions'}>
-                <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={handleShareScreen}>
-                  {t('stream.action_share_screen')}
-                </button>
-                <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={handleShareCamera}>
-                  {t('stream.action_share_camera')}
-                </button>
-              </div>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-action-btn stream-action-btn--primary stream-start-btn'}
+                onClick={() => setIsShareDialogOpen(true)}
+              >
+                {t('stream.action_start_stream')}
+              </button>
             </div>
           ) : (
             <div className={'stream-empty'}>
@@ -679,13 +643,13 @@ export function StreamPanel() {
           )}
         </StreamSection>
 
-        <StreamSection
-          className={'stream-section--available'}
-          countLabel={availableStreams.length > 0 ? availableCountLabel : undefined}
-          title={t('stream.section_available_title')}
-          description={t('stream.section_available_description')}
-        >
-          {availableStreams.length > 0 ? (
+        {availableStreams.length > 0 ? (
+          <StreamSection
+            className={'stream-section--available'}
+            countLabel={availableCountLabel}
+            title={t('stream.section_available_title')}
+            description={t('stream.section_available_description')}
+          >
             <div className={'stream-available-list'}>
               {availableStreams.map((stream) => (
                 <article key={stream.streamId} className={'stream-card stream-card--available'}>
@@ -711,13 +675,136 @@ export function StreamPanel() {
                 </article>
               ))}
             </div>
-          ) : (
-            <div className={'stream-empty'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_available_none')}</p>
-            </div>
-          )}
-        </StreamSection>
+          </StreamSection>
+        ) : null}
       </div>
+
+      {canShare && isShareDialogOpen ? (
+        <div
+          className={'stream-share-dialog-backdrop'}
+          role={'presentation'}
+          onMouseDown={() => setIsShareDialogOpen(false)}
+        >
+          <section
+            className={'stream-share-dialog'}
+            role={'dialog'}
+            aria-modal={'true'}
+            aria-labelledby={'stream-share-dialog-title'}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header className={'stream-share-dialog-header'}>
+              <div>
+                <p className={'stream-panel-icon stream-share-dialog-kicker'}>LIVE</p>
+                <h2 id={'stream-share-dialog-title'} className={'stream-share-dialog-title'}>
+                  {t('stream.share_dialog_title')}
+                </h2>
+                <p className={'stream-share-dialog-copy'}>{t('stream.share_dialog_description')}</p>
+              </div>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-share-dialog-close'}
+                onClick={() => setIsShareDialogOpen(false)}
+              >
+                {t('stream.share_dialog_close')}
+              </button>
+            </header>
+
+            <div className={'stream-share-dialog-body'}>
+              <div className={'stream-quality-controls'}>
+                <label className={'stream-quality-field'}>
+                  <span className={'stream-quality-label'}>{t('stream.quality_resolution')}</span>
+                  <select
+                    className={'stream-quality-select'}
+                    value={streamQuality.resolution}
+                    onChange={(event) =>
+                      handleStreamQualityChange({
+                        resolution: event.target.value as StreamQualitySettings['resolution'],
+                      })
+                    }
+                  >
+                    {STREAM_RESOLUTION_OPTIONS.map((resolution) => (
+                      <option key={resolution} value={resolution}>
+                        {resolution}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={'stream-quality-field'}>
+                  <span className={'stream-quality-label'}>{t('stream.quality_frame_rate')}</span>
+                  <select
+                    className={'stream-quality-select'}
+                    value={String(streamQuality.frameRate)}
+                    onChange={(event) =>
+                      handleStreamQualityChange({
+                        frameRate: Number(event.target.value) as StreamQualitySettings['frameRate'],
+                      })
+                    }
+                  >
+                    {STREAM_FRAME_RATE_OPTIONS.map((frameRate) => (
+                      <option key={frameRate} value={frameRate}>
+                        {frameRate} FPS
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={'stream-quality-field'}>
+                  <span className={'stream-quality-label'}>{t('stream.quality_bitrate')}</span>
+                  <select
+                    className={'stream-quality-select'}
+                    value={String(streamQuality.bitrateKbps)}
+                    onChange={(event) =>
+                      handleStreamQualityChange({
+                        bitrateKbps: Number(event.target.value) as StreamQualitySettings['bitrateKbps'],
+                      })
+                    }
+                  >
+                    {STREAM_BITRATE_OPTIONS.map((bitrate) => (
+                      <option key={bitrate} value={bitrate}>
+                        {bitrate} kbps
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={'stream-quality-field'}>
+                  <span className={'stream-quality-label'}>{t('stream.quality_codec')}</span>
+                  <select
+                    className={'stream-quality-select'}
+                    value={streamCodecPreference}
+                    onChange={(event) =>
+                      handleStreamCodecPreferenceChange(event.target.value as StreamCodecPreference)
+                    }
+                  >
+                    {STREAM_CODEC_OPTIONS.map((codecPreference) => (
+                      <option key={codecPreference} value={codecPreference}>
+                        {codecPreferenceLabel(t, codecPreference)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {renderCameraSourceControl(isSwitchingCamera)}
+            </div>
+
+            <footer className={'stream-share-dialog-actions'}>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-action-btn'}
+                onClick={handleShareScreenFromDialog}
+              >
+                {t('stream.action_share_screen')}
+              </button>
+              <button
+                type={'button'}
+                className={'btn-ghost stream-action-btn stream-action-btn--primary'}
+                onClick={handleShareCameraFromDialog}
+                disabled={isSwitchingCamera}
+              >
+                {t('stream.action_share_camera')}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </aside>
   );
 }

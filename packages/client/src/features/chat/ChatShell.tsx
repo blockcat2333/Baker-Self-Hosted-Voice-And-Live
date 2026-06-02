@@ -230,7 +230,11 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
             {selectedVoiceChannel ? (
               <div className="chat-main-pane-split">
                 <section className="chat-main-split-section chat-main-split-section--voice">
-                  <VoiceChannelView channelId={selectedVoiceChannel.id} channelName={selectedVoiceChannel.name} />
+                  <VoiceChannelView
+                    channelId={selectedVoiceChannel.id}
+                    channelName={selectedVoiceChannel.name}
+                    showConnectionHealth={!showDataDetails}
+                  />
                 </section>
                 <section className="chat-main-split-section chat-main-split-section--messages">
                   <MessagePanel api={api} />

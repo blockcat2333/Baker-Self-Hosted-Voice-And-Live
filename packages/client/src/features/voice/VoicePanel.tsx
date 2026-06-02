@@ -255,16 +255,23 @@ export function VoiceAudioDeviceControls() {
 export interface VoiceChannelViewProps {
   channelId: string;
   channelName: string;
+  showConnectionHealth?: boolean;
 }
 
-export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewProps) {
+export function VoiceChannelView({ channelId, channelName, showConnectionHealth = false }: VoiceChannelViewProps) {
   const { t } = useTranslation();
   const connectedChannelId = useVoiceStore((s) => s.channelId);
+  const connectionIssue = useVoiceStore((s) => s.connectionIssue);
+  const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
+  const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
   const participants = useVoiceStore((s) => s.participants);
   const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
   const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
   const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
   const clearParticipantPlaybackVolume = useVoiceStore((s) => s.clearParticipantPlaybackVolume);
+  const status = useVoiceStore((s) => s.status);
+  const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
+  const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
   const voiceRosterByChannel = useGatewayStore((s) => s.voiceRosterByChannel);
   const presenceMap = useGatewayStore((s) => s.presenceMap);
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
@@ -273,6 +280,58 @@ export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewPro
   const watchStream = useStreamStore((s) => s.watchStream);
   const [expandedVolumeUserIds, setExpandedVolumeUserIds] = useState<Set<string>>(() => new Set());
   const visibleParticipants = connectedChannelId === channelId ? participants : (voiceRosterByChannel[channelId] ?? []);
+  const isViewingConnectedVoiceChannel = connectedChannelId === channelId;
+  const networkSnapshot = isViewingConnectedVoiceChannel && myUserId ? voiceNetworkByChannel[channelId]?.[myUserId] : null;
+  const gatewayLossPct = networkSnapshot?.gatewayLossPct ?? null;
+  const mediaLossPct = isViewingConnectedVoiceChannel
+    ? (localMediaSelfLossPct ?? networkSnapshot?.mediaSelfLossPct ?? null)
+    : null;
+  const localStatsStale =
+    isViewingConnectedVoiceChannel && localMediaSelfUpdatedAt !== null && Date.now() - localMediaSelfUpdatedAt > 15_000;
+  const isStale = isViewingConnectedVoiceChannel && (networkSnapshot?.stale ?? localStatsStale);
+  const connectionHealth = useMemo(() => {
+    if (!isViewingConnectedVoiceChannel) {
+      return { label: t('voice.connection_health_not_connected'), level: 'warn' };
+    }
+
+    if (connectionIssue || status === 'error') {
+      return { label: t('voice.connection_health_error'), level: 'danger' };
+    }
+
+    if (status === 'reconnecting') {
+      return { label: t('voice.connection_health_reconnecting'), level: 'warn' };
+    }
+
+    if (status === 'joining' || status === 'requesting_mic') {
+      return { label: t('voice.connection_health_connecting'), level: 'warn' };
+    }
+
+    if (status === 'leaving') {
+      return { label: t('voice.connection_health_leaving'), level: 'warn' };
+    }
+
+    if ((gatewayLossPct ?? 0) > 0) {
+      return { label: t('voice.connection_health_gateway_loss'), level: (gatewayLossPct ?? 0) >= 5 ? 'danger' : 'warn' };
+    }
+
+    if ((mediaLossPct ?? 0) > 0) {
+      return { label: t('voice.connection_health_media_loss'), level: (mediaLossPct ?? 0) >= 5 ? 'danger' : 'warn' };
+    }
+
+    if (gatewayRttMs !== null && gatewayRttMs > 300) {
+      return { label: t('voice.connection_health_bad_latency'), level: 'danger' };
+    }
+
+    if (gatewayRttMs !== null && gatewayRttMs >= 150) {
+      return { label: t('voice.connection_health_high_latency'), level: 'warn' };
+    }
+
+    if (isStale) {
+      return { label: t('voice.connection_health_stale'), level: 'warn' };
+    }
+
+    return { label: t('voice.connection_health_stable'), level: 'stable' };
+  }, [connectionIssue, gatewayLossPct, gatewayRttMs, isStale, isViewingConnectedVoiceChannel, mediaLossPct, status, t]);
   const liveStreamsByUserId = useMemo(() => {
     const next: Record<string, { streamId: string }> = {};
     for (const stream of Object.values(roomStateByChannel[channelId] ?? {})) {
@@ -306,6 +365,11 @@ export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewPro
           <span className="voice-channel-view-dot" aria-hidden="true" />
           <span>{t('voice.member_count', { count: visibleParticipants.length })}</span>
           <span>{t('voice.public_channel')}</span>
+          {showConnectionHealth ? (
+            <span className={`voice-channel-connection-health voice-channel-connection-health--${connectionHealth.level}`}>
+              {t('voice.connection_health_label', { status: connectionHealth.label })}
+            </span>
+          ) : null}
         </div>
       </div>
 

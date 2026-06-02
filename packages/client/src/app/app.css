@@ -1137,7 +1137,7 @@ body {
 .chat-main-pane-split {
   display: grid;
   flex: 1 1 auto;
-  grid-template-rows: minmax(220px, 45fr) minmax(260px, 55fr);
+  grid-template-rows: minmax(220px, 50fr) minmax(260px, 50fr);
   min-height: 0;
   min-width: 0;
 }
@@ -1150,7 +1150,7 @@ body {
 
 .chat-main-split-section--voice {
   border-bottom: 1px solid var(--border-0);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .chat-main-split-section--messages {
@@ -1313,6 +1313,7 @@ body {
   gap: 18px;
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
   padding: 24px;
 }
 
@@ -1344,6 +1345,24 @@ body {
   justify-content: flex-end;
 }
 
+.voice-channel-connection-health {
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.voice-channel-connection-health--stable {
+  color: var(--success-text);
+}
+
+.voice-channel-connection-health--warn {
+  color: #fde68a;
+}
+
+.voice-channel-connection-health--danger {
+  color: var(--danger-text);
+}
+
 .voice-channel-view-dot,
 .voice-bottom-status-dot {
   background: var(--green-0);
@@ -1356,10 +1375,13 @@ body {
 .voice-channel-view-members {
   align-items: start;
   display: grid;
+  flex: 0 1 auto;
   gap: 8px;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   list-style: none;
   margin: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 0;
 }
 
@@ -1519,7 +1541,7 @@ body {
   flex: 1;
   flex-direction: column;
   justify-content: center;
-  min-height: 220px;
+  min-height: 0;
   text-align: center;
 }
 
@@ -1947,7 +1969,7 @@ body {
   }
 
   .chat-main-pane-split {
-    grid-template-rows: minmax(180px, 42fr) minmax(260px, 58fr);
+    grid-template-rows: minmax(180px, 48fr) minmax(260px, 52fr);
   }
 
   .chat-main-pane--stream {

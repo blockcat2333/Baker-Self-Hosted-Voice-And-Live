@@ -34,7 +34,7 @@ import {
   useStreamStore,
 } from './stream-store';
 
-const STREAM_DETAIL_STATS_POLL_INTERVAL_MS = 1000;
+const STREAM_DASHBOARD_REFRESH_INTERVAL_MS = 1000;
 
 type VoiceHealthLevel = 'danger' | 'good' | 'warn';
 type LiveStatsState =
@@ -153,22 +153,27 @@ function limitationReasonLabel(t: TFunction, reason: OwnedStreamVideoStats['qual
 
 function VoiceHealthPanel() {
   const { t } = useTranslation();
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
   const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
   const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
   const channelId = useVoiceStore((s) => s.channelId);
   const connectionIssue = useVoiceStore((s) => s.connectionIssue);
-  const isMuted = useVoiceStore((s) => s.isMuted);
   const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
   const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
   const participants = useVoiceStore((s) => s.participants);
   const status = useVoiceStore((s) => s.status);
 
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), STREAM_DASHBOARD_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
   const networkSnapshot = channelId && myUserId ? voiceNetworkByChannel[channelId]?.[myUserId] : null;
   const gatewayLossPct = networkSnapshot?.gatewayLossPct ?? null;
   const mediaLossPct = localMediaSelfLossPct ?? networkSnapshot?.mediaSelfLossPct ?? null;
   const localStatsStale =
-    localMediaSelfUpdatedAt !== null && Date.now() - localMediaSelfUpdatedAt > 15_000;
+    localMediaSelfUpdatedAt !== null && nowMs - localMediaSelfUpdatedAt > 15_000;
   const isStale = networkSnapshot?.stale ?? localStatsStale;
 
   const healthLevel: VoiceHealthLevel = useMemo(() => {
@@ -205,46 +210,41 @@ function VoiceHealthPanel() {
 
   return (
     <section className={'stream-section stream-dashboard-section stream-dashboard-section--voice'}>
-      <header className={'stream-section-header'}>
-        <div>
+      <div className={`stream-voice-health-bubble stream-voice-health-bubble--${healthLevel}`}>
+        <header className={'stream-voice-health-header'}>
           <h2 className={'stream-section-title'}>{t('stream.voice_health_title')}</h2>
-          <p className={'stream-section-description'}>{t('stream.voice_health_description')}</p>
-        </div>
-        <span className={`stream-pill stream-pill--${healthLevel}`}>{healthLabel}</span>
-      </header>
+          <span className={`stream-pill stream-pill--${healthLevel}`}>{healthLabel}</span>
+        </header>
 
-      <div className={'stream-dashboard-grid'}>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_connection')}</span>
-          <strong>{voiceStatusLabel(t, status)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_gateway_rtt')}</span>
-          <strong>{formatLatency(gatewayRttMs)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_gateway_loss')}</span>
-          <strong>{formatPercent(gatewayLossPct)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_media_loss')}</span>
-          <strong>{formatPercent(mediaLossPct)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_freshness')}</span>
-          <strong>{isStale ? t('stream.voice_health_stale') : t('stream.voice_health_fresh')}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_members')}</span>
-          <strong>{participants.length}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.voice_health_microphone')}</span>
-          <strong>{isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}</strong>
-        </div>
+        <dl className={'stream-voice-health-list'}>
+          <div className={'stream-voice-health-row'}>
+            <dt>{t('stream.voice_health_connection')}</dt>
+            <dd>{voiceStatusLabel(t, status)}</dd>
+          </div>
+          <div className={'stream-voice-health-row'}>
+            <dt>{t('stream.voice_health_gateway_rtt')}</dt>
+            <dd>{formatLatency(gatewayRttMs)}</dd>
+          </div>
+          <div className={'stream-voice-health-row'}>
+            <dt>{t('stream.voice_health_gateway_loss')}</dt>
+            <dd>{formatPercent(gatewayLossPct)}</dd>
+          </div>
+          <div className={'stream-voice-health-row'}>
+            <dt>{t('stream.voice_health_media_loss')}</dt>
+            <dd>{formatPercent(mediaLossPct)}</dd>
+          </div>
+          <div className={'stream-voice-health-row'}>
+            <dt>{t('stream.voice_health_freshness')}</dt>
+            <dd>{isStale ? t('stream.voice_health_stale') : t('stream.voice_health_fresh')}</dd>
+          </div>
+          <div className={'stream-voice-health-row'}>
+            <dt>{t('stream.voice_health_members')}</dt>
+            <dd>{participants.length}</dd>
+          </div>
+        </dl>
+
+        {connectionIssue ? <p className={'stream-voice-health-warning'}>{t('voice.error_connection_issue')}</p> : null}
       </div>
-
-      {connectionIssue ? <p className={'stream-dashboard-warning'}>{t('voice.error_connection_issue')}</p> : null}
     </section>
   );
 }
@@ -287,7 +287,7 @@ function LiveDetailPanel() {
     void refreshStats();
     interval = setInterval(() => {
       void refreshStats();
-    }, STREAM_DETAIL_STATS_POLL_INTERVAL_MS);
+    }, STREAM_DASHBOARD_REFRESH_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -319,80 +319,73 @@ function LiveDetailPanel() {
 
   return (
     <section className={'stream-section stream-dashboard-section stream-dashboard-section--live'}>
-      <header className={'stream-section-header'}>
-        <div>
+      <div className={'stream-live-detail-bubble'}>
+        <header className={'stream-live-detail-header'}>
           <h2 className={'stream-section-title'}>{t('stream.live_detail_title')}</h2>
-          <p className={'stream-section-description'}>
-            {ownedStream
-              ? t('stream.live_detail_owned_description')
-              : watchedStream
-                ? t('stream.live_detail_watched_description')
-                : t('stream.live_detail_empty')}
-          </p>
-        </div>
-        <span className={'stream-pill'}>{liveStatus}</span>
-      </header>
+          <span className={'stream-pill'}>{liveStatus}</span>
+        </header>
 
-      <div className={'stream-dashboard-grid'}>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.live_detail_source')}</span>
-          <strong>{sourceLabel(t, ownedStream?.sourceType ?? watchedStream?.sourceType ?? null)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.live_detail_viewers')}</span>
-          <strong>{ownedStream?.viewers.length ?? watchedStream?.viewers.length ?? 0}</strong>
-        </div>
+        <dl className={'stream-live-detail-list'}>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.live_detail_source')}</dt>
+            <dd>{sourceLabel(t, ownedStream?.sourceType ?? watchedStream?.sourceType ?? null)}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.live_detail_viewers')}</dt>
+            <dd>{ownedStream?.viewers.length ?? watchedStream?.viewers.length ?? 0}</dd>
+          </div>
         {ownedStream ? (
-          <div className={'stream-dashboard-item'}>
-            <span>{t('stream.live_detail_target_quality')}</span>
-            <strong>{`${ownedStream.quality.resolution} / ${ownedStream.quality.frameRate} fps / ${ownedStream.quality.bitrateKbps} kbps`}</strong>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.live_detail_target_quality')}</dt>
+            <dd>{`${ownedStream.quality.resolution} / ${ownedStream.quality.frameRate} fps / ${ownedStream.quality.bitrateKbps} kbps`}</dd>
           </div>
         ) : watchedStream ? (
-          <div className={'stream-dashboard-item'}>
-            <span>{t('stream.popup_stream_volume')}</span>
-            <strong>{formatVolumeLabel(watchedStream.playbackVolume)}</strong>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stream_volume')}</dt>
+            <dd>{formatVolumeLabel(watchedStream.playbackVolume)}</dd>
           </div>
         ) : null}
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_codec')}</span>
-          <strong>{formatNullableValue(activeStats?.codec)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_resolution')}</span>
-          <strong>{formatNullableValue(activeStats?.resolution)}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_frame_rate')}</span>
-          <strong>{formatNullableValue(activeStats?.frameRate, 'fps')}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_bitrate')}</span>
-          <strong>{formatNullableValue(activeStats?.bitrateKbps, 'kbps')}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_packet_loss')}</span>
-          <strong>{statsState.kind === 'watched' ? formatPacketLoss(statsState.stats) : '--'}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_jitter')}</span>
-          <strong>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.jitterMs, 'ms') : '--'}</strong>
-        </div>
-        <div className={'stream-dashboard-item'}>
-          <span>{t('stream.popup_stats_frames_dropped')}</span>
-          <strong>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.framesDropped) : '--'}</strong>
-        </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_codec')}</dt>
+            <dd>{formatNullableValue(activeStats?.codec)}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_resolution')}</dt>
+            <dd>{formatNullableValue(activeStats?.resolution)}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_frame_rate')}</dt>
+            <dd>{formatNullableValue(activeStats?.frameRate, 'fps')}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_bitrate')}</dt>
+            <dd>{formatNullableValue(activeStats?.bitrateKbps, 'kbps')}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_packet_loss')}</dt>
+            <dd>{statsState.kind === 'watched' ? formatPacketLoss(statsState.stats) : '--'}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_jitter')}</dt>
+            <dd>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.jitterMs, 'ms') : '--'}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.popup_stats_frames_dropped')}</dt>
+            <dd>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.framesDropped) : '--'}</dd>
+          </div>
         {statsState.kind === 'owned' ? (
           <>
-            <div className={'stream-dashboard-item'}>
-              <span>{t('stream.health_active_peers')}</span>
-              <strong>{statsState.stats?.activePeerCount ?? 0}</strong>
+            <div className={'stream-live-detail-row'}>
+              <dt>{t('stream.health_active_peers')}</dt>
+              <dd>{statsState.stats?.activePeerCount ?? 0}</dd>
             </div>
-            <div className={'stream-dashboard-item'}>
-              <span>{t('stream.health_limitation_reason')}</span>
-              <strong>{limitationReasonLabel(t, statsState.stats?.qualityLimitationReason)}</strong>
+            <div className={'stream-live-detail-row'}>
+              <dt>{t('stream.health_limitation_reason')}</dt>
+              <dd>{limitationReasonLabel(t, statsState.stats?.qualityLimitationReason)}</dd>
             </div>
           </>
         ) : null}
+        </dl>
       </div>
     </section>
   );

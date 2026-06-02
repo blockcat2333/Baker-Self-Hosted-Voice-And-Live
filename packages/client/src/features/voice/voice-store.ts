@@ -34,9 +34,15 @@ import {
   applyPreferredAudioOutputDevice,
   buildPreferredAudioInputConstraints,
 } from '../media/audio-device-store';
-import { loadNumberPreference, saveNumberPreference } from '../preferences/client-preferences';
+import {
+  loadNumberPreference,
+  loadNumberRecordPreference,
+  saveNumberPreference,
+  saveNumberRecordPreference,
+} from '../preferences/client-preferences';
 import {
   clampVoiceInputVolume,
+  clampVoiceParticipantPlaybackVolume,
   clampVoicePlaybackVolume,
   computeEffectiveParticipantPlaybackVolume,
   DEFAULT_VOICE_INPUT_VOLUME,
@@ -77,6 +83,7 @@ let lastLocalMuteChangedAtMs = 0;
 let lastLocalMuteValue: boolean | null = null;
 
 const remoteAudioElements = new Map<string, HTMLAudioElement>();
+const remoteAudioGainNodes = new Map<string, { context: AudioContext; gainNode: GainNode }>();
 
 function attachRemoteAudio(audio: HTMLAudioElement) {
   if (typeof document !== 'undefined') {
@@ -89,6 +96,19 @@ function detachRemoteAudio(audio: HTMLAudioElement) {
   audio.pause();
   audio.srcObject = null;
   audio.parentNode?.removeChild(audio);
+}
+
+function saveParticipantPlaybackVolumePreference(participantPlaybackVolume: Record<string, number>) {
+  saveNumberRecordPreference('voiceParticipantPlaybackVolume', participantPlaybackVolume);
+}
+
+function detachRemoteAudioGain(userId: string) {
+  const gain = remoteAudioGainNodes.get(userId);
+  if (!gain) return;
+  remoteAudioGainNodes.delete(userId);
+  void gain.context.close().catch(() => {
+    // Best-effort cleanup only.
+  });
 }
 
 let networkStatsTimer: ReturnType<typeof setInterval> | null = null;
@@ -208,10 +228,34 @@ function getEffectivePlaybackVolumeForUser(userId: string) {
   return computeEffectiveParticipantPlaybackVolume(state.playbackVolume, perUser);
 }
 
+function ensureRemoteAudioGain(userId: string, audio: HTMLAudioElement) {
+  const existing = remoteAudioGainNodes.get(userId);
+  if (existing) return existing;
+  if (typeof AudioContext === 'undefined') return null;
+
+  const context = new AudioContext();
+  const source = context.createMediaElementSource(audio);
+  const gainNode = context.createGain();
+  source.connect(gainNode);
+  gainNode.connect(context.destination);
+  const next = { context, gainNode };
+  remoteAudioGainNodes.set(userId, next);
+  void context.resume().catch(() => {
+    // Playback is already user-gesture gated by the voice join flow.
+  });
+  return next;
+}
+
 function applyRemoteAudioElementVolumeForUser(userId: string) {
   const audio = remoteAudioElements.get(userId);
   if (!audio) return;
-  audio.volume = getEffectivePlaybackVolumeForUser(userId);
+  const effectiveVolume = getEffectivePlaybackVolumeForUser(userId);
+  audio.volume = Math.max(0, Math.min(1, effectiveVolume));
+
+  const gain = effectiveVolume > 1 ? ensureRemoteAudioGain(userId, audio) : remoteAudioGainNodes.get(userId);
+  if (gain) {
+    gain.gainNode.gain.value = effectiveVolume > 1 ? effectiveVolume : 1;
+  }
 }
 
 function syncRemoteAudioElementVolumes() {
@@ -605,7 +649,8 @@ function teardown() {
   sfuSession = null;
   pendingSfuVoiceProducers = [];
 
-  for (const [, audio] of remoteAudioElements) {
+  for (const [userId, audio] of remoteAudioElements) {
+    detachRemoteAudioGain(userId);
     detachRemoteAudio(audio);
   }
   remoteAudioElements.clear();
@@ -646,7 +691,8 @@ function teardownPeersForReconnect() {
   sfuSession = null;
   pendingSfuVoiceProducers = [];
 
-  for (const [, audio] of remoteAudioElements) {
+  for (const [userId, audio] of remoteAudioElements) {
+    detachRemoteAudioGain(userId);
     detachRemoteAudio(audio);
   }
   remoteAudioElements.clear();
@@ -824,7 +870,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   connectionIssue: null,
   inputVolume: loadNumberPreference('voiceInputVolume', DEFAULT_VOICE_INPUT_VOLUME, clampVoiceInputVolume),
   playbackVolume: loadNumberPreference('voicePlaybackVolume', DEFAULT_VOICE_PLAYBACK_VOLUME, clampVoicePlaybackVolume),
-  participantPlaybackVolume: {},
+  participantPlaybackVolume: loadNumberRecordPreference(
+    'voiceParticipantPlaybackVolume',
+    clampVoiceParticipantPlaybackVolume,
+  ),
   localMediaSelfLossPct: null,
   localMediaSelfUpdatedAt: null,
   peerNetwork: {},
@@ -1130,25 +1179,34 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   },
 
   setParticipantPlaybackVolume(userId, volume) {
-    const clampedVolume = clampVoicePlaybackVolume(volume);
+    const clampedVolume = clampVoiceParticipantPlaybackVolume(volume);
+    let nextParticipantPlaybackVolume: Record<string, number> | null = null;
     set((state) => ({
-      participantPlaybackVolume: {
+      participantPlaybackVolume: (nextParticipantPlaybackVolume = {
         ...state.participantPlaybackVolume,
         [userId]: clampedVolume,
-      },
+      }),
     }));
+    if (nextParticipantPlaybackVolume) {
+      saveParticipantPlaybackVolumePreference(nextParticipantPlaybackVolume);
+    }
     applyRemoteAudioElementVolumeForUser(userId);
   },
 
   clearParticipantPlaybackVolume(userId) {
+    let nextParticipantPlaybackVolume: Record<string, number> | null = null;
     set((state) => {
       if (state.participantPlaybackVolume[userId] === undefined) {
         return state;
       }
       const next = { ...state.participantPlaybackVolume };
       delete next[userId];
+      nextParticipantPlaybackVolume = next;
       return { participantPlaybackVolume: next };
     });
+    if (nextParticipantPlaybackVolume) {
+      saveParticipantPlaybackVolumePreference(nextParticipantPlaybackVolume);
+    }
     applyRemoteAudioElementVolumeForUser(userId);
   },
 
@@ -1191,6 +1249,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
           peersWithRemoteAudio.delete(p.userId);
           const remoteAudio = remoteAudioElements.get(p.userId);
           if (remoteAudio) {
+            detachRemoteAudioGain(p.userId);
             detachRemoteAudio(remoteAudio);
             remoteAudioElements.delete(p.userId);
           }
@@ -1216,19 +1275,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       }
     }
 
-    const activeUserIds = new Set(participants.map((participant) => participant.userId));
-    set((state) => {
-      const nextParticipantPlaybackVolume: Record<string, number> = {};
-      for (const [userId, volume] of Object.entries(state.participantPlaybackVolume)) {
-        if (activeUserIds.has(userId)) {
-          nextParticipantPlaybackVolume[userId] = volume;
-        }
-      }
-      return {
-        participants,
-        participantPlaybackVolume: nextParticipantPlaybackVolume,
-      };
-    });
+    set({ participants });
 
     clearVoiceConnectionIssueIfResolved();
   },
@@ -1331,6 +1378,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
           peersWithRemoteAudio.delete(fromUserId);
           const remoteAudio = remoteAudioElements.get(fromUserId);
           if (remoteAudio) {
+            detachRemoteAudioGain(fromUserId);
             detachRemoteAudio(remoteAudio);
             remoteAudioElements.delete(fromUserId);
           }
@@ -1361,6 +1409,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     pendingSfuVoiceProducers = pendingSfuVoiceProducers.filter((queued) => queued.id !== producer.id);
     const remoteAudio = remoteAudioElements.get(producer.userId);
     if (remoteAudio) {
+      detachRemoteAudioGain(producer.userId);
       detachRemoteAudio(remoteAudio);
       remoteAudioElements.delete(producer.userId);
     }

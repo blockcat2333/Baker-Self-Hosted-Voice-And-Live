@@ -5,9 +5,11 @@ export const CLIENT_PREFERENCES_STORAGE_KEY = 'baker_client_preferences_v1';
 export interface ClientPreferences {
   musicPlaybackVolume?: number;
   selectedCameraKey?: string | null;
+  showDataDetails?: boolean;
   streamCodecPreference?: string;
   streamQuality?: Partial<StreamQualitySettings>;
   voiceInputVolume?: number;
+  voiceParticipantPlaybackVolume?: Record<string, number>;
   voicePlaybackVolume?: number;
 }
 
@@ -52,6 +54,11 @@ export function loadClientPreferences(): ClientPreferences {
   return readRawPreferences();
 }
 
+export function loadBooleanPreference(key: keyof ClientPreferences, fallback: boolean) {
+  const value = readRawPreferences()[key];
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 export function saveClientPreferencesPatch(patch: ClientPreferences) {
   writeRawPreferences({
     ...readRawPreferences(),
@@ -65,6 +72,26 @@ export function loadNumberPreference(key: keyof ClientPreferences, fallback: num
 }
 
 export function saveNumberPreference(key: keyof ClientPreferences, value: number) {
+  saveClientPreferencesPatch({ [key]: value });
+}
+
+export function loadNumberRecordPreference(
+  key: keyof ClientPreferences,
+  clamp: (value: number) => number,
+): Record<string, number> {
+  const value = readRawPreferences()[key];
+  if (!isRecord(value)) return {};
+
+  const next: Record<string, number> = {};
+  for (const [recordKey, recordValue] of Object.entries(value)) {
+    if (typeof recordValue === 'number' && Number.isFinite(recordValue)) {
+      next[recordKey] = clamp(recordValue);
+    }
+  }
+  return next;
+}
+
+export function saveNumberRecordPreference(key: keyof ClientPreferences, value: Record<string, number>) {
   saveClientPreferencesPatch({ [key]: value });
 }
 

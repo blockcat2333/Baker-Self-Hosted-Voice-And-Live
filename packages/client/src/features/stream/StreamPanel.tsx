@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import type { StreamQualitySettings } from '@baker/protocol';
@@ -6,8 +6,8 @@ import type { StreamQualitySettings } from '@baker/protocol';
 import './stream-ui.css';
 
 import { useAuthStore } from '../auth/auth-store';
-import { sendCommandAwaitAck, sendRawCommand } from '../gateway/gateway-store';
 import { useGatewayStore } from '../gateway/gateway-store';
+import { sendCommandAwaitAck, sendRawCommand } from '../gateway/gateway-store';
 import {
   loadStreamQualityPreference,
   loadStringOptionPreference,
@@ -15,11 +15,9 @@ import {
   saveStreamQualityPreference,
 } from '../preferences/client-preferences';
 import { useVoiceStore } from '../voice/voice-store';
-import { closeStreamPopup, ensureStreamPopupWindow } from './stream-popup-controller';
 import {
   type CameraOption,
   DEFAULT_STREAM_CODEC_PREFERENCE,
-  DEFAULT_STREAM_PLAYBACK_VOLUME,
   DEFAULT_STREAM_QUALITY,
   STREAM_BITRATE_OPTIONS,
   STREAM_CODEC_OPTIONS,
@@ -29,45 +27,20 @@ import {
 } from './stream-media';
 import {
   getOwnedStreamVideoStats,
-  type OwnedPublishState,
+  getWatchedStreamVideoStats,
   type OwnedStreamVideoStats,
+  type WatchedStreamState,
+  type WatchedStreamVideoStats,
   useStreamStore,
 } from './stream-store';
 
-function sourceLabel(t: TFunction, sourceType: 'camera' | 'screen' | null) {
-  if (sourceType === 'camera') {
-    return t('stream.source_camera');
-  }
-  if (sourceType === 'screen') {
-    return t('stream.source_screen');
-  }
-  return t('stream.source_stream');
-}
+const STREAM_DETAIL_STATS_POLL_INTERVAL_MS = 1000;
 
-function describeOwnedStatus(
-  t: TFunction,
-  status: 'capturing' | 'starting' | 'live' | 'stopping',
-  sourceType: 'camera' | 'screen',
-) {
-  const source = sourceLabel(t, sourceType);
-  if (status === 'live') {
-    return t('stream.owned_status_sharing', { source });
-  }
-
-  if (status === 'capturing') {
-    return t('stream.owned_status_preparing', { source });
-  }
-
-  if (status === 'starting') {
-    return t('stream.owned_status_starting', { source });
-  }
-
-  return t('stream.owned_status_stopping');
-}
-
-function formatVolumeLabel(volume: number) {
-  return `${Math.round(volume * 100)}%`;
-}
+type VoiceHealthLevel = 'danger' | 'good' | 'warn';
+type LiveStatsState =
+  | { kind: 'none'; stats: null }
+  | { kind: 'owned'; stats: OwnedStreamVideoStats | null }
+  | { kind: 'watched'; stats: WatchedStreamVideoStats | null };
 
 function codecPreferenceLabel(t: TFunction, codecPreference: StreamCodecPreference) {
   switch (codecPreference) {
@@ -97,11 +70,7 @@ function cameraOptionLabel(t: TFunction, option: CameraOption) {
   return option.label?.trim() || t('stream.source_camera');
 }
 
-function formatQualityLabel(t: TFunction, quality: StreamQualitySettings, codecPreference: StreamCodecPreference) {
-  return `${quality.resolution} | ${quality.frameRate} FPS | ${quality.bitrateKbps} kbps | ${codecPreferenceLabel(t, codecPreference)}`;
-}
-
-function formatStatsValue(value: number | string | null | undefined, suffix?: string) {
+function formatNullableValue(value: number | string | null | undefined, suffix?: string) {
   if (value === null || value === undefined || value === '') {
     return '--';
   }
@@ -109,12 +78,71 @@ function formatStatsValue(value: number | string | null | undefined, suffix?: st
   return suffix ? `${value} ${suffix}` : String(value);
 }
 
-function limitationReasonLabel(t: TFunction, reason: OwnedStreamVideoStats['qualityLimitationReason']) {
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '--';
+  }
+
+  return `${Math.max(0, Math.round(value))}%`;
+}
+
+function formatLatency(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return '--';
+  }
+
+  return `${Math.max(0, Math.round(value))}ms`;
+}
+
+function formatVolumeLabel(volume: number) {
+  return `${Math.round(volume * 100)}%`;
+}
+
+function formatPacketLoss(stats: WatchedStreamVideoStats | null) {
+  if (!stats || stats.packetsLost === null || stats.packetsReceived === null) {
+    return '--';
+  }
+
+  return `${stats.packetsLost} / ${stats.packetsReceived}`;
+}
+
+function sourceLabel(t: TFunction, sourceType: 'camera' | 'screen' | 'stream' | null | undefined) {
+  if (sourceType === 'camera') {
+    return t('stream.source_camera');
+  }
+
+  if (sourceType === 'screen') {
+    return t('stream.source_screen');
+  }
+
+  return t('stream.source_stream');
+}
+
+function voiceStatusLabel(t: TFunction, status: ReturnType<typeof useVoiceStore.getState>['status']) {
+  switch (status) {
+    case 'active':
+      return t('voice.connected_short');
+    case 'joining':
+    case 'requesting_mic':
+      return t('voice.status_connecting');
+    case 'reconnecting':
+      return t('gateway.reconnecting');
+    case 'error':
+      return t('voice.error_title');
+    case 'leaving':
+      return t('voice.leave');
+    case 'idle':
+    default:
+      return t('stream.voice_health_not_connected');
+  }
+}
+
+function limitationReasonLabel(t: TFunction, reason: OwnedStreamVideoStats['qualityLimitationReason'] | null | undefined) {
   switch (reason) {
-    case 'cpu':
-      return t('stream.health_reason_cpu');
     case 'bandwidth':
       return t('stream.health_reason_bandwidth');
+    case 'cpu':
+      return t('stream.health_reason_cpu');
     case 'other':
       return t('stream.health_reason_other');
     case 'none':
@@ -123,218 +151,259 @@ function limitationReasonLabel(t: TFunction, reason: OwnedStreamVideoStats['qual
   }
 }
 
-function describeOwnedStreamHealth(
-  t: TFunction,
-  ownedStream: OwnedPublishState,
-  stats: OwnedStreamVideoStats | null,
-) {
-  if (ownedStream.viewers.length === 0) {
-    return {
-      badgeClassName: 'stream-pill',
-      badgeLabel: t('stream.health_waiting'),
-      copy: t('stream.health_waiting_copy'),
-    };
-  }
-
-  if (!stats) {
-    return {
-      badgeClassName: 'stream-pill',
-      badgeLabel: t('stream.health_sampling'),
-      copy: t('stream.health_sampling_copy'),
-    };
-  }
-
-  if (stats.qualityLimitationReason === 'bandwidth') {
-    return {
-      badgeClassName: 'stream-pill stream-pill--warn',
-      badgeLabel: t('stream.health_bandwidth'),
-      copy: t('stream.health_bandwidth_copy'),
-    };
-  }
-
-  if (stats.encoderLimited) {
-    return {
-      badgeClassName: 'stream-pill stream-pill--danger',
-      badgeLabel: t('stream.health_encoder_limited'),
-      copy: t('stream.health_encoder_limited_copy').replace('{{targetFps}}', String(ownedStream.quality.frameRate)),
-    };
-  }
-
-  if (stats.qualityLimitationReason === 'other') {
-    return {
-      badgeClassName: 'stream-pill stream-pill--warn',
-      badgeLabel: t('stream.health_other_limited'),
-      copy: t('stream.health_other_limited_copy'),
-    };
-  }
-
-  return {
-    badgeClassName: 'stream-pill stream-pill--good',
-    badgeLabel: t('stream.health_healthy'),
-    copy: t('stream.health_healthy_copy'),
-  };
-}
-
-const OWNED_STREAM_STATS_POLL_INTERVAL_MS = 1000;
-
-function OwnedStreamHealthPanel({
-  ownedStream,
-}: {
-  ownedStream: OwnedPublishState;
-}) {
+function VoiceHealthPanel() {
   const { t } = useTranslation();
-  const [stats, setStats] = useState<OwnedStreamVideoStats | null>(null);
+  const myUserId = useAuthStore((s) => s.user?.id ?? null);
+  const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
+  const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
+  const channelId = useVoiceStore((s) => s.channelId);
+  const connectionIssue = useVoiceStore((s) => s.connectionIssue);
+  const isMuted = useVoiceStore((s) => s.isMuted);
+  const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
+  const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
+  const participants = useVoiceStore((s) => s.participants);
+  const status = useVoiceStore((s) => s.status);
 
-  useEffect(() => {
-    if (ownedStream.status !== 'live') {
-      setStats(null);
-      return;
+  const networkSnapshot = channelId && myUserId ? voiceNetworkByChannel[channelId]?.[myUserId] : null;
+  const gatewayLossPct = networkSnapshot?.gatewayLossPct ?? null;
+  const mediaLossPct = localMediaSelfLossPct ?? networkSnapshot?.mediaSelfLossPct ?? null;
+  const localStatsStale =
+    localMediaSelfUpdatedAt !== null && Date.now() - localMediaSelfUpdatedAt > 15_000;
+  const isStale = networkSnapshot?.stale ?? localStatsStale;
+
+  const healthLevel: VoiceHealthLevel = useMemo(() => {
+    if (connectionIssue || status === 'error' || (gatewayRttMs !== null && gatewayRttMs > 300)) {
+      return 'danger';
     }
 
-    let cancelled = false;
-    const refresh = async () => {
-      const next = await getOwnedStreamVideoStats();
-      if (!cancelled) {
-        setStats(next);
-      }
-    };
+    if ((gatewayLossPct ?? 0) >= 5 || (mediaLossPct ?? 0) >= 5) {
+      return 'danger';
+    }
 
-    void refresh();
-    const interval = setInterval(() => {
-      void refresh();
-    }, OWNED_STREAM_STATS_POLL_INTERVAL_MS);
+    if (
+      status === 'joining' ||
+      status === 'requesting_mic' ||
+      status === 'reconnecting' ||
+      status === 'leaving' ||
+      isStale ||
+      (gatewayRttMs !== null && gatewayRttMs >= 150) ||
+      (gatewayLossPct ?? 0) >= 2 ||
+      (mediaLossPct ?? 0) >= 2
+    ) {
+      return 'warn';
+    }
+
+    return status === 'active' ? 'good' : 'warn';
+  }, [connectionIssue, gatewayLossPct, gatewayRttMs, isStale, mediaLossPct, status]);
+
+  const healthLabel =
+    healthLevel === 'danger'
+      ? t('stream.voice_health_danger')
+      : healthLevel === 'warn'
+        ? t('stream.voice_health_warn')
+        : t('stream.voice_health_good');
+
+  return (
+    <section className={'stream-section stream-dashboard-section stream-dashboard-section--voice'}>
+      <header className={'stream-section-header'}>
+        <div>
+          <h2 className={'stream-section-title'}>{t('stream.voice_health_title')}</h2>
+          <p className={'stream-section-description'}>{t('stream.voice_health_description')}</p>
+        </div>
+        <span className={`stream-pill stream-pill--${healthLevel}`}>{healthLabel}</span>
+      </header>
+
+      <div className={'stream-dashboard-grid'}>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_connection')}</span>
+          <strong>{voiceStatusLabel(t, status)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_gateway_rtt')}</span>
+          <strong>{formatLatency(gatewayRttMs)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_gateway_loss')}</span>
+          <strong>{formatPercent(gatewayLossPct)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_media_loss')}</span>
+          <strong>{formatPercent(mediaLossPct)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_freshness')}</span>
+          <strong>{isStale ? t('stream.voice_health_stale') : t('stream.voice_health_fresh')}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_members')}</span>
+          <strong>{participants.length}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.voice_health_microphone')}</span>
+          <strong>{isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}</strong>
+        </div>
+      </div>
+
+      {connectionIssue ? <p className={'stream-dashboard-warning'}>{t('voice.error_connection_issue')}</p> : null}
+    </section>
+  );
+}
+
+function LiveDetailPanel() {
+  const { t } = useTranslation();
+  const ownedStream = useStreamStore((s) => s.ownedStream);
+  const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
+  const watchedStream = useMemo<WatchedStreamState | null>(
+    () => Object.values(watchedStreamsById).find((entry) => entry.status !== 'ended') ?? null,
+    [watchedStreamsById],
+  );
+  const [statsState, setStatsState] = useState<LiveStatsState>({ kind: 'none', stats: null });
+  const hasLiveData = !!ownedStream || !!watchedStream;
+
+  useEffect(() => {
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    async function refreshStats() {
+      if (ownedStream) {
+        const stats = await getOwnedStreamVideoStats();
+        if (!cancelled) {
+          setStatsState({ kind: 'owned', stats });
+        }
+        return;
+      }
+
+      if (watchedStream) {
+        const stats = await getWatchedStreamVideoStats(watchedStream.streamId);
+        if (!cancelled) {
+          setStatsState({ kind: 'watched', stats });
+        }
+        return;
+      }
+
+      setStatsState({ kind: 'none', stats: null });
+    }
+
+    void refreshStats();
+    interval = setInterval(() => {
+      void refreshStats();
+    }, STREAM_DETAIL_STATS_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+      }
     };
-  }, [ownedStream.status, ownedStream.streamId]);
+  }, [ownedStream, watchedStream]);
 
-  const health = describeOwnedStreamHealth(t, ownedStream, stats);
+  const liveStatus = ownedStream
+    ? ownedStream.status === 'live'
+      ? t('stream.pill_live')
+      : ownedStream.status === 'stopping'
+        ? t('stream.pill_stopping')
+        : t('stream.pill_starting')
+    : watchedStream
+      ? watchedStream.status === 'watching'
+        ? t('stream.pill_live')
+        : watchedStream.status === 'ended'
+          ? t('stream.pill_ended')
+          : t('stream.pill_starting')
+      : t('stream.live_detail_none');
 
-  return (
-    <section className={'stream-owned-health'} aria-label={t('stream.health_title')}>
-      <div className={'stream-owned-health-header'}>
-        <div>
-          <h4 className={'stream-owned-health-title'}>{t('stream.health_title')}</h4>
-          <p className={'stream-owned-health-copy'}>{health.copy}</p>
-        </div>
-        <span className={health.badgeClassName}>{health.badgeLabel}</span>
-      </div>
-      <div className={'stream-owned-health-grid'}>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_target_frame_rate')}</span>
-          <strong className={'stream-owned-health-value'}>{formatStatsValue(ownedStream.quality.frameRate, 'fps')}</strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_actual_frame_rate')}</span>
-          <strong className={'stream-owned-health-value'}>{formatStatsValue(stats?.frameRate, 'fps')}</strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_send_bitrate')}</span>
-          <strong className={'stream-owned-health-value'}>{formatStatsValue(stats?.bitrateKbps, 'kbps')}</strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_send_resolution')}</span>
-          <strong className={'stream-owned-health-value'}>{formatStatsValue(stats?.resolution)}</strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_preferred_codec')}</span>
-          <strong className={'stream-owned-health-value'}>
-            {codecPreferenceLabel(t, ownedStream.codecPreference)}
-          </strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_actual_codec')}</span>
-          <strong className={'stream-owned-health-value'}>{formatStatsValue(stats?.codec)}</strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_limitation_reason')}</span>
-          <strong className={'stream-owned-health-value'}>
-            {stats ? limitationReasonLabel(t, stats.qualityLimitationReason) : '--'}
-          </strong>
-        </div>
-        <div className={'stream-owned-health-item'}>
-          <span className={'stream-owned-health-label'}>{t('stream.health_active_peers')}</span>
-          <strong className={'stream-owned-health-value'}>{formatStatsValue(stats?.activePeerCount ?? ownedStream.viewers.length)}</strong>
-        </div>
-      </div>
-    </section>
-  );
-}
+  const activeStats = statsState.stats;
 
-function StreamVideo({
-  muted = false,
-  playbackVolume = DEFAULT_STREAM_PLAYBACK_VOLUME,
-  stream,
-}: {
-  muted?: boolean;
-  playbackVolume?: number;
-  stream: MediaStream | null;
-}) {
-  const { t } = useTranslation();
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const element = videoRef.current;
-    if (!element) {
-      return;
-    }
-
-    element.srcObject = stream;
-    if (stream) {
-      void element.play().catch(() => {});
-    }
-
-    return () => {
-      element.srcObject = null;
-    };
-  }, [stream]);
-
-  useEffect(() => {
-    const element = videoRef.current;
-    if (!element) {
-      return;
-    }
-
-    element.volume = playbackVolume;
-  }, [playbackVolume]);
-
-  if (!stream) {
-    return <div className={'stream-video stream-video--placeholder'}>{t('stream.video_waiting')}</div>;
+  if (!hasLiveData) {
+    return null;
   }
 
-  return <video ref={videoRef} className={'stream-video'} autoPlay muted={muted} playsInline />;
-}
-
-function StreamSection({
-  children,
-  className,
-  countLabel,
-  description,
-  title,
-}: {
-  children: ReactNode;
-  className?: string;
-  countLabel?: string;
-  description: string;
-  title: string;
-}) {
   return (
-    <section className={className ? `stream-section ${className}` : 'stream-section'}>
-      <div className={'stream-section-header'}>
+    <section className={'stream-section stream-dashboard-section stream-dashboard-section--live'}>
+      <header className={'stream-section-header'}>
         <div>
-          <h2 className={'stream-section-title'}>{title}</h2>
-          <p className={'stream-section-description'}>{description}</p>
+          <h2 className={'stream-section-title'}>{t('stream.live_detail_title')}</h2>
+          <p className={'stream-section-description'}>
+            {ownedStream
+              ? t('stream.live_detail_owned_description')
+              : watchedStream
+                ? t('stream.live_detail_watched_description')
+                : t('stream.live_detail_empty')}
+          </p>
         </div>
-        {countLabel ? <span className={'stream-section-count'}>{countLabel}</span> : null}
+        <span className={'stream-pill'}>{liveStatus}</span>
+      </header>
+
+      <div className={'stream-dashboard-grid'}>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.live_detail_source')}</span>
+          <strong>{sourceLabel(t, ownedStream?.sourceType ?? watchedStream?.sourceType ?? null)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.live_detail_viewers')}</span>
+          <strong>{ownedStream?.viewers.length ?? watchedStream?.viewers.length ?? 0}</strong>
+        </div>
+        {ownedStream ? (
+          <div className={'stream-dashboard-item'}>
+            <span>{t('stream.live_detail_target_quality')}</span>
+            <strong>{`${ownedStream.quality.resolution} / ${ownedStream.quality.frameRate} fps / ${ownedStream.quality.bitrateKbps} kbps`}</strong>
+          </div>
+        ) : watchedStream ? (
+          <div className={'stream-dashboard-item'}>
+            <span>{t('stream.popup_stream_volume')}</span>
+            <strong>{formatVolumeLabel(watchedStream.playbackVolume)}</strong>
+          </div>
+        ) : null}
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_codec')}</span>
+          <strong>{formatNullableValue(activeStats?.codec)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_resolution')}</span>
+          <strong>{formatNullableValue(activeStats?.resolution)}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_frame_rate')}</span>
+          <strong>{formatNullableValue(activeStats?.frameRate, 'fps')}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_bitrate')}</span>
+          <strong>{formatNullableValue(activeStats?.bitrateKbps, 'kbps')}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_packet_loss')}</span>
+          <strong>{statsState.kind === 'watched' ? formatPacketLoss(statsState.stats) : '--'}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_jitter')}</span>
+          <strong>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.jitterMs, 'ms') : '--'}</strong>
+        </div>
+        <div className={'stream-dashboard-item'}>
+          <span>{t('stream.popup_stats_frames_dropped')}</span>
+          <strong>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.framesDropped) : '--'}</strong>
+        </div>
+        {statsState.kind === 'owned' ? (
+          <>
+            <div className={'stream-dashboard-item'}>
+              <span>{t('stream.health_active_peers')}</span>
+              <strong>{statsState.stats?.activePeerCount ?? 0}</strong>
+            </div>
+            <div className={'stream-dashboard-item'}>
+              <span>{t('stream.health_limitation_reason')}</span>
+              <strong>{limitationReasonLabel(t, statsState.stats?.qualityLimitationReason)}</strong>
+            </div>
+          </>
+        ) : null}
       </div>
-      {children}
     </section>
   );
 }
 
-export function StreamPanel() {
+export interface StreamPanelProps {
+  isShareDialogOpen: boolean;
+  onCloseShareDialog: () => void;
+}
+
+export function StreamPanel({ isShareDialogOpen, onCloseShareDialog }: StreamPanelProps) {
   const { t } = useTranslation();
   const [streamQuality, setStreamQuality] = useState(() =>
     loadStreamQualityPreference(DEFAULT_STREAM_QUALITY, {
@@ -346,14 +415,9 @@ export function StreamPanel() {
   const [streamCodecPreference, setStreamCodecPreference] = useState<StreamCodecPreference>(
     () => loadStringOptionPreference('streamCodecPreference', DEFAULT_STREAM_CODEC_PREFERENCE, STREAM_CODEC_OPTIONS),
   );
-  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
-  const [isOwnedHealthOpen, setIsOwnedHealthOpen] = useState(false);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const voiceStatus = useVoiceStore((s) => s.status);
   const ownedStream = useStreamStore((s) => s.ownedStream);
-  const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
-  const roomStateByChannel = useStreamStore((s) => s.roomStateByChannel);
-  const error = useStreamStore((s) => s.error);
   const cameraOptions = useStreamStore((s) => s.cameraOptions);
   const selectedCameraKey = useStreamStore((s) => s.selectedCameraKey);
   const isRefreshingCameras = useStreamStore((s) => s.isRefreshingCameras);
@@ -361,40 +425,11 @@ export function StreamPanel() {
   const refreshCameraOptions = useStreamStore((s) => s.refreshCameraOptions);
   const selectCamera = useStreamStore((s) => s.selectCamera);
   const startSharing = useStreamStore((s) => s.startSharing);
-  const stopSharing = useStreamStore((s) => s.stopSharing);
-  const watchStream = useStreamStore((s) => s.watchStream);
-  const unwatchStream = useStreamStore((s) => s.unwatchStream);
-  const myUserId = useAuthStore((s) => s.user?.id ?? null);
-  const presenceMap = useGatewayStore((s) => s.presenceMap);
-
-  const watchedStreams = Object.values(watchedStreamsById);
-  const activeChannelId = voiceChannelId ?? ownedStream?.channelId ?? watchedStreams[0]?.channelId ?? null;
-  const roomStreams = activeChannelId ? Object.values(roomStateByChannel[activeChannelId] ?? {}) : [];
-  const watchedStreamsInChannel = watchedStreams.filter((stream) => stream.channelId === activeChannelId);
-  const watchedStreamIds = new Set(watchedStreamsInChannel.map((stream) => stream.streamId));
-  const availableStreams = roomStreams.filter(
-    (stream) => stream.hostUserId !== myUserId && !watchedStreamIds.has(stream.streamId),
-  );
   const canShare = voiceStatus === 'active' && !!voiceChannelId && !ownedStream;
-  const liveCountLabel = t('stream.live_stream_count', { count: roomStreams.length });
-  const watchingCountLabel = t('stream.watching_now_count', { count: watchedStreamsInChannel.length });
-  const availableCountLabel = t('stream.available_count', { count: availableStreams.length });
 
   useEffect(() => {
     void refreshCameraOptions();
   }, [refreshCameraOptions]);
-
-  if (!activeChannelId && !ownedStream && watchedStreams.length === 0 && !error) {
-    return null;
-  }
-
-  function userLabel(userId: string) {
-    if (userId === myUserId) {
-      return t('common.you');
-    }
-
-    return presenceMap[userId]?.username ?? userId.slice(0, 8);
-  }
 
   function handleShareScreen() {
     if (!voiceChannelId) {
@@ -413,12 +448,12 @@ export function StreamPanel() {
   }
 
   function handleShareScreenFromDialog() {
-    setIsShareDialogOpen(false);
+    onCloseShareDialog();
     handleShareScreen();
   }
 
   function handleShareCameraFromDialog() {
-    setIsShareDialogOpen(false);
+    onCloseShareDialog();
     handleShareCamera();
   }
 
@@ -466,224 +501,17 @@ export function StreamPanel() {
     );
   }
 
-  function handleWatch(streamId: string) {
-    if (!activeChannelId) {
-      return;
-    }
-
-    if (!ensureStreamPopupWindow(streamId)) {
-      useStreamStore.setState({ error: t('stream.error_popup_blocked') });
-      return;
-    }
-
-    void watchStream(activeChannelId, streamId, sendCommandAwaitAck, sendRawCommand).catch(() => {
-      closeStreamPopup(streamId);
-    });
-  }
-
   return (
-    <aside className={'stream-panel'} aria-label={t('stream.streams_label')}>
-      <div className={'stream-panel-header'}>
-        <div>
-          <div className={'stream-panel-heading-row'}>
-            <span className={'stream-panel-icon'}>LIVE</span>
-            <span className={'stream-panel-label'}>{t('stream.streams_label')}</span>
-          </div>
-          <p className={'stream-panel-summary'}>
-            {activeChannelId ? liveCountLabel : t('stream.panel_summary_join_voice')}
-          </p>
-        </div>
-      </div>
-
-      {error && <p className={'stream-panel-error'}>{error}</p>}
-
-      <div className={'stream-panel-stack'}>
-        {watchedStreamsInChannel.length > 0 ? (
-          <StreamSection
-            className={'stream-section--watching'}
-            countLabel={watchingCountLabel}
-            title={t('stream.section_watching_title')}
-            description={t('stream.section_watching_description')}
-          >
-            <div className={'stream-watch-status-list'}>
-              {watchedStreamsInChannel.map((stream) => (
-                <article key={stream.streamId} className={'stream-watch-row'}>
-                  <div className={'stream-watch-row-summary'}>
-                    <div>
-                      <h3 className={'stream-card-title'}>
-                        {userLabel(stream.hostUserId)} | {sourceLabel(t, stream.sourceType)}
-                      </h3>
-                      <p className={stream.connectionError ? 'stream-card-subtitle stream-card-subtitle--error' : 'stream-card-subtitle'}>
-                        {stream.connectionError
-                          ? t('stream.connection_error')
-                          : stream.status === 'starting'
-                            ? t('stream.watching_status_starting')
-                            : stream.status === 'reconnecting'
-                              ? t('stream.watching_status_starting')
-                              : stream.status === 'stopping'
-                                ? t('stream.watching_status_stopping')
-                                : stream.status === 'ended'
-                                  ? t('stream.watching_status_ended')
-                                  : t('stream.watching_status_watching')}
-                      </p>
-                    </div>
-                    <span className={'stream-pill'}>
-                      {stream.status === 'ended'
-                        ? t('stream.pill_ended')
-                        : stream.status === 'stopping'
-                          ? t('stream.pill_stopping')
-                          : stream.status === 'starting' || stream.status === 'reconnecting'
-                            ? t('stream.pill_starting')
-                            : t('stream.pill_live')}
-                    </span>
-                  </div>
-                  <div className={'stream-watch-row-meta'}>
-                    <span className={'stream-card-meta'}>
-                      {t('stream.watch_row_meta', {
-                        viewerCount: t('stream.viewer_count', { count: stream.viewers.length }),
-                        volume: formatVolumeLabel(stream.playbackVolume),
-                      })}
-                    </span>
-                    <span className={'stream-card-meta'}>
-                      {t('stream.viewer_meta', { id: stream.streamId.slice(0, 8) })}
-                    </span>
-                  </div>
-                  <div className={'stream-watch-row-actions'}>
-                    <button
-                      type={'button'}
-                      className={'btn-ghost stream-action-btn'}
-                      onClick={() => {
-                        if (!ensureStreamPopupWindow(stream.streamId)) {
-                          useStreamStore.setState({ error: t('stream.error_popup_blocked') });
-                        }
-                      }}
-                      disabled={stream.status === 'stopping'}
-                    >
-                      {t('stream.action_focus_window')}
-                    </button>
-                    <button
-                      type={'button'}
-                      className={'btn-ghost stream-action-btn'}
-                      onClick={() => {
-                        closeStreamPopup(stream.streamId);
-                        void unwatchStream(stream.streamId, sendCommandAwaitAck);
-                      }}
-                      disabled={stream.status === 'stopping'}
-                    >
-                      {t('stream.action_stop_watching')}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </StreamSection>
-        ) : null}
-
-        <StreamSection
-          className={'stream-section--owned'}
-          countLabel={ownedStream ? t('stream.viewer_count', { count: ownedStream.viewers.length }) : undefined}
-          title={t('stream.section_owned_title')}
-          description={t('stream.section_owned_description')}
-        >
-          {ownedStream ? (
-            <article className={'stream-card stream-card--owned'}>
-              <div className={'stream-card-header'}>
-                <div>
-                  <h3 className={'stream-card-title'}>
-                    {describeOwnedStatus(t, ownedStream.status, ownedStream.sourceType)}
-                  </h3>
-                  <p className={'stream-card-subtitle'}>
-                    {t('stream.viewer_count', { count: ownedStream.viewers.length })} |{' '}
-                    {formatQualityLabel(t, ownedStream.quality, ownedStream.codecPreference)}
-                  </p>
-                </div>
-                <span className={'stream-pill'}>{sourceLabel(t, ownedStream.sourceType)}</span>
-              </div>
-              {ownedStream.sourceType === 'camera'
-                ? renderCameraSourceControl(ownedStream.status !== 'live' || isSwitchingCamera)
-                : null}
-              <StreamVideo muted stream={ownedStream.localPreviewStream} />
-              <div className={'stream-card-actions'}>
-                <button
-                  type={'button'}
-                  className={'btn-ghost stream-action-btn'}
-                  onClick={() => setIsOwnedHealthOpen((current) => !current)}
-                  aria-expanded={isOwnedHealthOpen}
-                >
-                  {isOwnedHealthOpen ? t('stream.action_hide_stream_details') : t('stream.action_show_stream_details')}
-                </button>
-                <button
-                  type={'button'}
-                  className={'btn-ghost stream-action-btn'}
-                  onClick={() => {
-                    void stopSharing(sendCommandAwaitAck);
-                  }}
-                  disabled={ownedStream.status === 'stopping'}
-                >
-                  {t('stream.action_stop_sharing')}
-                </button>
-              </div>
-              {isOwnedHealthOpen ? <OwnedStreamHealthPanel ownedStream={ownedStream} /> : null}
-            </article>
-          ) : canShare ? (
-            <div className={'stream-empty stream-empty--actions'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_owned_empty')}</p>
-              <button
-                type={'button'}
-                className={'btn-ghost stream-action-btn stream-action-btn--primary stream-start-btn'}
-                onClick={() => setIsShareDialogOpen(true)}
-              >
-                {t('stream.action_start_stream')}
-              </button>
-            </div>
-          ) : (
-            <div className={'stream-empty'}>
-              <p className={'stream-empty-copy'}>{t('stream.section_owned_join_voice')}</p>
-            </div>
-          )}
-        </StreamSection>
-
-        {availableStreams.length > 0 ? (
-          <StreamSection
-            className={'stream-section--available'}
-            countLabel={availableCountLabel}
-            title={t('stream.section_available_title')}
-            description={t('stream.section_available_description')}
-          >
-            <div className={'stream-available-list'}>
-              {availableStreams.map((stream) => (
-                <article key={stream.streamId} className={'stream-card stream-card--available'}>
-                  <div className={'stream-card-header'}>
-                    <div>
-                      <h3 className={'stream-card-title'}>{userLabel(stream.hostUserId)}</h3>
-                      <p className={'stream-card-subtitle'}>
-                        {sourceLabel(t, stream.sourceType)} | {t('stream.viewer_count', { count: stream.viewers.length })}
-                      </p>
-                    </div>
-                    <span className={'stream-pill'}>{t('stream.pill_live')}</span>
-                  </div>
-                  <div className={'stream-card-actions'}>
-                    <span className={'stream-card-meta'}>{t('stream.section_available_opens_in_popup')}</span>
-                    <button
-                      type={'button'}
-                      className={'btn-ghost stream-action-btn stream-action-btn--primary'}
-                      onClick={() => handleWatch(stream.streamId)}
-                    >
-                      {t('stream.action_watch_stream')}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </StreamSection>
-        ) : null}
-      </div>
-
+    <>
+      <aside className={'stream-panel stream-dashboard-panel'} aria-label={t('stream.streams_label')}>
+        <VoiceHealthPanel />
+        <LiveDetailPanel />
+      </aside>
       {canShare && isShareDialogOpen ? (
         <div
           className={'stream-share-dialog-backdrop'}
           role={'presentation'}
-          onMouseDown={() => setIsShareDialogOpen(false)}
+          onMouseDown={onCloseShareDialog}
         >
           <section
             className={'stream-share-dialog'}
@@ -703,7 +531,7 @@ export function StreamPanel() {
               <button
                 type={'button'}
                 className={'btn-ghost stream-share-dialog-close'}
-                onClick={() => setIsShareDialogOpen(false)}
+                onClick={onCloseShareDialog}
               >
                 {t('stream.share_dialog_close')}
               </button>
@@ -805,6 +633,6 @@ export function StreamPanel() {
           </section>
         </div>
       ) : null}
-    </aside>
+    </>
   );
 }

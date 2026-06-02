@@ -18,6 +18,7 @@ let analyserAmplitude = 0;
 const OriginalMediaStream = globalThis.MediaStream;
 const OriginalAudioContext = globalThis.AudioContext;
 const OriginalNavigator = globalThis.navigator;
+const OriginalWindow = globalThis.window;
 
 class MockTrack {
   enabled = true;
@@ -80,6 +81,12 @@ class MockAudioContext {
     };
   }
 
+  createMediaElementSource(_audio: HTMLAudioElement) {
+    return {
+      connect() {},
+    };
+  }
+
   close() {
     return Promise.resolve();
   }
@@ -118,6 +125,7 @@ vi.mock('./voice-sfx', () => ({
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import { useAudioDeviceStore } from '../media/audio-device-store';
+import { CLIENT_PREFERENCES_STORAGE_KEY } from '../preferences/client-preferences';
 import { useVoiceStore } from './voice-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
@@ -126,6 +134,24 @@ const sessionId = '33333333-3333-4333-8333-333333333333';
 const peerSessionId = '44444444-4444-4444-8444-444444444444';
 const sessionIdB = '55555555-5555-4555-8555-555555555555';
 const getUserMedia = vi.fn();
+
+function createMockStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    clear: vi.fn(() => values.clear()),
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    key: vi.fn((index: number) => [...values.keys()][index] ?? null),
+    get length() {
+      return values.size;
+    },
+    removeItem: vi.fn((key: string) => {
+      values.delete(key);
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+  };
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -151,6 +177,12 @@ beforeEach(() => {
 
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
   globalThis.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      localStorage: createMockStorage(),
+    },
+  });
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: globalThis.navigator ?? {},
@@ -225,6 +257,45 @@ afterEach(async () => {
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: OriginalNavigator,
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: OriginalWindow,
+  });
+});
+
+describe('participant playback volume preferences', () => {
+  it('persists participant playback volume by user id', () => {
+    useVoiceStore.getState().setParticipantPlaybackVolume('peer-user', 1.5);
+
+    const raw = window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw ?? '{}')).toMatchObject({
+      voiceParticipantPlaybackVolume: {
+        'peer-user': 1.5,
+      },
+    });
+  });
+
+  it('removes participant playback volume preference when reset', () => {
+    useVoiceStore.getState().setParticipantPlaybackVolume('peer-user', 1.5);
+    useVoiceStore.getState().clearParticipantPlaybackVolume('peer-user');
+
+    const raw = window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY);
+    expect(JSON.parse(raw ?? '{}')).toMatchObject({
+      voiceParticipantPlaybackVolume: {},
+    });
+  });
+
+  it('clamps participant playback volume before persisting', () => {
+    useVoiceStore.getState().setParticipantPlaybackVolume('peer-user', 3);
+
+    const raw = window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY);
+    expect(JSON.parse(raw ?? '{}')).toMatchObject({
+      voiceParticipantPlaybackVolume: {
+        'peer-user': 2,
+      },
+    });
   });
 });
 

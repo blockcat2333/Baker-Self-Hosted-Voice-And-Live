@@ -11,9 +11,17 @@ interface SettingsDialogProps {
   api: ApiClient;
   onChangeServer?: () => void;
   onClose: () => void;
+  onShowDataDetailsChange: (show: boolean) => void;
+  showDataDetails: boolean;
 }
 
-export function SettingsDialog({ api, onChangeServer, onClose }: SettingsDialogProps) {
+export function SettingsDialog({
+  api,
+  onChangeServer,
+  onClose,
+  onShowDataDetailsChange,
+  showDataDetails,
+}: SettingsDialogProps) {
   const { t } = useTranslation();
   const logout = useAuthStore((s) => s.logout);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -79,6 +87,28 @@ export function SettingsDialog({ api, onChangeServer, onClose }: SettingsDialogP
           <section className="settings-dialog-section">
             <h3 className="settings-dialog-section-title">{t('settings.language')}</h3>
             <LanguageSwitcher className="language-switcher settings-language-switcher" />
+          </section>
+
+          <section className="settings-dialog-section">
+            <h3 className="settings-dialog-section-title">{t('settings.data_details')}</h3>
+            <div className="settings-data-detail-toggle">
+              <button
+                type="button"
+                className="btn-ghost"
+                aria-pressed={showDataDetails}
+                onClick={() => onShowDataDetailsChange(true)}
+              >
+                {t('settings.show_data')}
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                aria-pressed={!showDataDetails}
+                onClick={() => onShowDataDetailsChange(false)}
+              >
+                {t('settings.hide_data')}
+              </button>
+            </div>
           </section>
 
           {onChangeServer ? (

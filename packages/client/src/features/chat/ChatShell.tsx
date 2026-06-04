@@ -9,7 +9,7 @@ import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
-import { VoiceBottomControlBar, VoiceChannelView, VoiceSidebarVolumeControls } from '../voice/VoicePanel';
+import { VoiceBottomControlBar, VoiceChannelView, VoicePanel, VoiceSidebarVolumeControls } from '../voice/VoicePanel';
 import { loadBooleanPreference, saveClientPreferencesPatch } from '../preferences/client-preferences';
 import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
@@ -169,11 +169,13 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
         </div>
 
         <div className="sidebar-section sidebar-section--voice" data-on-mobile="voice">
-          {!isVoiceActive ? (
+          {isVoiceActive ? (
+            <VoicePanel />
+          ) : (
             <div className="sidebar-voice-idle">
               <p className="sidebar-voice-empty">{t('chat.voice_section_idle')}</p>
             </div>
-          ) : null}
+          )}
         </div>
 
         <div className="sidebar-section sidebar-section--more" data-on-mobile="more">
@@ -244,14 +246,13 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
               <MessagePanel api={api} />
             )}
           </div>
-          {showDataDetails ? (
-            <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
-              <StreamPanel
-                isShareDialogOpen={isStreamShareDialogOpen}
-                onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
-              />
-            </div>
-          ) : null}
+          <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
+            <StreamPanel
+              isShareDialogOpen={isStreamShareDialogOpen}
+              onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
+              showDashboard={showDataDetails}
+            />
+          </div>
         </div>
         <VoiceBottomControlBar onOpenStreamShareDialog={() => setIsStreamShareDialogOpen(true)} />
       </main>

@@ -2307,20 +2307,6 @@ body {
   white-space: nowrap;
 }
 
-.voice-panel-member-count {
-  background: var(--success-1);
-  border: 1px solid var(--success-2);
-  border-radius: 999px;
-  color: var(--success-text);
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  min-width: 22px;
-  padding: 4px 7px;
-  text-align: center;
-}
-
 .voice-panel-channel {
   align-items: center;
   color: var(--text-2);

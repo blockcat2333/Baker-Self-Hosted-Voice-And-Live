@@ -394,9 +394,10 @@ function LiveDetailPanel() {
 export interface StreamPanelProps {
   isShareDialogOpen: boolean;
   onCloseShareDialog: () => void;
+  showDashboard: boolean;
 }
 
-export function StreamPanel({ isShareDialogOpen, onCloseShareDialog }: StreamPanelProps) {
+export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboard }: StreamPanelProps) {
   const { t } = useTranslation();
   const [streamQuality, setStreamQuality] = useState(() =>
     loadStreamQualityPreference(DEFAULT_STREAM_QUALITY, {
@@ -496,10 +497,12 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog }: StreamPan
 
   return (
     <>
-      <aside className={'stream-panel stream-dashboard-panel'} aria-label={t('stream.streams_label')}>
-        <VoiceHealthPanel />
-        <LiveDetailPanel />
-      </aside>
+      {showDashboard ? (
+        <aside className={'stream-panel stream-dashboard-panel'} aria-label={t('stream.streams_label')}>
+          <VoiceHealthPanel />
+          <LiveDetailPanel />
+        </aside>
+      ) : null}
       {canShare && isShareDialogOpen ? (
         <div
           className={'stream-share-dialog-backdrop'}

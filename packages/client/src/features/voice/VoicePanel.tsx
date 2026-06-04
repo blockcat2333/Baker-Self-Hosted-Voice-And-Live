@@ -7,7 +7,6 @@ import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useMusicStore } from '../music/music-store';
 import { useStreamStore } from '../stream/stream-store';
 import { closeStreamPopup, ensureStreamPopupWindow } from '../stream/stream-popup-controller';
-import { useChatStore } from '../chat/chat-store';
 import { DEFAULT_VOICE_PARTICIPANT_VOLUME, toVoiceParticipantVolumePercent, toVoiceVolumePercent } from './voice-audio';
 import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
 
@@ -711,22 +710,8 @@ export function VoicePanel() {
   const { t } = useTranslation();
   const status = useVoiceStore((s) => s.status);
   const voiceError = useVoiceStore((s) => s.error);
-  const connectionIssue = useVoiceStore((s) => s.connectionIssue);
-  const channelId = useVoiceStore((s) => s.channelId);
-  const participants = useVoiceStore((s) => s.participants);
-  const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
-  const peerNetwork = useVoiceStore((s) => s.peerNetwork);
-  const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
-  const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
   const clearError = useVoiceStore((s) => s.clearError);
   const musicError = useMusicStore((s) => s.error);
-  const myUserId = useAuthStore((s) => s.user?.id ?? null);
-  const myUsername = useAuthStore((s) => s.user?.username ?? null);
-  const presenceMap = useGatewayStore((s) => s.presenceMap);
-  const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
-  const activeGuildId = useChatStore((s) => s.activeGuildId);
-  const channelsByGuild = useChatStore((s) => s.channelsByGuild);
-  const controls = useVoiceControls();
 
   useEffect(() => {
     if (!musicError) return;
@@ -741,20 +726,6 @@ export function VoicePanel() {
       window.clearTimeout(timeoutId);
     };
   }, [musicError]);
-
-  const participantNameById = useMemo(() => {
-    const names: Record<string, string> = {};
-    for (const participant of participants) {
-      if (participant.userId === myUserId) {
-        names[participant.userId] = myUsername ?? t('common.you');
-        continue;
-      }
-      names[participant.userId] = presenceMap[participant.userId]?.username ?? participant.userId;
-    }
-    return names;
-  }, [myUserId, myUsername, participants, presenceMap, t]);
-
-  if (status === 'idle') return null;
 
   if (status === 'error') {
     let errorMessage: string;
@@ -786,100 +757,5 @@ export function VoicePanel() {
     );
   }
 
-  if (!channelId) return null;
-
-  const channelName =
-    (activeGuildId ? channelsByGuild[activeGuildId]?.find((channel) => channel.id === channelId)?.name : null) ??
-    channelId;
-
-  return (
-    <div className="voice-panel">
-      <div className="voice-panel-header">
-        <div className="voice-panel-heading">
-          <span className="voice-panel-icon">VC</span>
-          <span className="voice-panel-label">
-            {controls.isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
-          </span>
-        </div>
-        <span className="voice-panel-member-count">{participants.length}</span>
-      </div>
-
-      <div className="voice-panel-channel" title={channelName}>
-        <span className="voice-panel-channel-dot" aria-hidden="true" />
-        <span>{channelName}</span>
-      </div>
-
-      {connectionIssue ? (
-        <p className="voice-panel-warning" role="alert">
-          {t('voice.error_connection_issue')}
-        </p>
-      ) : null}
-
-      {musicError ? (
-        <p className="voice-panel-warning" role="alert">
-          {musicError}
-        </p>
-      ) : null}
-
-      <ul className="voice-participant-list">
-        {participants.map((participant) => {
-          const isMe = participant.userId === myUserId;
-          const isSpeaking = speakingUserIds.has(participant.userId);
-          const displayName = participantNameById[participant.userId] ?? participant.userId;
-          const connState = peerNetwork[participant.userId]?.connectionState;
-          const connSuffix = connState && connState !== 'connected' ? ` [${connState}]` : '';
-          const networkSnapshot = voiceNetworkByChannel[channelId]?.[participant.userId];
-          const gatewayRttText =
-            networkSnapshot?.gatewayRttMs === null || networkSnapshot?.gatewayRttMs === undefined
-              ? '--'
-              : `${Math.max(0, Math.round(networkSnapshot.gatewayRttMs))}ms`;
-          const gatewayLossText =
-            networkSnapshot?.gatewayLossPct === null || networkSnapshot?.gatewayLossPct === undefined
-              ? '--'
-              : `${Math.max(0, Math.round(networkSnapshot.gatewayLossPct))}%`;
-          const mediaLossRaw =
-            networkSnapshot?.mediaSelfLossPct ?? (isMe ? localMediaSelfLossPct : null);
-          const mediaLossText =
-            mediaLossRaw === null || mediaLossRaw === undefined
-              ? '--'
-              : `${Math.max(0, Math.round(mediaLossRaw))}%`;
-          const localMetricStale =
-            isMe && localMediaSelfUpdatedAt !== null
-              ? Date.now() - localMediaSelfUpdatedAt > 15_000
-              : true;
-          const stale = networkSnapshot?.stale ?? localMetricStale;
-          const localFallback = !networkSnapshot && isMe && localMediaSelfLossPct !== null;
-          const netLabel = `${t('voice.net_label_gw_rtt')} ${gatewayRttText} · ${t('voice.net_label_gw_loss')} ${gatewayLossText} · ${t('voice.net_label_media_loss')} ${mediaLossText}${stale ? ` · ${t('voice.net_label_stale')}` : ''}${localFallback ? ` · ${t('voice.net_label_local')}` : ''}${connSuffix}`;
-
-          return (
-            <li
-              key={participant.userId}
-              className={[
-                'voice-participant',
-                isSpeaking ? 'voice-participant--speaking' : '',
-                participant.isMuted ? 'voice-participant--muted' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              title={netLabel}
-            >
-              <div className="voice-participant-row">
-                <span className="voice-participant-name" title={displayName}>
-                  {displayName}
-                </span>
-                {isMe ? <span className="voice-participant-badge">{t('common.you')}</span> : null}
-                {participant.isMuted ? (
-                  <span className="voice-participant-badge">{t('voice.badge_muted')}</span>
-                ) : null}
-                {isSpeaking && !participant.isMuted ? (
-                  <span className="voice-participant-badge">{t('voice.badge_speaking')}</span>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-
-    </div>
-  );
+  return null;
 }

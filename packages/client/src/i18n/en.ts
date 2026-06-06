@@ -133,6 +133,7 @@ export const en = {
     leave_title: 'Leave voice channel',
     leave: 'Leave',
     error_title: 'Voice unavailable',
+    music_error_title: 'Music share issue',
     error_dismiss: 'Dismiss',
     net_label_gw_rtt: 'GW RTT',
     net_label_gw_loss: 'GW Loss',

@@ -824,6 +824,66 @@ body {
   width: 100%;
 }
 
+.sidebar-music-error {
+  background: rgba(127, 29, 29, 0.18);
+  border: 1px solid rgba(248, 113, 113, 0.32);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 10px 12px 4px;
+  min-width: 0;
+  padding: 9px 10px;
+}
+
+.sidebar-music-error-header {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.sidebar-music-error-icon {
+  align-items: center;
+  background: rgba(248, 113, 113, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  border-radius: 50%;
+  color: var(--red-0);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  width: 18px;
+}
+
+.sidebar-music-error-title {
+  color: var(--red-0);
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-music-error-message {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sidebar-music-error-dismiss {
+  align-self: flex-start;
+  font-size: 12px;
+  padding: 5px 9px;
+  width: auto;
+}
+
 .sidebar-action-icon {
   display: block;
   flex: 0 0 auto;
@@ -1806,6 +1866,10 @@ body {
   .sidebar-section--more .presence-bar {
     border-top: none;
     padding: 12px 14px 8px;
+  }
+
+  .sidebar-music-error {
+    margin: 12px 14px 4px;
   }
 
   .sidebar-section--more .presence-list {

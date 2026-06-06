@@ -18,6 +18,7 @@ import { ChannelList } from './ChannelList';
 import { MessagePanel } from './MessagePanel';
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { PresenceBar } from './PresenceBar';
+import { SidebarMusicError } from './SidebarMusicError';
 import { SettingsDialog } from './SettingsDialog';
 
 export interface ChatShellProps {
@@ -179,6 +180,7 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
         </div>
 
         <div className="sidebar-section sidebar-section--more" data-on-mobile="more">
+          <SidebarMusicError />
           <PresenceBar />
           <div className="sidebar-footer">
             <AccountPanel api={api} />

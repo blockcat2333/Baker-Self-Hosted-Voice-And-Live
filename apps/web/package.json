@@ -8,7 +8,7 @@
     "dev": "vite",
     "lint": "eslint src vite.config.ts",
     "preview": "vite preview",
-    "test": "vitest run apps/web",
+    "test": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

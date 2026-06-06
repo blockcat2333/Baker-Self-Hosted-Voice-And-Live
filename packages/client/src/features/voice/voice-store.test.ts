@@ -15,10 +15,13 @@ const { playVoiceSfx } = vi.hoisted(() => ({
   playVoiceSfx: vi.fn(),
 }));
 let analyserAmplitude = 0;
+const OriginalAudio = globalThis.Audio;
 const OriginalMediaStream = globalThis.MediaStream;
 const OriginalAudioContext = globalThis.AudioContext;
 const OriginalNavigator = globalThis.navigator;
 const OriginalWindow = globalThis.window;
+const audioElements: MockAudio[] = [];
+const mockGainNodes: Array<{ gain: { value: number } }> = [];
 
 class MockTrack {
   enabled = true;
@@ -50,6 +53,29 @@ class MockMediaStream {
   }
 }
 
+class MockAudio {
+  autoplay = false;
+  pause = vi.fn();
+  play = vi.fn().mockResolvedValue(undefined);
+  srcObject: MediaStream | null = null;
+  private currentVolume = 1;
+
+  constructor() {
+    audioElements.push(this);
+  }
+
+  get volume() {
+    return this.currentVolume;
+  }
+
+  set volume(value: number) {
+    if (value < 0 || value > 1) {
+      throw new Error(`HTMLMediaElement volume must be between 0 and 1, received ${value}.`);
+    }
+    this.currentVolume = value;
+  }
+}
+
 class MockAudioContext {
   createAnalyser() {
     return {
@@ -63,10 +89,12 @@ class MockAudioContext {
   }
 
   createGain() {
-    return {
+    const gainNode = {
       connect() {},
       gain: { value: 1 },
     };
+    mockGainNodes.push(gainNode);
+    return gainNode;
   }
 
   createMediaStreamDestination() {
@@ -174,7 +202,10 @@ beforeEach(() => {
   getPeerIds.mockReturnValue([]);
   playVoiceSfx.mockReset();
   latestCallbacks = null;
+  audioElements.length = 0;
+  mockGainNodes.length = 0;
 
+  globalThis.Audio = MockAudio as unknown as typeof Audio;
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
   globalThis.AudioContext = MockAudioContext as unknown as typeof AudioContext;
   Object.defineProperty(globalThis, 'window', {
@@ -252,6 +283,7 @@ afterEach(async () => {
   }
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
+  globalThis.Audio = OriginalAudio;
   globalThis.MediaStream = OriginalMediaStream;
   globalThis.AudioContext = OriginalAudioContext;
   Object.defineProperty(globalThis, 'navigator', {
@@ -296,6 +328,34 @@ describe('participant playback volume preferences', () => {
         'peer-user': 2,
       },
     });
+  });
+
+  it('clamps the media element volume and applies gain when remote audio first attaches above 100%', async () => {
+    const peerUserId = '77777777-7777-4777-8777-777777777777';
+
+    useVoiceStore.getState().setParticipantPlaybackVolume(peerUserId, 2);
+
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [
+          { isMuted: false, sessionId, userId },
+          { isMuted: false, sessionId: peerSessionId, userId: peerUserId },
+        ],
+        sessionId,
+      }),
+      vi.fn(),
+    );
+
+    const track = new MockTrack('remote-audio-track', 'audio') as unknown as MediaStreamTrack;
+    const stream = new MockMediaStream([track]) as unknown as MediaStream;
+
+    expect(() => latestCallbacks!.onRemoteTrack(peerUserId, track, [stream])).not.toThrow();
+    expect(audioElements).toHaveLength(1);
+    expect(audioElements[0]?.volume).toBe(1);
+    expect(mockGainNodes[0]?.gain.value).toBe(2);
   });
 });
 

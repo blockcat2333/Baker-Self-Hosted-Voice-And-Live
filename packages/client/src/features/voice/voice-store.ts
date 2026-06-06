@@ -285,7 +285,7 @@ function attachRemoteAudioTrack(fromUserId: string, track: MediaStreamTrack, str
     remoteAudioElements.set(fromUserId, audio);
   }
   audio.srcObject = streams[0] ?? new MediaStream([track]);
-  audio.volume = getEffectivePlaybackVolumeForUser(fromUserId);
+  applyRemoteAudioElementVolumeForUser(fromUserId);
   void applyPreferredAudioOutputDevice(audio).catch((err) => {
     console.warn('[voice] audio output selection failed:', err);
   });

@@ -133,6 +133,7 @@ export const zh = {
     leave_title: '离开语音频道',
     leave: '离开',
     error_title: '语音不可用',
+    music_error_title: '音乐共享错误',
     error_dismiss: '关闭',
     net_label_gw_rtt: '网关延迟',
     net_label_gw_loss: '网关丢包',

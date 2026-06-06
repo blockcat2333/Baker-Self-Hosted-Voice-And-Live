@@ -48,11 +48,13 @@ function resetAuthStore() {
 }
 
 describe('auth store persistence', () => {
-  let storage: Storage;
+  let localStorage: Storage;
+  let sessionStorage: Storage;
 
   beforeEach(() => {
-    storage = createMemoryStorage();
-    vi.stubGlobal('window', { localStorage: storage });
+    localStorage = createMemoryStorage();
+    sessionStorage = createMemoryStorage();
+    vi.stubGlobal('window', { localStorage, sessionStorage });
     resetAuthStore();
   });
 
@@ -75,9 +77,12 @@ describe('auth store persistence', () => {
 
     await useAuthStore.getState().login(api, user.email, 'password123');
 
-    expect(storage.getItem('baker_access_token')).toBe('access-token');
-    expect(storage.getItem('baker_refresh_token')).toBe('refresh-token');
-    expect(storage.getItem('baker_auth_user')).toBe(JSON.stringify(user));
+    expect(sessionStorage.getItem('baker_access_token')).toBe('access-token');
+    expect(sessionStorage.getItem('baker_refresh_token')).toBe('refresh-token');
+    expect(sessionStorage.getItem('baker_auth_user')).toBe(JSON.stringify(user));
+    expect(localStorage.getItem('baker_access_token')).toBeNull();
+    expect(localStorage.getItem('baker_refresh_token')).toBeNull();
+    expect(localStorage.getItem('baker_auth_user')).toBeNull();
 
     resetAuthStore();
     useAuthStore.getState().rehydrate();
@@ -90,16 +95,36 @@ describe('auth store persistence', () => {
   });
 
   it('clears the persisted session on logout', async () => {
-    storage.setItem('baker_access_token', 'access-token');
-    storage.setItem('baker_refresh_token', 'refresh-token');
-    storage.setItem('baker_auth_user', JSON.stringify(user));
+    sessionStorage.setItem('baker_access_token', 'access-token');
+    sessionStorage.setItem('baker_refresh_token', 'refresh-token');
+    sessionStorage.setItem('baker_auth_user', JSON.stringify(user));
     useAuthStore.getState().rehydrate();
 
     await useAuthStore.getState().logout();
 
-    expect(storage.getItem('baker_access_token')).toBeNull();
-    expect(storage.getItem('baker_refresh_token')).toBeNull();
-    expect(storage.getItem('baker_auth_user')).toBeNull();
+    expect(sessionStorage.getItem('baker_access_token')).toBeNull();
+    expect(sessionStorage.getItem('baker_refresh_token')).toBeNull();
+    expect(sessionStorage.getItem('baker_auth_user')).toBeNull();
+    expect(localStorage.getItem('baker_access_token')).toBeNull();
+    expect(localStorage.getItem('baker_refresh_token')).toBeNull();
+    expect(localStorage.getItem('baker_auth_user')).toBeNull();
+    expect(useAuthStore.getState()).toMatchObject({
+      accessToken: null,
+      refreshToken: null,
+      user: null,
+    });
+  });
+
+  it('clears legacy localStorage tokens during rehydrate', () => {
+    localStorage.setItem('baker_access_token', 'legacy-access-token');
+    localStorage.setItem('baker_refresh_token', 'legacy-refresh-token');
+    localStorage.setItem('baker_auth_user', JSON.stringify(user));
+
+    useAuthStore.getState().rehydrate();
+
+    expect(localStorage.getItem('baker_access_token')).toBeNull();
+    expect(localStorage.getItem('baker_refresh_token')).toBeNull();
+    expect(localStorage.getItem('baker_auth_user')).toBeNull();
     expect(useAuthStore.getState()).toMatchObject({
       accessToken: null,
       refreshToken: null,

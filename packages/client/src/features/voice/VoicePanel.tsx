@@ -711,21 +711,6 @@ export function VoicePanel() {
   const status = useVoiceStore((s) => s.status);
   const voiceError = useVoiceStore((s) => s.error);
   const clearError = useVoiceStore((s) => s.clearError);
-  const musicError = useMusicStore((s) => s.error);
-
-  useEffect(() => {
-    if (!musicError) return;
-
-    const timeoutId = window.setTimeout(() => {
-      if (useMusicStore.getState().error === musicError) {
-        useMusicStore.setState({ error: null });
-      }
-    }, 5000);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [musicError]);
 
   if (status === 'error') {
     let errorMessage: string;

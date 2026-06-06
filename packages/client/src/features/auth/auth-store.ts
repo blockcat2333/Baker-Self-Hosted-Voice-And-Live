@@ -9,17 +9,32 @@ const ACCESS_TOKEN_KEY = 'baker_access_token';
 const REFRESH_TOKEN_KEY = 'baker_refresh_token';
 const USER_KEY = 'baker_auth_user';
 
-function getPersistentStorage() {
+function getSessionStorage() {
   if (typeof window === 'undefined') {
     return null;
   }
 
-  return window.localStorage;
+  return window.sessionStorage;
+}
+
+function clearLegacyLocalStorageTokens() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+    window.localStorage.removeItem(USER_KEY);
+  } catch {
+    // Legacy localStorage may be blocked; session auth should still work.
+  }
 }
 
 function loadStoredSession(): { accessToken: string; refreshToken: string; user: AuthUser | null } | null {
   try {
-    const storage = getPersistentStorage();
+    clearLegacyLocalStorageTokens();
+    const storage = getSessionStorage();
     if (!storage) return null;
     const access = storage.getItem(ACCESS_TOKEN_KEY);
     const refresh = storage.getItem(REFRESH_TOKEN_KEY);
@@ -27,14 +42,15 @@ function loadStoredSession(): { accessToken: string; refreshToken: string; user:
     const user = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
     if (access && refresh) return { accessToken: access, refreshToken: refresh, user };
   } catch {
-    // Persistent storage unavailable (SSR / test env)
+    // Session storage unavailable (SSR / test env)
   }
   return null;
 }
 
 function saveSession(accessToken: string, refreshToken: string, user: AuthUser) {
   try {
-    const storage = getPersistentStorage();
+    clearLegacyLocalStorageTokens();
+    const storage = getSessionStorage();
     if (!storage) return;
     storage.setItem(ACCESS_TOKEN_KEY, accessToken);
     storage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -46,7 +62,8 @@ function saveSession(accessToken: string, refreshToken: string, user: AuthUser) 
 
 function clearTokens() {
   try {
-    const storage = getPersistentStorage();
+    clearLegacyLocalStorageTokens();
+    const storage = getSessionStorage();
     if (!storage) return;
     storage.removeItem(ACCESS_TOKEN_KEY);
     storage.removeItem(REFRESH_TOKEN_KEY);
@@ -71,7 +88,7 @@ interface AuthState {
   logout(api?: ApiClient): Promise<void>;
   /** Attempt a silent token refresh. Returns new accessToken or null on failure. */
   refreshTokens(api: ApiClient): Promise<string | null>;
-  /** Rehydrate from localStorage on app mount. */
+  /** Rehydrate from sessionStorage on app mount. */
   rehydrate(): void;
 }
 

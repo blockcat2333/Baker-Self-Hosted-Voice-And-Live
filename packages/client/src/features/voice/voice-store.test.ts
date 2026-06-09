@@ -70,7 +70,9 @@ class MockAudio {
 
   set volume(value: number) {
     if (value < 0 || value > 1) {
-      throw new Error(`HTMLMediaElement volume must be between 0 and 1, received ${value}.`);
+      throw new Error(
+        `HTMLMediaElement volume must be between 0 and 1, received ${value}.`,
+      );
     }
     this.currentVolume = value;
   }
@@ -99,7 +101,12 @@ class MockAudioContext {
 
   createMediaStreamDestination() {
     return {
-      stream: new MockMediaStream([new MockTrack('send-audio-track', 'audio') as unknown as MediaStreamTrack]),
+      stream: new MockMediaStream([
+        new MockTrack(
+          'send-audio-track',
+          'audio',
+        ) as unknown as MediaStreamTrack,
+      ]),
     };
   }
 
@@ -226,7 +233,12 @@ beforeEach(() => {
   });
 
   getUserMedia.mockResolvedValue(
-    new MockMediaStream([new MockTrack('capture-audio-track', 'audio') as unknown as MediaStreamTrack]),
+    new MockMediaStream([
+      new MockTrack(
+        'capture-audio-track',
+        'audio',
+      ) as unknown as MediaStreamTrack,
+    ]),
   );
 
   useAuthStore.setState({
@@ -279,7 +291,9 @@ beforeEach(() => {
 
 afterEach(async () => {
   if (useVoiceStore.getState().status === 'active') {
-    await useVoiceStore.getState().leaveVoiceChannel(async () => ({ channelId }));
+    await useVoiceStore
+      .getState()
+      .leaveVoiceChannel(async () => ({ channelId }));
   }
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
@@ -349,13 +363,18 @@ describe('participant playback volume preferences', () => {
       vi.fn(),
     );
 
-    const track = new MockTrack('remote-audio-track', 'audio') as unknown as MediaStreamTrack;
+    const track = new MockTrack(
+      'remote-audio-track',
+      'audio',
+    ) as unknown as MediaStreamTrack;
     const stream = new MockMediaStream([track]) as unknown as MediaStream;
 
-    expect(() => latestCallbacks!.onRemoteTrack(peerUserId, track, [stream])).not.toThrow();
+    expect(() =>
+      latestCallbacks!.onRemoteTrack(peerUserId, track, [stream]),
+    ).not.toThrow();
     expect(audioElements).toHaveLength(1);
     expect(audioElements[0]?.volume).toBe(1);
-    expect(mockGainNodes[0]?.gain.value).toBe(2);
+    expect(mockGainNodes.map((node) => node.gain.value)).toEqual([1, 2]);
   });
 });
 
@@ -366,7 +385,8 @@ describe('voice channel switch', () => {
   it('sends end signals and voice.leave for old channel before joining new channel', async () => {
     const sendRawCommand = vi.fn();
     // Calls in order: voice.join(A) → voice.leave(A) [best-effort] → voice.join(B)
-    const sendCommandAwaitAck = vi.fn()
+    const sendCommandAwaitAck = vi
+      .fn()
       .mockResolvedValueOnce({
         channelId,
         iceServers: [],
@@ -386,13 +406,17 @@ describe('voice channel switch', () => {
 
     getPeerIds.mockReturnValue([peerId]);
 
-    await useVoiceStore.getState().joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+    await useVoiceStore
+      .getState()
+      .joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
     expect(useVoiceStore.getState().status).toBe('active');
 
     sendRawCommand.mockClear();
     sendCommandAwaitAck.mockClear();
 
-    await useVoiceStore.getState().joinVoiceChannel(channelIdB, sendCommandAwaitAck, sendRawCommand);
+    await useVoiceStore
+      .getState()
+      .joinVoiceChannel(channelIdB, sendCommandAwaitAck, sendRawCommand);
 
     // end signal dispatched to peer in old channel
     expect(sendRawCommand).toHaveBeenCalledWith(
@@ -401,7 +425,10 @@ describe('voice channel switch', () => {
     );
 
     // voice.leave sent for old channel before joining new one
-    const calls = sendCommandAwaitAck.mock.calls as [string, Record<string, unknown>][];
+    const calls = sendCommandAwaitAck.mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
     const leaveCall = calls.find(([cmd]) => cmd === 'voice.leave');
     expect(leaveCall).toBeDefined();
     expect(leaveCall![1]).toEqual({ channelId });
@@ -474,7 +501,9 @@ describe('voice mute behavior', () => {
         payload.isSpeaking === true,
     ).length;
 
-    expect(positiveSpeakingCallsAfterMute).toBe(positiveSpeakingCallsBeforeMute);
+    expect(positiveSpeakingCallsAfterMute).toBe(
+      positiveSpeakingCallsBeforeMute,
+    );
   });
 
   it('preserves local mute state across gateway reconnect and resyncs it to the gateway', async () => {
@@ -551,7 +580,11 @@ describe('voice audio device selection', () => {
         iceServers: [],
         participants: [
           { isMuted: false, sessionId, userId },
-          { isMuted: false, sessionId: peerSessionId, userId: '77777777-7777-4777-8777-777777777777' },
+          {
+            isMuted: false,
+            sessionId: peerSessionId,
+            userId: '77777777-7777-4777-8777-777777777777',
+          },
         ],
         sessionId,
       }),

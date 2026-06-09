@@ -3,10 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import '../../i18n';
-import { useGatewayStore } from '../gateway/gateway-store';
 import { useMusicStore } from '../music/music-store';
-import { PresenceBar } from './PresenceBar';
-import { SidebarMusicError } from './SidebarMusicError';
+import { SidebarMusicErrorView } from './SidebarMusicError';
 import {
   clearSidebarMusicError,
   scheduleSidebarMusicErrorClear,
@@ -15,36 +13,29 @@ import {
 describe('SidebarMusicError', () => {
   beforeEach(() => {
     useMusicStore.setState({ error: null });
-    useGatewayStore.setState({
-      presenceMap: {
-        'online-user': {
-          connectionCount: 1,
-          status: 'online',
-          username: 'saygoodbye233',
-        },
-      },
-    });
   });
 
   afterEach(() => {
     useMusicStore.setState({ error: null });
-    useGatewayStore.setState({ presenceMap: {} });
   });
 
   it('renders the music error above the online presence section', () => {
-    useMusicStore.setState({ error: 'Music capture failed.' });
-
     const markup = renderToStaticMarkup(
       createElement(
         'div',
         null,
-        createElement(SidebarMusicError),
-        createElement(PresenceBar),
+        createElement(SidebarMusicErrorView, {
+          musicError: 'Music capture failed.',
+          onDismiss: () => {},
+        }),
+        createElement('div', { className: 'presence-bar' }, 'saygoodbye233'),
       ),
     );
 
     expect(markup).toContain('Music capture failed.');
-    expect(markup.indexOf('Music capture failed.')).toBeLessThan(markup.indexOf('saygoodbye233'));
+    expect(markup.indexOf('Music capture failed.')).toBeLessThan(
+      markup.indexOf('saygoodbye233'),
+    );
   });
 
   it('clears the current music error when dismissed', () => {

@@ -177,14 +177,14 @@ function attachRemoteAudioElement(musicId: string, stream: MediaStream) {
   }
 
   audio.srcObject = stream;
-  audio.volume = useMusicStore.getState().playbackVolume;
+  audio.volume = clampMusicPlaybackVolume(useMusicStore.getState().playbackVolume);
   void audio.play().catch((err) => {
     console.warn('[music] remote audio play() blocked:', err);
   });
 }
 
 function syncRemoteAudioVolumes() {
-  const volume = useMusicStore.getState().playbackVolume;
+  const volume = clampMusicPlaybackVolume(useMusicStore.getState().playbackVolume);
   for (const audio of remoteAudioElements.values()) {
     audio.volume = volume;
   }

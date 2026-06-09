@@ -15,9 +15,13 @@ const { playVoiceSfx } = vi.hoisted(() => ({
   playVoiceSfx: vi.fn(),
 }));
 let analyserAmplitude = 0;
+const OriginalAudio = globalThis.Audio;
 const OriginalMediaStream = globalThis.MediaStream;
 const OriginalAudioContext = globalThis.AudioContext;
 const OriginalNavigator = globalThis.navigator;
+const OriginalWindow = globalThis.window;
+const audioElements: MockAudio[] = [];
+const mockGainNodes: Array<{ gain: { value: number } }> = [];
 
 class MockTrack {
   enabled = true;
@@ -49,6 +53,31 @@ class MockMediaStream {
   }
 }
 
+class MockAudio {
+  autoplay = false;
+  pause = vi.fn();
+  play = vi.fn().mockResolvedValue(undefined);
+  srcObject: MediaStream | null = null;
+  private currentVolume = 1;
+
+  constructor() {
+    audioElements.push(this);
+  }
+
+  get volume() {
+    return this.currentVolume;
+  }
+
+  set volume(value: number) {
+    if (value < 0 || value > 1) {
+      throw new Error(
+        `HTMLMediaElement volume must be between 0 and 1, received ${value}.`,
+      );
+    }
+    this.currentVolume = value;
+  }
+}
+
 class MockAudioContext {
   createAnalyser() {
     return {
@@ -62,19 +91,32 @@ class MockAudioContext {
   }
 
   createGain() {
-    return {
+    const gainNode = {
       connect() {},
       gain: { value: 1 },
     };
+    mockGainNodes.push(gainNode);
+    return gainNode;
   }
 
   createMediaStreamDestination() {
     return {
-      stream: new MockMediaStream([new MockTrack('send-audio-track', 'audio') as unknown as MediaStreamTrack]),
+      stream: new MockMediaStream([
+        new MockTrack(
+          'send-audio-track',
+          'audio',
+        ) as unknown as MediaStreamTrack,
+      ]),
     };
   }
 
   createMediaStreamSource(_stream: MediaStream) {
+    return {
+      connect() {},
+    };
+  }
+
+  createMediaElementSource(_audio: HTMLAudioElement) {
     return {
       connect() {},
     };
@@ -118,6 +160,7 @@ vi.mock('./voice-sfx', () => ({
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import { useAudioDeviceStore } from '../media/audio-device-store';
+import { CLIENT_PREFERENCES_STORAGE_KEY } from '../preferences/client-preferences';
 import { useVoiceStore } from './voice-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
@@ -126,6 +169,24 @@ const sessionId = '33333333-3333-4333-8333-333333333333';
 const peerSessionId = '44444444-4444-4444-8444-444444444444';
 const sessionIdB = '55555555-5555-4555-8555-555555555555';
 const getUserMedia = vi.fn();
+
+function createMockStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    clear: vi.fn(() => values.clear()),
+    getItem: vi.fn((key: string) => values.get(key) ?? null),
+    key: vi.fn((index: number) => [...values.keys()][index] ?? null),
+    get length() {
+      return values.size;
+    },
+    removeItem: vi.fn((key: string) => {
+      values.delete(key);
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+      values.set(key, value);
+    }),
+  };
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -148,9 +209,18 @@ beforeEach(() => {
   getPeerIds.mockReturnValue([]);
   playVoiceSfx.mockReset();
   latestCallbacks = null;
+  audioElements.length = 0;
+  mockGainNodes.length = 0;
 
+  globalThis.Audio = MockAudio as unknown as typeof Audio;
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
   globalThis.AudioContext = MockAudioContext as unknown as typeof AudioContext;
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      localStorage: createMockStorage(),
+    },
+  });
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: globalThis.navigator ?? {},
@@ -163,7 +233,12 @@ beforeEach(() => {
   });
 
   getUserMedia.mockResolvedValue(
-    new MockMediaStream([new MockTrack('capture-audio-track', 'audio') as unknown as MediaStreamTrack]),
+    new MockMediaStream([
+      new MockTrack(
+        'capture-audio-track',
+        'audio',
+      ) as unknown as MediaStreamTrack,
+    ]),
   );
 
   useAuthStore.setState({
@@ -216,15 +291,90 @@ beforeEach(() => {
 
 afterEach(async () => {
   if (useVoiceStore.getState().status === 'active') {
-    await useVoiceStore.getState().leaveVoiceChannel(async () => ({ channelId }));
+    await useVoiceStore
+      .getState()
+      .leaveVoiceChannel(async () => ({ channelId }));
   }
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
+  globalThis.Audio = OriginalAudio;
   globalThis.MediaStream = OriginalMediaStream;
   globalThis.AudioContext = OriginalAudioContext;
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: OriginalNavigator,
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: OriginalWindow,
+  });
+});
+
+describe('participant playback volume preferences', () => {
+  it('persists participant playback volume by user id', () => {
+    useVoiceStore.getState().setParticipantPlaybackVolume('peer-user', 1.5);
+
+    const raw = window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw ?? '{}')).toMatchObject({
+      voiceParticipantPlaybackVolume: {
+        'peer-user': 1.5,
+      },
+    });
+  });
+
+  it('removes participant playback volume preference when reset', () => {
+    useVoiceStore.getState().setParticipantPlaybackVolume('peer-user', 1.5);
+    useVoiceStore.getState().clearParticipantPlaybackVolume('peer-user');
+
+    const raw = window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY);
+    expect(JSON.parse(raw ?? '{}')).toMatchObject({
+      voiceParticipantPlaybackVolume: {},
+    });
+  });
+
+  it('clamps participant playback volume before persisting', () => {
+    useVoiceStore.getState().setParticipantPlaybackVolume('peer-user', 3);
+
+    const raw = window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY);
+    expect(JSON.parse(raw ?? '{}')).toMatchObject({
+      voiceParticipantPlaybackVolume: {
+        'peer-user': 2,
+      },
+    });
+  });
+
+  it('clamps the media element volume and applies gain when remote audio first attaches above 100%', async () => {
+    const peerUserId = '77777777-7777-4777-8777-777777777777';
+
+    useVoiceStore.getState().setParticipantPlaybackVolume(peerUserId, 2);
+
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [
+          { isMuted: false, sessionId, userId },
+          { isMuted: false, sessionId: peerSessionId, userId: peerUserId },
+        ],
+        sessionId,
+      }),
+      vi.fn(),
+    );
+
+    const track = new MockTrack(
+      'remote-audio-track',
+      'audio',
+    ) as unknown as MediaStreamTrack;
+    const stream = new MockMediaStream([track]) as unknown as MediaStream;
+
+    expect(() =>
+      latestCallbacks!.onRemoteTrack(peerUserId, track, [stream]),
+    ).not.toThrow();
+    expect(audioElements).toHaveLength(1);
+    expect(audioElements[0]?.volume).toBe(1);
+    expect(mockGainNodes.map((node) => node.gain.value)).toEqual([1, 2]);
   });
 });
 
@@ -235,7 +385,8 @@ describe('voice channel switch', () => {
   it('sends end signals and voice.leave for old channel before joining new channel', async () => {
     const sendRawCommand = vi.fn();
     // Calls in order: voice.join(A) → voice.leave(A) [best-effort] → voice.join(B)
-    const sendCommandAwaitAck = vi.fn()
+    const sendCommandAwaitAck = vi
+      .fn()
       .mockResolvedValueOnce({
         channelId,
         iceServers: [],
@@ -255,13 +406,17 @@ describe('voice channel switch', () => {
 
     getPeerIds.mockReturnValue([peerId]);
 
-    await useVoiceStore.getState().joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+    await useVoiceStore
+      .getState()
+      .joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
     expect(useVoiceStore.getState().status).toBe('active');
 
     sendRawCommand.mockClear();
     sendCommandAwaitAck.mockClear();
 
-    await useVoiceStore.getState().joinVoiceChannel(channelIdB, sendCommandAwaitAck, sendRawCommand);
+    await useVoiceStore
+      .getState()
+      .joinVoiceChannel(channelIdB, sendCommandAwaitAck, sendRawCommand);
 
     // end signal dispatched to peer in old channel
     expect(sendRawCommand).toHaveBeenCalledWith(
@@ -270,7 +425,10 @@ describe('voice channel switch', () => {
     );
 
     // voice.leave sent for old channel before joining new one
-    const calls = sendCommandAwaitAck.mock.calls as [string, Record<string, unknown>][];
+    const calls = sendCommandAwaitAck.mock.calls as [
+      string,
+      Record<string, unknown>,
+    ][];
     const leaveCall = calls.find(([cmd]) => cmd === 'voice.leave');
     expect(leaveCall).toBeDefined();
     expect(leaveCall![1]).toEqual({ channelId });
@@ -343,7 +501,9 @@ describe('voice mute behavior', () => {
         payload.isSpeaking === true,
     ).length;
 
-    expect(positiveSpeakingCallsAfterMute).toBe(positiveSpeakingCallsBeforeMute);
+    expect(positiveSpeakingCallsAfterMute).toBe(
+      positiveSpeakingCallsBeforeMute,
+    );
   });
 
   it('preserves local mute state across gateway reconnect and resyncs it to the gateway', async () => {
@@ -420,7 +580,11 @@ describe('voice audio device selection', () => {
         iceServers: [],
         participants: [
           { isMuted: false, sessionId, userId },
-          { isMuted: false, sessionId: peerSessionId, userId: '77777777-7777-4777-8777-777777777777' },
+          {
+            isMuted: false,
+            sessionId: peerSessionId,
+            userId: '77777777-7777-4777-8777-777777777777',
+          },
         ],
         sessionId,
       }),

@@ -10,7 +10,7 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "lint": "eslint src drizzle.config.ts",
-    "test": "vitest run packages/db",
+    "test": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

@@ -8,7 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "lint": "eslint src",
     "start": "node dist/index.js",
-    "test": "vitest run apps/media",
+    "test": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

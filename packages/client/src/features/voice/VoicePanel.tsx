@@ -6,8 +6,8 @@ import { sendCommandAwaitAck, sendRawCommand, useGatewayStore } from '../gateway
 import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useMusicStore } from '../music/music-store';
 import { useStreamStore } from '../stream/stream-store';
-import { useChatStore } from '../chat/chat-store';
-import { toVoiceVolumePercent } from './voice-audio';
+import { closeStreamPopup, ensureStreamPopupWindow } from '../stream/stream-popup-controller';
+import { DEFAULT_VOICE_PARTICIPANT_VOLUME, toVoiceParticipantVolumePercent, toVoiceVolumePercent } from './voice-audio';
 import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
 
 interface VoiceControlsState {
@@ -22,6 +22,72 @@ interface VoiceControlsState {
   handleMusicShareToggle(): void;
   handleMute(): void;
   setPlaybackVolume(volume: number): void;
+}
+
+interface SidebarIconProps {
+  className?: string;
+}
+
+function MicrophoneIcon({ className = 'sidebar-action-icon' }: SidebarIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect
+        x="9"
+        y="3.5"
+        width="6"
+        height="10"
+        rx="3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M5.8 11.2a6.2 6.2 0 0 0 12.4 0M12 17.4v3.1M8.6 20.5h6.8"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function SpeakerIcon({ className = 'sidebar-action-icon' }: SidebarIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M4 9.2h3.2L12 5.4v13.2l-4.8-3.8H4V9.2Z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M15.4 8.4a5.6 5.6 0 0 1 0 7.2M18 6.2a8.8 8.8 0 0 1 0 11.6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function MusicNoteIcon({ className = 'sidebar-action-icon' }: SidebarIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M10 17.4a2.7 2.7 0 1 1-1.6-2.5L8.4 6l9-1.8v11.2a2.7 2.7 0 1 1-1.6-2.5V8l-7.4 1.5v8"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
 }
 
 function useVoiceControls(): VoiceControlsState {
@@ -188,17 +254,104 @@ export function VoiceAudioDeviceControls() {
 export interface VoiceChannelViewProps {
   channelId: string;
   channelName: string;
+  showConnectionHealth?: boolean;
 }
 
-export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewProps) {
+export function VoiceChannelView({ channelId, channelName, showConnectionHealth = false }: VoiceChannelViewProps) {
   const { t } = useTranslation();
   const connectedChannelId = useVoiceStore((s) => s.channelId);
+  const connectionIssue = useVoiceStore((s) => s.connectionIssue);
+  const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
+  const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
   const participants = useVoiceStore((s) => s.participants);
+  const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
   const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
+  const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
+  const clearParticipantPlaybackVolume = useVoiceStore((s) => s.clearParticipantPlaybackVolume);
+  const status = useVoiceStore((s) => s.status);
+  const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
+  const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
   const voiceRosterByChannel = useGatewayStore((s) => s.voiceRosterByChannel);
   const presenceMap = useGatewayStore((s) => s.presenceMap);
   const myUserId = useAuthStore((s) => s.user?.id ?? null);
+  const roomStateByChannel = useStreamStore((s) => s.roomStateByChannel);
+  const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
+  const watchStream = useStreamStore((s) => s.watchStream);
+  const [expandedVolumeUserIds, setExpandedVolumeUserIds] = useState<Set<string>>(() => new Set());
   const visibleParticipants = connectedChannelId === channelId ? participants : (voiceRosterByChannel[channelId] ?? []);
+  const isViewingConnectedVoiceChannel = connectedChannelId === channelId;
+  const networkSnapshot = isViewingConnectedVoiceChannel && myUserId ? voiceNetworkByChannel[channelId]?.[myUserId] : null;
+  const gatewayLossPct = networkSnapshot?.gatewayLossPct ?? null;
+  const mediaLossPct = isViewingConnectedVoiceChannel
+    ? (localMediaSelfLossPct ?? networkSnapshot?.mediaSelfLossPct ?? null)
+    : null;
+  const localStatsStale =
+    isViewingConnectedVoiceChannel && localMediaSelfUpdatedAt !== null && Date.now() - localMediaSelfUpdatedAt > 15_000;
+  const isStale = isViewingConnectedVoiceChannel && (networkSnapshot?.stale ?? localStatsStale);
+  const connectionHealth = useMemo(() => {
+    if (!isViewingConnectedVoiceChannel) {
+      return { label: t('voice.connection_health_not_connected'), level: 'warn' };
+    }
+
+    if (connectionIssue || status === 'error') {
+      return { label: t('voice.connection_health_error'), level: 'danger' };
+    }
+
+    if (status === 'reconnecting') {
+      return { label: t('voice.connection_health_reconnecting'), level: 'warn' };
+    }
+
+    if (status === 'joining' || status === 'requesting_mic') {
+      return { label: t('voice.connection_health_connecting'), level: 'warn' };
+    }
+
+    if (status === 'leaving') {
+      return { label: t('voice.connection_health_leaving'), level: 'warn' };
+    }
+
+    if ((gatewayLossPct ?? 0) > 0) {
+      return { label: t('voice.connection_health_gateway_loss'), level: (gatewayLossPct ?? 0) >= 5 ? 'danger' : 'warn' };
+    }
+
+    if ((mediaLossPct ?? 0) > 0) {
+      return { label: t('voice.connection_health_media_loss'), level: (mediaLossPct ?? 0) >= 5 ? 'danger' : 'warn' };
+    }
+
+    if (gatewayRttMs !== null && gatewayRttMs > 300) {
+      return { label: t('voice.connection_health_bad_latency'), level: 'danger' };
+    }
+
+    if (gatewayRttMs !== null && gatewayRttMs >= 150) {
+      return { label: t('voice.connection_health_high_latency'), level: 'warn' };
+    }
+
+    if (isStale) {
+      return { label: t('voice.connection_health_stale'), level: 'warn' };
+    }
+
+    return { label: t('voice.connection_health_stable'), level: 'stable' };
+  }, [connectionIssue, gatewayLossPct, gatewayRttMs, isStale, isViewingConnectedVoiceChannel, mediaLossPct, status, t]);
+  const liveStreamsByUserId = useMemo(() => {
+    const next: Record<string, { streamId: string }> = {};
+    for (const stream of Object.values(roomStateByChannel[channelId] ?? {})) {
+      if (stream.status === 'live') {
+        next[stream.hostUserId] = { streamId: stream.streamId };
+      }
+    }
+    return next;
+  }, [channelId, roomStateByChannel]);
+  const watchedStreamIds = useMemo(() => new Set(Object.keys(watchedStreamsById)), [watchedStreamsById]);
+
+  function handleWatchStream(streamId: string) {
+    if (!ensureStreamPopupWindow(streamId)) {
+      useStreamStore.setState({ error: t('stream.error_popup_blocked') });
+      return;
+    }
+
+    void watchStream(channelId, streamId, sendCommandAwaitAck, sendRawCommand).catch(() => {
+      closeStreamPopup(streamId);
+    });
+  }
 
   return (
     <section className="voice-channel-view" aria-label={channelName}>
@@ -211,6 +364,11 @@ export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewPro
           <span className="voice-channel-view-dot" aria-hidden="true" />
           <span>{t('voice.member_count', { count: visibleParticipants.length })}</span>
           <span>{t('voice.public_channel')}</span>
+          {showConnectionHealth ? (
+            <span className={`voice-channel-connection-health voice-channel-connection-health--${connectionHealth.level}`}>
+              {t('voice.connection_health_label', { status: connectionHealth.label })}
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -220,6 +378,13 @@ export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewPro
             const isMe = participant.userId === myUserId;
             const displayName = isMe ? t('common.you') : (presenceMap[participant.userId]?.username ?? participant.userId);
             const isSpeaking = speakingUserIds.has(participant.userId);
+            const participantVolume =
+              participantPlaybackVolume[participant.userId] ?? DEFAULT_VOICE_PARTICIPANT_VOLUME;
+            const participantVolumePercent = toVoiceParticipantVolumePercent(participantVolume);
+            const isVolumeOpen = expandedVolumeUserIds.has(participant.userId);
+            const volumeControlId = `voice-participant-volume-${participant.userId}`;
+            const liveStream = liveStreamsByUserId[participant.userId] ?? null;
+            const canWatchLiveStream = !!liveStream && !isMe && !watchedStreamIds.has(liveStream.streamId);
 
             return (
               <li
@@ -232,13 +397,75 @@ export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewPro
                   .filter(Boolean)
                   .join(' ')}
               >
-                <span className="voice-channel-view-avatar" aria-hidden="true">
-                  {displayName.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="voice-channel-view-member-name">{displayName}</span>
-                {participant.isMuted ? <span className="voice-channel-view-badge">{t('voice.badge_muted')}</span> : null}
-                {isSpeaking && !participant.isMuted ? (
-                  <span className="voice-channel-view-badge">{t('voice.badge_speaking')}</span>
+                <button
+                  type="button"
+                  className="voice-channel-view-member-button"
+                  aria-expanded={isVolumeOpen}
+                  aria-controls={isVolumeOpen ? volumeControlId : undefined}
+                  onClick={() => {
+                    setExpandedVolumeUserIds((current) => {
+                      const next = new Set(current);
+                      if (next.has(participant.userId)) {
+                        next.delete(participant.userId);
+                      } else {
+                        next.add(participant.userId);
+                      }
+                      return next;
+                    });
+                  }}
+                >
+                  <span className="voice-channel-view-avatar" aria-hidden="true">
+                    {displayName.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="voice-channel-view-member-name">{displayName}</span>
+                  {participant.isMuted ? <span className="voice-channel-view-badge">{t('voice.badge_muted')}</span> : null}
+                  {isSpeaking && !participant.isMuted ? (
+                    <span className="voice-channel-view-badge">{t('voice.badge_speaking')}</span>
+                  ) : null}
+                  {liveStream ? <span className="voice-channel-view-live-badge">{t('chat.live_badge')}</span> : null}
+                </button>
+
+                {isVolumeOpen ? (
+                  <div id={volumeControlId} className="voice-channel-volume-popover">
+                    <div className="voice-channel-volume-header">
+                      <span>{t('voice.participant_volume_title', { user: displayName })}</span>
+                      <strong>{participantVolumePercent}%</strong>
+                    </div>
+                    {isMe ? (
+                      <p className="voice-channel-volume-note">{t('voice.participant_volume_self_note')}</p>
+                    ) : (
+                      <div className="voice-channel-volume-row">
+                        <input
+                          type="range"
+                          className="voice-volume-slider"
+                          min={0}
+                          max={200}
+                          value={participantVolumePercent}
+                          aria-label={t('voice.participant_volume_aria', { user: displayName })}
+                          onChange={(event) => {
+                            setParticipantPlaybackVolume(participant.userId, Number(event.target.value) / 100);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-ghost voice-channel-volume-reset"
+                          onClick={() => clearParticipantPlaybackVolume(participant.userId)}
+                          disabled={participantPlaybackVolume[participant.userId] === undefined}
+                        >
+                          {t('voice.reset_volume')}
+                        </button>
+                      </div>
+                    )}
+                    {canWatchLiveStream ? (
+                      <button
+                        type="button"
+                        className="btn-ghost voice-channel-watch-stream-btn"
+                        onClick={() => handleWatchStream(liveStream.streamId)}
+                      >
+                        {t('stream.action_watch_stream')}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </li>
             );
@@ -247,17 +474,21 @@ export function VoiceChannelView({ channelId, channelName }: VoiceChannelViewPro
       ) : null}
 
       <div className="voice-channel-empty">
-        <div className="voice-channel-empty-icon" aria-hidden="true">VC</div>
         <h3>{t('voice.channel_welcome_title', { channel: channelName })}</h3>
-        <p>{t('voice.channel_welcome_copy')}</p>
       </div>
     </section>
   );
 }
 
-export function VoiceBottomControlBar() {
+export interface VoiceBottomControlBarProps {
+  onOpenStreamShareDialog: () => void;
+}
+
+export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomControlBarProps) {
   const { t } = useTranslation();
   const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
+  const ownedStream = useStreamStore((s) => s.ownedStream);
+  const stopSharing = useStreamStore((s) => s.stopSharing);
   const controls = useVoiceControls();
   const lastAudiblePlaybackVolumeRef = useRef(1);
 
@@ -293,6 +524,31 @@ export function VoiceBottomControlBar() {
       </div>
 
       <div className="voice-bottom-actions">
+        {ownedStream ? (
+          <button
+            type="button"
+            className="btn-ghost voice-bottom-btn voice-bottom-btn--danger"
+            onClick={() => {
+              void stopSharing(sendCommandAwaitAck);
+            }}
+            disabled={controls.isConnecting || ownedStream.status === 'stopping'}
+            title={t('stream.action_stop_sharing')}
+          >
+            <span aria-hidden="true">X</span>
+            <span>{t('stream.action_stop_sharing')}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-ghost voice-bottom-btn voice-bottom-btn--stream"
+            onClick={onOpenStreamShareDialog}
+            disabled={controls.isConnecting}
+            title={t('stream.action_start_stream')}
+          >
+            <span aria-hidden="true">LIVE</span>
+            <span>{t('stream.action_start_stream')}</span>
+          </button>
+        )}
         <button
           type="button"
           className={`btn-ghost voice-bottom-btn${controls.isMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
@@ -369,24 +625,30 @@ export function VoiceSidebarVolumeControls() {
           className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'input' ? ' voice-audio-toggle--active' : ''}`}
           onClick={() => toggleVolumeControl('input')}
           aria-pressed={expandedVolumeControl === 'input'}
+          aria-label={t('voice.mic_input')}
+          title={t('voice.mic_input')}
         >
-          {t('voice.mic_input')}
+          <MicrophoneIcon />
         </button>
         <button
           type="button"
           className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'output' ? ' voice-audio-toggle--active' : ''}`}
           onClick={() => toggleVolumeControl('output')}
           aria-pressed={expandedVolumeControl === 'output'}
+          aria-label={t('voice.playback')}
+          title={t('voice.playback')}
         >
-          {t('voice.playback')}
+          <SpeakerIcon />
         </button>
         <button
           type="button"
           className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'music' ? ' voice-audio-toggle--active' : ''}`}
           onClick={() => toggleVolumeControl('music')}
           aria-pressed={expandedVolumeControl === 'music'}
+          aria-label={t('voice.shared_music')}
+          title={t('voice.shared_music')}
         >
-          {t('voice.shared_music')}
+          <MusicNoteIcon />
         </button>
       </div>
 
@@ -448,50 +710,7 @@ export function VoicePanel() {
   const { t } = useTranslation();
   const status = useVoiceStore((s) => s.status);
   const voiceError = useVoiceStore((s) => s.error);
-  const connectionIssue = useVoiceStore((s) => s.connectionIssue);
-  const channelId = useVoiceStore((s) => s.channelId);
-  const participants = useVoiceStore((s) => s.participants);
-  const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
-  const peerNetwork = useVoiceStore((s) => s.peerNetwork);
-  const localMediaSelfLossPct = useVoiceStore((s) => s.localMediaSelfLossPct);
-  const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
   const clearError = useVoiceStore((s) => s.clearError);
-  const musicError = useMusicStore((s) => s.error);
-  const myUserId = useAuthStore((s) => s.user?.id ?? null);
-  const myUsername = useAuthStore((s) => s.user?.username ?? null);
-  const presenceMap = useGatewayStore((s) => s.presenceMap);
-  const voiceNetworkByChannel = useGatewayStore((s) => s.voiceNetworkByChannel);
-  const activeGuildId = useChatStore((s) => s.activeGuildId);
-  const channelsByGuild = useChatStore((s) => s.channelsByGuild);
-  const controls = useVoiceControls();
-
-  useEffect(() => {
-    if (!musicError) return;
-
-    const timeoutId = window.setTimeout(() => {
-      if (useMusicStore.getState().error === musicError) {
-        useMusicStore.setState({ error: null });
-      }
-    }, 5000);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [musicError]);
-
-  const participantNameById = useMemo(() => {
-    const names: Record<string, string> = {};
-    for (const participant of participants) {
-      if (participant.userId === myUserId) {
-        names[participant.userId] = myUsername ?? t('common.you');
-        continue;
-      }
-      names[participant.userId] = presenceMap[participant.userId]?.username ?? participant.userId;
-    }
-    return names;
-  }, [myUserId, myUsername, participants, presenceMap, t]);
-
-  if (status === 'idle') return null;
 
   if (status === 'error') {
     let errorMessage: string;
@@ -523,100 +742,5 @@ export function VoicePanel() {
     );
   }
 
-  if (!channelId) return null;
-
-  const channelName =
-    (activeGuildId ? channelsByGuild[activeGuildId]?.find((channel) => channel.id === channelId)?.name : null) ??
-    channelId;
-
-  return (
-    <div className="voice-panel">
-      <div className="voice-panel-header">
-        <div className="voice-panel-heading">
-          <span className="voice-panel-icon">VC</span>
-          <span className="voice-panel-label">
-            {controls.isConnecting ? t('voice.status_connecting') : t('voice.status_connected')}
-          </span>
-        </div>
-        <span className="voice-panel-member-count">{participants.length}</span>
-      </div>
-
-      <div className="voice-panel-channel" title={channelName}>
-        <span className="voice-panel-channel-dot" aria-hidden="true" />
-        <span>{channelName}</span>
-      </div>
-
-      {connectionIssue ? (
-        <p className="voice-panel-warning" role="alert">
-          {t('voice.error_connection_issue')}
-        </p>
-      ) : null}
-
-      {musicError ? (
-        <p className="voice-panel-warning" role="alert">
-          {musicError}
-        </p>
-      ) : null}
-
-      <ul className="voice-participant-list">
-        {participants.map((participant) => {
-          const isMe = participant.userId === myUserId;
-          const isSpeaking = speakingUserIds.has(participant.userId);
-          const displayName = participantNameById[participant.userId] ?? participant.userId;
-          const connState = peerNetwork[participant.userId]?.connectionState;
-          const connSuffix = connState && connState !== 'connected' ? ` [${connState}]` : '';
-          const networkSnapshot = voiceNetworkByChannel[channelId]?.[participant.userId];
-          const gatewayRttText =
-            networkSnapshot?.gatewayRttMs === null || networkSnapshot?.gatewayRttMs === undefined
-              ? '--'
-              : `${Math.max(0, Math.round(networkSnapshot.gatewayRttMs))}ms`;
-          const gatewayLossText =
-            networkSnapshot?.gatewayLossPct === null || networkSnapshot?.gatewayLossPct === undefined
-              ? '--'
-              : `${Math.max(0, Math.round(networkSnapshot.gatewayLossPct))}%`;
-          const mediaLossRaw =
-            networkSnapshot?.mediaSelfLossPct ?? (isMe ? localMediaSelfLossPct : null);
-          const mediaLossText =
-            mediaLossRaw === null || mediaLossRaw === undefined
-              ? '--'
-              : `${Math.max(0, Math.round(mediaLossRaw))}%`;
-          const localMetricStale =
-            isMe && localMediaSelfUpdatedAt !== null
-              ? Date.now() - localMediaSelfUpdatedAt > 15_000
-              : true;
-          const stale = networkSnapshot?.stale ?? localMetricStale;
-          const localFallback = !networkSnapshot && isMe && localMediaSelfLossPct !== null;
-          const netLabel = `${t('voice.net_label_gw_rtt')} ${gatewayRttText} · ${t('voice.net_label_gw_loss')} ${gatewayLossText} · ${t('voice.net_label_media_loss')} ${mediaLossText}${stale ? ` · ${t('voice.net_label_stale')}` : ''}${localFallback ? ` · ${t('voice.net_label_local')}` : ''}${connSuffix}`;
-
-          return (
-            <li
-              key={participant.userId}
-              className={[
-                'voice-participant',
-                isSpeaking ? 'voice-participant--speaking' : '',
-                participant.isMuted ? 'voice-participant--muted' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              title={netLabel}
-            >
-              <div className="voice-participant-row">
-                <span className="voice-participant-name" title={displayName}>
-                  {displayName}
-                </span>
-                {isMe ? <span className="voice-participant-badge">{t('common.you')}</span> : null}
-                {participant.isMuted ? (
-                  <span className="voice-participant-badge">{t('voice.badge_muted')}</span>
-                ) : null}
-                {isSpeaking && !participant.isMuted ? (
-                  <span className="voice-participant-badge">{t('voice.badge_speaking')}</span>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-
-    </div>
-  );
+  return null;
 }

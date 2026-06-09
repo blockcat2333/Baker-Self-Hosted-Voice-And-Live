@@ -9,8 +9,8 @@
     "build:native:win": "node scripts/build-excluded-system-audio.mjs --required",
     "dist:win": "pnpm build:native:win && vite build && electron-builder --win nsis --x64 --publish never",
     "dev": "vite",
-    "lint": "eslint electron src vite.config.ts",
-    "test": "vitest run apps/desktop",
+    "lint": "eslint electron src vite.config.ts vitest.config.ts",
+    "test": "vitest run src electron --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

@@ -34,15 +34,33 @@ export function clampVoicePlaybackVolume(volume: number): number {
   return volume;
 }
 
+export function clampVoiceParticipantPlaybackVolume(volume: number): number {
+  if (!Number.isFinite(volume)) {
+    return DEFAULT_VOICE_PARTICIPANT_VOLUME;
+  }
+
+  if (volume <= 0) {
+    return 0;
+  }
+
+  if (volume >= 2) {
+    return 2;
+  }
+
+  return volume;
+}
+
 export function computeEffectiveParticipantPlaybackVolume(
   globalPlaybackVolume: number,
   participantPlaybackVolume: number,
 ): number {
-  return clampVoicePlaybackVolume(
-    clampVoicePlaybackVolume(globalPlaybackVolume) * clampVoicePlaybackVolume(participantPlaybackVolume),
-  );
+  return clampVoicePlaybackVolume(globalPlaybackVolume) * clampVoiceParticipantPlaybackVolume(participantPlaybackVolume);
 }
 
 export function toVoiceVolumePercent(volume: number): number {
   return Math.round(clampVoicePlaybackVolume(volume) * 100);
+}
+
+export function toVoiceParticipantVolumePercent(volume: number): number {
+  return Math.round(clampVoiceParticipantPlaybackVolume(volume) * 100);
 }

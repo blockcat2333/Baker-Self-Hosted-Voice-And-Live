@@ -59,10 +59,21 @@ class MockAudio {
   play = vi.fn().mockResolvedValue(undefined);
   srcObject: MediaStream | null = null;
   style = { display: '' };
-  volume = 1;
+  private currentVolume = 1;
 
   constructor() {
     audioElements.push(this);
+  }
+
+  get volume() {
+    return this.currentVolume;
+  }
+
+  set volume(value: number) {
+    if (value < 0 || value > 1 || !Number.isFinite(value)) {
+      throw new Error(`HTMLMediaElement volume must be between 0 and 1, received ${value}.`);
+    }
+    this.currentVolume = value;
   }
 }
 
@@ -222,6 +233,33 @@ describe('music store playback', () => {
     expect(audioElements[0]?.volume).toBe(0.25);
 
     useMusicStore.getState().setPlaybackVolume(2);
+    expect(audioElements[0]?.volume).toBe(1);
+  });
+
+  it('clamps stored playback volume before writing it to a remote audio element', async () => {
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      hostSessionId,
+      hostUserId,
+      iceServers: [],
+      mediaMode: 'p2p',
+      musicId,
+      sessionId: listenerSessionId,
+    });
+
+    useMusicStore.getState().handleMusicStateUpdated(
+      { channelId, publications: [publication()] },
+      sendCommandAwaitAck,
+      vi.fn(),
+    );
+    await flushPromises();
+
+    useMusicStore.setState({ playbackVolume: 2 });
+
+    const track = createTrack('remote-music-track');
+    const stream = new MockMediaStream([track]) as unknown as MediaStream;
+
+    expect(() => latestCallbacks?.onRemoteTrack?.(hostUserId, track, [stream])).not.toThrow();
     expect(audioElements[0]?.volume).toBe(1);
   });
 });

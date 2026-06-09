@@ -10,6 +10,7 @@ import { sendCommandAwaitAck } from '../gateway/gateway-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import { applyAudioOutputDevice, useAudioDeviceStore } from '../media/audio-device-store';
 import {
+  clampStreamPlaybackVolume,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
   isDisplayAudioSource,
   startPopupStreamPlayback,
@@ -220,7 +221,7 @@ function StreamPopupVideo({
     if (!mediaElement) {
       return;
     }
-    mediaElement.volume = playbackVolume;
+    mediaElement.volume = clampStreamPlaybackVolume(playbackVolume);
   }, [playbackVolume]);
 
   useEffect(() => {

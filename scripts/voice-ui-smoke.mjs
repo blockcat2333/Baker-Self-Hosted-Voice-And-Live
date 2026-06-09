@@ -66,11 +66,10 @@ async function run() {
   await voiceButton.waitFor({ timeout: 20000 });
   await voiceButton.click();
 
-  // Wait until either voice connects or an error panel appears.
-  const voicePanel = page.locator('.voice-panel');
-  await voicePanel.waitFor({ timeout: 20000 });
-
   const voiceError = page.locator('.voice-panel--error');
+  const voiceConnected = page.locator('.voice-bottom-bar, .voice-panel').first();
+  await voiceConnected.waitFor({ timeout: 20000 });
+
   if ((await voiceError.count()) > 0) {
     const text = await page.locator('.voice-panel-error-msg').first().textContent().catch(() => '');
     throw new Error(`Voice UI showed error panel: ${text ?? ''}`.trim());

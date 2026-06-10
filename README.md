@@ -101,6 +101,8 @@ If a bundled service is unhealthy, use **Repair Services** to restart only the a
 
 Self-repair mode stores its settings under `/var/lib/baker/runtime` and continues running inside the container even when the admin page is closed. The default interval is 60 seconds, and it can be adjusted from 30 seconds to 24 hours.
 
+The same runtime card also includes public IP automation. When enabled, Baker periodically detects the server's current public IP and keeps the managed TURN/SFU media addresses current. If the IP changes, it updates the persistent runtime config and restarts only the affected Media/TURN supervisor services. This does not replace port publishing, HTTPS, or TURN credentials; those still need to be configured correctly.
+
 ### Docker Desktop Walkthrough
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
@@ -176,6 +178,8 @@ For public internet deployments, treat these as mandatory requirements, not opti
 
 When `TURN_ENABLED=true`, Baker now fails fast at startup if it cannot determine a public TURN relay address for clients. After restarting the container, confirm the media session logs show `turnConfigured:true` before testing cross-region voice or livestream playback.
 
+If your VPS or home network public IP can change, enable **Runtime Status -> Public IP Automation** in the admin panel after TURN/SFU is configured. Baker will refresh `TURN_EXTERNAL_IP`, auto-generated `TURN_URLS`, and configured `SFU_ANNOUNCED_IP` when the detected public IP changes.
+
 ## Optional SFU Media Mode
 
 Baker defaults to P2P media. TURN helps P2P peers reach each other through strict NATs, but browsers still try to form peer connections between users. SFU mode sends voice and livestream tracks through the built-in media backend, which is often more stable for users on restrictive networks.
@@ -204,6 +208,7 @@ Then open the admin panel and switch **Server settings -> Media mode** from `p2p
 - TURN is optional for small/local setups but strongly recommended for public internet, mobile, VPN, or cross-region usage
 - When TURN is enabled for public deployment, you must expose the relay ports and provide either `TURN_EXTERNAL_IP` or explicit `TURN_URLS`
 - SFU mode requires `SFU_ANNOUNCED_IP` and the `50000-50100` TCP/UDP range to be reachable from browsers
+- If the server's public IP may change, enable public IP automation in the admin panel so media addresses are refreshed automatically
 - `docker-compose.yml` remains in the repo for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment product
 
 ## Current Limits

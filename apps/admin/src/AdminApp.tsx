@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type {
   AdminDeploymentSettings,
   AdminRuntimeHealth,
+  AdminRuntimePublicIpSettings,
   AdminRuntimeRepairResult,
   AdminRuntimeSelfRepairSettings,
   AdminServerSettings,
@@ -16,6 +17,8 @@ import {
   AdminDeploymentSettingsSchema,
   AdminDeleteChannelResponseSchema,
   AdminRuntimeHealthSchema,
+  AdminRuntimePublicIpCheckResultSchema,
+  AdminRuntimePublicIpSettingsSchema,
   AdminRuntimeRepairResultSchema,
   AdminRuntimeSelfRepairSettingsSchema,
   AdminServerSettingsSchema,
@@ -69,6 +72,8 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     useState<AdminRuntimeRepairResult | null>(null);
   const [selfRepair, setSelfRepair] =
     useState<AdminRuntimeSelfRepairSettings | null>(null);
+  const [publicIp, setPublicIp] =
+    useState<AdminRuntimePublicIpSettings | null>(null);
   const [updateVersions, setUpdateVersions] =
     useState<AdminUpdateVersionsResponse | null>(null);
   const [selectedUpdateTag, setSelectedUpdateTag] = useState('');
@@ -107,6 +112,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     useState('60');
   const [selfRepairAllowContainerRepair, setSelfRepairAllowContainerRepair] =
     useState(true);
+  const [publicIpEnabled, setPublicIpEnabled] = useState(false);
+  const [publicIpIntervalSeconds, setPublicIpIntervalSeconds] =
+    useState('300');
 
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserUsername, setNewUserUsername] = useState('');
@@ -161,6 +169,13 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setSelfRepairEnabled(nextSelfRepair.enabled);
     setSelfRepairIntervalSeconds(String(nextSelfRepair.intervalSeconds));
     setSelfRepairAllowContainerRepair(nextSelfRepair.allowContainerRepair);
+  }
+
+  function applyPublicIpSettingsToForm(
+    nextPublicIp: AdminRuntimePublicIpSettings,
+  ) {
+    setPublicIpEnabled(nextPublicIp.enabled);
+    setPublicIpIntervalSeconds(String(nextPublicIp.intervalSeconds));
   }
 
   const request = useCallback(
@@ -223,6 +238,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       nextUpdateStatus,
       nextRuntimeHealth,
       nextSelfRepair,
+      nextPublicIp,
     ] = await Promise.all([
       request(
         '/v1/admin/settings',
@@ -254,6 +270,11 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         { method: 'GET' },
         AdminRuntimeSelfRepairSettingsSchema,
       ),
+      request(
+        '/v1/admin/runtime/public-ip',
+        { method: 'GET' },
+        AdminRuntimePublicIpSettingsSchema,
+      ),
     ]);
 
     setSettings(nextSettings);
@@ -263,6 +284,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setRuntimeHealth(nextRuntimeHealth);
     setRuntimeRepairResult(nextRuntimeHealth.lastRepair);
     setSelfRepair(nextSelfRepair);
+    setPublicIp(nextPublicIp);
     setServerName(nextSettings.serverName);
     setAllowPublicRegistration(nextSettings.allowPublicRegistration);
     setWebEnabled(nextSettings.webEnabled);
@@ -271,6 +293,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setMediaMode(nextSettings.mediaMode);
     applyDeploymentSettingsToForm(nextDeployment);
     applySelfRepairSettingsToForm(nextSelfRepair);
+    applyPublicIpSettingsToForm(nextPublicIp);
   }
 
   const refreshRuntimeHealth = useCallback(async () => {
@@ -564,6 +587,56 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     } catch (err) {
       setError(
         err instanceof Error ? err.message : t('admin.error_save_self_repair'),
+      );
+    } finally {
+      setIsRuntimeLoading(false);
+    }
+  }
+
+  async function handleSavePublicIp(event: React.FormEvent) {
+    event.preventDefault();
+    setIsRuntimeLoading(true);
+    setError(null);
+
+    try {
+      const nextPublicIp = await request(
+        '/v1/admin/runtime/public-ip',
+        {
+          body: JSON.stringify({
+            enabled: publicIpEnabled,
+            intervalSeconds: Number(publicIpIntervalSeconds),
+          }),
+          method: 'PATCH',
+        },
+        AdminRuntimePublicIpSettingsSchema,
+      );
+      setPublicIp(nextPublicIp);
+      applyPublicIpSettingsToForm(nextPublicIp);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('admin.error_save_public_ip'),
+      );
+    } finally {
+      setIsRuntimeLoading(false);
+    }
+  }
+
+  async function handleCheckPublicIp() {
+    setIsRuntimeLoading(true);
+    setError(null);
+
+    try {
+      const result = await request(
+        '/v1/admin/runtime/public-ip/check',
+        { method: 'POST' },
+        AdminRuntimePublicIpCheckResultSchema,
+      );
+      setPublicIp(result.settings);
+      applyPublicIpSettingsToForm(result.settings);
+      await loadDashboard();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('admin.error_check_public_ip'),
       );
     } finally {
       setIsRuntimeLoading(false);
@@ -1086,6 +1159,79 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
             <p className="admin-copy">
               {t('admin.self_repair_saved_at', { time: selfRepair.updatedAt })}
             </p>
+          ) : null}
+          <form className="admin-form" onSubmit={handleSavePublicIp}>
+            <div className="admin-section-header">
+              <div>
+                <h3>{t('admin.public_ip_automation')}</h3>
+                <p className="admin-copy">
+                  {t('admin.public_ip_automation_copy')}
+                </p>
+              </div>
+            </div>
+            <div className="admin-checkbox-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={publicIpEnabled}
+                  onChange={(event) =>
+                    setPublicIpEnabled(event.target.checked)
+                  }
+                />{' '}
+                {t('admin.public_ip_enabled')}
+              </label>
+            </div>
+            <label className="admin-field">
+              <span>{t('admin.public_ip_interval')}</span>
+              <input
+                type="number"
+                min={60}
+                max={86400}
+                value={publicIpIntervalSeconds}
+                onChange={(event) =>
+                  setPublicIpIntervalSeconds(event.target.value)
+                }
+              />
+            </label>
+            <div className="admin-inline-actions">
+              <button
+                type="submit"
+                className="admin-secondary-btn"
+                disabled={isRuntimeLoading}
+              >
+                {t('admin.save_public_ip')}
+              </button>
+              <button
+                type="button"
+                className="admin-primary-btn"
+                onClick={() => void handleCheckPublicIp()}
+                disabled={isRuntimeLoading}
+              >
+                {t('admin.check_public_ip_now')}
+              </button>
+            </div>
+          </form>
+          {publicIp ? (
+            <div className="admin-status">
+              <span>
+                {t('admin.public_ip_detected', {
+                  ip: publicIp.lastDetectedIp ?? t('admin.public_ip_none'),
+                })}
+              </span>
+              <span>
+                {t('admin.public_ip_applied', {
+                  ip: publicIp.lastAppliedIp ?? t('admin.public_ip_none'),
+                })}
+              </span>
+              <span>
+                {t('admin.public_ip_checked_at', {
+                  time: publicIp.lastCheckedAt ?? t('admin.public_ip_never'),
+                })}
+              </span>
+              {publicIp.lastError ? (
+                <span className="admin-error">{publicIp.lastError}</span>
+              ) : null}
+            </div>
           ) : null}
           {runtimeRepairResult ? (
             <div className="admin-status">

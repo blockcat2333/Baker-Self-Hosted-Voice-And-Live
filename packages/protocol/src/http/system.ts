@@ -188,6 +188,29 @@ export const AdminUpdateRuntimeSelfRepairSettingsRequestSchema = z.object({
   intervalSeconds: z.number().int().min(30).max(86_400).optional(),
 });
 
+export const AdminRuntimePublicIpSettingsSchema = z.object({
+  enabled: z.boolean(),
+  intervalSeconds: z.number().int().min(60).max(86_400),
+  lastAppliedAt: z.string().datetime().nullable(),
+  lastAppliedIp: z.string().nullable(),
+  lastCheckedAt: z.string().datetime().nullable(),
+  lastDetectedIp: z.string().nullable(),
+  lastError: z.string().nullable(),
+  updatedAt: z.string().datetime(),
+});
+
+export const AdminUpdateRuntimePublicIpSettingsRequestSchema = z.object({
+  enabled: z.boolean().optional(),
+  intervalSeconds: z.number().int().min(60).max(86_400).optional(),
+});
+
+export const AdminRuntimePublicIpCheckResultSchema = z.object({
+  applied: z.boolean(),
+  changed: z.boolean(),
+  restartedServices: z.array(AdminRuntimeManagedServiceNameSchema),
+  settings: AdminRuntimePublicIpSettingsSchema,
+});
+
 export const AdminDeploymentSettingsSchema = z.object({
   adminHostPort: z.number().int().min(1).max(65535),
   allowedHosts: z.string(),
@@ -316,6 +339,15 @@ export type AdminRuntimeSelfRepairSettings = z.infer<
 >;
 export type AdminUpdateRuntimeSelfRepairSettingsRequest = z.infer<
   typeof AdminUpdateRuntimeSelfRepairSettingsRequestSchema
+>;
+export type AdminRuntimePublicIpSettings = z.infer<
+  typeof AdminRuntimePublicIpSettingsSchema
+>;
+export type AdminUpdateRuntimePublicIpSettingsRequest = z.infer<
+  typeof AdminUpdateRuntimePublicIpSettingsRequestSchema
+>;
+export type AdminRuntimePublicIpCheckResult = z.infer<
+  typeof AdminRuntimePublicIpCheckResultSchema
 >;
 export type AdminDeploymentSettings = z.infer<
   typeof AdminDeploymentSettingsSchema

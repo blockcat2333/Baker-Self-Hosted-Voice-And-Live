@@ -8,8 +8,10 @@ import {
   readDeploymentPendingMarker,
   parseRuntimeEnv,
   readDeploymentRuntimeSettings,
+  readRuntimePublicIpSettings,
   serializeRuntimeEnv,
   updateDeploymentRuntimeSettings,
+  updateRuntimePublicIpSettings,
 } from './runtime-config';
 
 afterEach(() => {
@@ -69,6 +71,37 @@ describe('runtime deployment config', () => {
 
       const reread = await readDeploymentRuntimeSettings();
       expect(reread.turnUsername).toBe('relay');
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it('persists public IP automation settings', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-runtime-public-ip-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    try {
+      const defaults = await readRuntimePublicIpSettings();
+      expect(defaults).toMatchObject({
+        enabled: false,
+        intervalSeconds: 300,
+        lastAppliedIp: null,
+      });
+
+      const updated = await updateRuntimePublicIpSettings({
+        enabled: true,
+        intervalSeconds: 600,
+      });
+      expect(updated).toMatchObject({
+        enabled: true,
+        intervalSeconds: 600,
+      });
+
+      const reread = await readRuntimePublicIpSettings();
+      expect(reread).toMatchObject({
+        enabled: true,
+        intervalSeconds: 600,
+      });
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

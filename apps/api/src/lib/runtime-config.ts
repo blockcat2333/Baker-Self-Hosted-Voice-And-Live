@@ -60,7 +60,23 @@ export interface RuntimeSelfRepairSettingsUpdate {
   intervalSeconds?: number;
 }
 
-type RuntimeEnv = Record<string, string>;
+export interface RuntimePublicIpSettings {
+  enabled: boolean;
+  intervalSeconds: number;
+  lastAppliedAt: string | null;
+  lastAppliedIp: string | null;
+  lastCheckedAt: string | null;
+  lastDetectedIp: string | null;
+  lastError: string | null;
+  updatedAt: string;
+}
+
+export interface RuntimePublicIpSettingsUpdate {
+  enabled?: boolean;
+  intervalSeconds?: number;
+}
+
+export type RuntimeEnv = Record<string, string>;
 
 const defaultRuntimeDir = '/var/lib/baker/runtime';
 const defaultStunUrls =
@@ -92,6 +108,10 @@ export function getRuntimeRepairLockPath() {
 
 export function getRuntimeSelfRepairSettingsPath() {
   return join(getRuntimeDir(), 'self-repair.json');
+}
+
+export function getRuntimePublicIpSettingsPath() {
+  return join(getRuntimeDir(), 'public-ip.json');
 }
 
 function decodeShellValue(input: string) {
@@ -156,7 +176,7 @@ export function serializeRuntimeEnv(env: RuntimeEnv) {
     .join('\n')}\n`;
 }
 
-async function readRuntimeEnvFromDisk(
+export async function readRuntimeEnvFromDisk(
   path = getRuntimeEnvPath(),
 ): Promise<RuntimeEnv> {
   try {
@@ -172,6 +192,16 @@ async function readRuntimeEnvFromDisk(
     }
     throw err;
   }
+}
+
+export async function writeRuntimeEnvToDisk(
+  env: RuntimeEnv,
+  path = getRuntimeEnvPath(),
+) {
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  await writeFile(tmpPath, serializeRuntimeEnv(env), { mode: 0o600 });
+  await rename(tmpPath, path);
 }
 
 function sourceValue(env: RuntimeEnv, key: string, fallback: string) {
@@ -265,10 +295,7 @@ export async function updateDeploymentRuntimeSettings(
   setRuntimeValue(env, 'TURN_USERNAME', input.turnUsername);
   setRuntimeValue(env, 'WEB_PORT', input.webHostPort);
 
-  await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.${process.pid}.tmp`;
-  await writeFile(tmpPath, serializeRuntimeEnv(env), { mode: 0o600 });
-  await rename(tmpPath, path);
+  await writeRuntimeEnvToDisk(env, path);
   await writeDeploymentPendingMarker(Object.keys(input));
 
   return toDeploymentRuntimeSettings(env);
@@ -351,6 +378,19 @@ function defaultRuntimeSelfRepairSettings(): RuntimeSelfRepairSettings {
   };
 }
 
+function defaultRuntimePublicIpSettings(): RuntimePublicIpSettings {
+  return {
+    enabled: false,
+    intervalSeconds: 300,
+    lastAppliedAt: null,
+    lastAppliedIp: null,
+    lastCheckedAt: null,
+    lastDetectedIp: null,
+    lastError: null,
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
 export async function readRuntimeSelfRepairSettings(
   path = getRuntimeSelfRepairSettingsPath(),
 ): Promise<RuntimeSelfRepairSettings> {
@@ -409,4 +449,85 @@ export async function updateRuntimeSelfRepairSettings(
   await writeFile(tmpPath, JSON.stringify(next, null, 2), { mode: 0o600 });
   await rename(tmpPath, path);
   return next;
+}
+
+export async function readRuntimePublicIpSettings(
+  path = getRuntimePublicIpSettingsPath(),
+): Promise<RuntimePublicIpSettings> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(path, 'utf8'),
+    ) as Partial<RuntimePublicIpSettings>;
+    const defaults = defaultRuntimePublicIpSettings();
+    const intervalSeconds =
+      Number.isInteger(parsed.intervalSeconds) &&
+      typeof parsed.intervalSeconds === 'number' &&
+      parsed.intervalSeconds >= 60 &&
+      parsed.intervalSeconds <= 86_400
+        ? parsed.intervalSeconds
+        : defaults.intervalSeconds;
+
+    return {
+      enabled:
+        typeof parsed.enabled === 'boolean' ? parsed.enabled : defaults.enabled,
+      intervalSeconds,
+      lastAppliedAt:
+        typeof parsed.lastAppliedAt === 'string'
+          ? parsed.lastAppliedAt
+          : null,
+      lastAppliedIp:
+        typeof parsed.lastAppliedIp === 'string' ? parsed.lastAppliedIp : null,
+      lastCheckedAt:
+        typeof parsed.lastCheckedAt === 'string'
+          ? parsed.lastCheckedAt
+          : null,
+      lastDetectedIp:
+        typeof parsed.lastDetectedIp === 'string'
+          ? parsed.lastDetectedIp
+          : null,
+      lastError:
+        typeof parsed.lastError === 'string' ? parsed.lastError : null,
+      updatedAt:
+        typeof parsed.updatedAt === 'string'
+          ? parsed.updatedAt
+          : defaults.updatedAt,
+    };
+  } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === 'ENOENT'
+    ) {
+      return defaultRuntimePublicIpSettings();
+    }
+    throw err;
+  }
+}
+
+export async function writeRuntimePublicIpSettings(
+  settings: RuntimePublicIpSettings,
+  path = getRuntimePublicIpSettingsPath(),
+) {
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(settings, null, 2), {
+    mode: 0o600,
+  });
+  await rename(tmpPath, path);
+  return settings;
+}
+
+export async function updateRuntimePublicIpSettings(
+  input: RuntimePublicIpSettingsUpdate,
+  path = getRuntimePublicIpSettingsPath(),
+) {
+  const current = await readRuntimePublicIpSettings(path);
+  const next: RuntimePublicIpSettings = {
+    ...current,
+    ...input,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return writeRuntimePublicIpSettings(next, path);
 }

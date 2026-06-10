@@ -92,6 +92,8 @@ Public deployment checklist:
 
 After the container restarts, check the logs and make sure the media service reports `turnConfigured:true`.
 
+If your public IP may change, enable **Runtime Status -> Public IP Automation** in the admin panel after TURN/SFU is configured. Baker will periodically detect the current public IP and refresh the managed media addresses.
+
 ## Optional SFU Mode
 
 TURN keeps P2P media working through NAT. SFU mode is different: voice and livestream tracks go through Baker's media backend, which is useful when some users are on networks that block or degrade direct P2P paths.

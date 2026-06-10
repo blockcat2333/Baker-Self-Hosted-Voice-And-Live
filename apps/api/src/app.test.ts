@@ -598,6 +598,35 @@ describe('api app', () => {
         intervalSeconds: 120,
       });
 
+      const publicIpResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'GET',
+        url: '/v1/admin/runtime/public-ip',
+      });
+
+      expect(publicIpResponse.statusCode).toBe(200);
+      expect(publicIpResponse.json()).toMatchObject({
+        enabled: false,
+        intervalSeconds: 300,
+        lastAppliedIp: null,
+      });
+
+      const updatePublicIpResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'PATCH',
+        payload: {
+          enabled: true,
+          intervalSeconds: 600,
+        },
+        url: '/v1/admin/runtime/public-ip',
+      });
+
+      expect(updatePublicIpResponse.statusCode).toBe(200);
+      expect(updatePublicIpResponse.json()).toMatchObject({
+        enabled: true,
+        intervalSeconds: 600,
+      });
+
       const repairResponse = await app.inject({
         headers: { 'x-admin-password': 'admin' },
         method: 'POST',

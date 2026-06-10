@@ -19,6 +19,7 @@ const execFileAsync = promisify(execFile);
 const runtimeDir = process.env.BAKER_RUNTIME_DIR || '/var/lib/baker/runtime';
 const runtimeEnvPath = `${runtimeDir}/runtime.env`;
 const selfRepairPath = `${runtimeDir}/self-repair.json`;
+const publicIpPath = `${runtimeDir}/public-ip.json`;
 const repairStatusPath = `${runtimeDir}/runtime-repair-status.json`;
 const repairLockPath = `${runtimeDir}/runtime-repair.lock`;
 const updateStatusPath = `${runtimeDir}/update-status.json`;
@@ -30,6 +31,11 @@ const bakerImageRepository =
   process.env.BAKER_IMAGE_REPOSITORY || 'blockcat233/baker';
 const bakerVersion = process.env.BAKER_VERSION || 'latest';
 const repairLockStaleMs = 15 * 60 * 1000;
+const defaultPublicIpEndpoints = [
+  'https://api.ipify.org?format=json',
+  'https://ifconfig.me/ip',
+  'https://checkip.amazonaws.com',
+];
 
 const serviceOrder = [
   'postgres',
@@ -101,6 +107,24 @@ function decodeShellValue(input) {
   return output;
 }
 
+function encodeShellValue(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function serializeRuntimeEnv(env) {
+  return `${Object.keys(env)
+    .sort()
+    .map((key) => `${key}=${encodeShellValue(env[key] ?? '')}`)
+    .join('\n')}\n`;
+}
+
+async function writeRuntimeEnv(env) {
+  await mkdir(dirname(runtimeEnvPath), { recursive: true });
+  const tmpPath = `${runtimeEnvPath}.${process.pid}.tmp`;
+  await writeFile(tmpPath, serializeRuntimeEnv(env), { mode: 0o600 });
+  await rename(tmpPath, runtimeEnvPath);
+}
+
 async function readJson(path, fallback) {
   try {
     return JSON.parse(await readFile(path, 'utf8'));
@@ -112,6 +136,32 @@ async function readJson(path, fallback) {
 async function writeJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(value, null, 2), { mode: 0o600 });
+}
+
+async function readPublicIpSettings() {
+  const raw = await readJson(publicIpPath, null);
+  return {
+    enabled: typeof raw?.enabled === 'boolean' ? raw.enabled : false,
+    intervalSeconds:
+      Number.isInteger(raw?.intervalSeconds) &&
+      raw.intervalSeconds >= 60 &&
+      raw.intervalSeconds <= 86_400
+        ? raw.intervalSeconds
+        : 300,
+    lastAppliedAt:
+      typeof raw?.lastAppliedAt === 'string' ? raw.lastAppliedAt : null,
+    lastAppliedIp:
+      typeof raw?.lastAppliedIp === 'string' ? raw.lastAppliedIp : null,
+    lastCheckedAt:
+      typeof raw?.lastCheckedAt === 'string' ? raw.lastCheckedAt : null,
+    lastDetectedIp:
+      typeof raw?.lastDetectedIp === 'string' ? raw.lastDetectedIp : null,
+    lastError: typeof raw?.lastError === 'string' ? raw.lastError : null,
+    updatedAt:
+      typeof raw?.updatedAt === 'string'
+        ? raw.updatedAt
+        : new Date(0).toISOString(),
+  };
 }
 
 async function readSettings() {
@@ -133,6 +183,169 @@ async function readSettings() {
         ? raw.updatedAt
         : new Date(0).toISOString(),
   };
+}
+
+function publicIpEndpoints() {
+  return (process.env.BAKER_PUBLIC_IP_ENDPOINTS || '')
+    .split(',')
+    .map((endpoint) => endpoint.trim())
+    .filter(Boolean)
+    .concat(defaultPublicIpEndpoints);
+}
+
+function parseIpFromBody(body) {
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+
+  try {
+    const json = JSON.parse(trimmed);
+    if (typeof json?.ip === 'string') return json.ip.trim();
+  } catch {
+    // Plain-text endpoints are expected.
+  }
+
+  return trimmed.split(/\s+/)[0]?.trim() || null;
+}
+
+function isValidDetectedPublicIp(value) {
+  return net.isIP(String(value).trim()) !== 0;
+}
+
+function buildAutoTurnUrls(ip, port) {
+  const host = net.isIP(ip) === 6 ? `[${ip}]` : ip;
+  return `turn:${host}:${port}?transport=udp,turn:${host}:${port}?transport=tcp`;
+}
+
+function shouldUpdateAutoTurnUrls({
+  currentTurnExternalIp,
+  currentTurnUrls,
+  lastAppliedIp,
+  turnPort,
+}) {
+  if (!currentTurnUrls) return true;
+  if (currentTurnUrls === buildAutoTurnUrls(currentTurnExternalIp, turnPort))
+    return true;
+  if (!lastAppliedIp) return false;
+  return currentTurnUrls === buildAutoTurnUrls(lastAppliedIp, turnPort);
+}
+
+async function detectPublicIp(timeoutMs = 4000) {
+  const errors = [];
+  for (const endpoint of publicIpEndpoints()) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(endpoint, { signal: controller.signal });
+      if (!response.ok) {
+        errors.push(`${endpoint} returned HTTP ${response.status}.`);
+        continue;
+      }
+      const ip = parseIpFromBody(await response.text());
+      if (ip && isValidDetectedPublicIp(ip)) return ip;
+      errors.push(`${endpoint} returned an invalid IP address.`);
+    } catch (err) {
+      errors.push(
+        `${endpoint}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw new Error(
+    errors.length > 0
+      ? errors.join(' ')
+      : 'No public IP detection endpoints are configured.',
+  );
+}
+
+async function checkAndApplyPublicIp() {
+  const current = await readPublicIpSettings();
+  let detectedIp;
+  try {
+    detectedIp = await detectPublicIp();
+  } catch (err) {
+    await writeJson(publicIpPath, {
+      ...current,
+      lastCheckedAt: nowIso(),
+      lastError: err instanceof Error ? err.message : String(err),
+      updatedAt: nowIso(),
+    });
+    return false;
+  }
+
+  let env = {};
+  try {
+    env = parseRuntimeEnv(await readFile(runtimeEnvPath, 'utf8'));
+  } catch {
+    env = {};
+  }
+
+  const runtimeSettings = await readRuntimeSettings();
+  const nextEnv = { ...env };
+  const servicesToRestart = new Set();
+
+  if (runtimeSettings.turnEnabled) {
+    if (runtimeSettings.turnExternalIp !== detectedIp) {
+      nextEnv.TURN_EXTERNAL_IP = detectedIp;
+      servicesToRestart.add('turn');
+      servicesToRestart.add('media');
+    }
+
+    const nextTurnUrls = buildAutoTurnUrls(
+      detectedIp,
+      runtimeSettings.turnPort,
+    );
+    if (
+      shouldUpdateAutoTurnUrls({
+        currentTurnExternalIp: runtimeSettings.turnExternalIp,
+        currentTurnUrls: runtimeSettings.turnUrls,
+        lastAppliedIp: current.lastAppliedIp,
+        turnPort: runtimeSettings.turnPort,
+      }) &&
+      runtimeSettings.turnUrls !== nextTurnUrls
+    ) {
+      nextEnv.TURN_URLS = nextTurnUrls;
+      servicesToRestart.add('media');
+    }
+  }
+
+  if (
+    runtimeSettings.sfuAnnouncedIp &&
+    runtimeSettings.sfuAnnouncedIp !== detectedIp
+  ) {
+    nextEnv.SFU_ANNOUNCED_IP = detectedIp;
+    servicesToRestart.add('media');
+  }
+
+  const changed = servicesToRestart.size > 0;
+  const restartErrors = [];
+  if (changed) {
+    await writeRuntimeEnv(nextEnv);
+    for (const service of servicesToRestart) {
+      try {
+        await runSupervisorctl(['restart', service]);
+      } catch (err) {
+        restartErrors.push(
+          `${service}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  await writeJson(publicIpPath, {
+    ...current,
+    lastAppliedAt: changed ? nowIso() : current.lastAppliedAt,
+    lastAppliedIp: changed ? detectedIp : current.lastAppliedIp,
+    lastCheckedAt: nowIso(),
+    lastDetectedIp: detectedIp,
+    lastError:
+      restartErrors.length > 0
+        ? `Runtime config was updated, but service restart failed: ${restartErrors.join(' ')}`
+        : null,
+    updatedAt: nowIso(),
+  });
+  return changed;
 }
 
 async function readRuntimeSettings() {
@@ -579,19 +792,39 @@ async function repairOnce(settings) {
 }
 
 async function main() {
+  let nextPublicIpCheckAt = 0;
+  let nextSelfRepairCheckAt = 0;
+
   for (;;) {
     try {
-      const settings = await readSettings();
-      if (
-        !settings.enabled ||
-        (await repairLockExists()) ||
-        (await updateRunning())
-      ) {
-        await sleep(10_000);
-        continue;
+      const [settings, publicIpSettings, repairLocked, updateIsRunning] =
+        await Promise.all([
+          readSettings(),
+          readPublicIpSettings(),
+          repairLockExists(),
+          updateRunning(),
+        ]);
+      const busy = repairLocked || updateIsRunning;
+      const now = Date.now();
+
+      if (!busy && publicIpSettings.enabled && now >= nextPublicIpCheckAt) {
+        nextPublicIpCheckAt =
+          Date.now() + publicIpSettings.intervalSeconds * 1000;
+        if (await checkAndApplyPublicIp()) {
+          nextSelfRepairCheckAt = Date.now() + 30_000;
+        }
+      } else if (!publicIpSettings.enabled) {
+        nextPublicIpCheckAt = 0;
       }
-      await repairOnce(settings);
-      await sleep(settings.intervalSeconds * 1000);
+
+      if (!busy && settings.enabled && now >= nextSelfRepairCheckAt) {
+        nextSelfRepairCheckAt = Date.now() + settings.intervalSeconds * 1000;
+        await repairOnce(settings);
+      } else if (!settings.enabled) {
+        nextSelfRepairCheckAt = 0;
+      }
+
+      await sleep(10_000);
     } catch (err) {
       console.error('[watchdog] self-repair loop failed:', err);
       await sleep(30_000);

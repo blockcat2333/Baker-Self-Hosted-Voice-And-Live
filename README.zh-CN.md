@@ -99,6 +99,8 @@ docker logs baker
 
 自我修复模式的设置保存在 `/var/lib/baker/runtime`，管理后台页面关闭后仍会在容器内继续运行。默认检查间隔为 60 秒，可以在 30 秒到 24 小时之间调整。
 
+同一张运行状态卡片也提供公网 IP 自动化。启用后，Baker 会定期检测服务器当前公网 IP，并保持托管的 TURN/SFU 媒体地址可用。检测到 IP 变化时，它会更新持久化运行配置，并只重启受影响的 Media/TURN Supervisor 服务。这个功能不替代端口映射、HTTPS 或 TURN 凭据，这些仍然需要正确配置。
+
 ### Docker Desktop 图形界面填写示例
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
@@ -176,6 +178,8 @@ docker run -d \
 
 现在只要 `TURN_ENABLED=true`，Baker 就会在无法确定客户端可用的公网 TURN relay 地址时直接启动失败，而不会再静默进入“看起来开了 TURN、实际上客户端拿不到 relay”的状态。容器重启后，建议先确认日志里出现 `turnConfigured:true`，再做跨地区语音或直播观看测试。
 
+如果你的 VPS 或家庭网络公网 IP 可能变化，请在配置好 TURN/SFU 后进入管理后台，启用“运行状态 -> 自动公网 IP”。Baker 会在检测到公网 IP 变化时刷新 `TURN_EXTERNAL_IP`、自动生成的 `TURN_URLS`，以及已配置的 `SFU_ANNOUNCED_IP`。
+
 ## 可选：启用 SFU 媒体模式
 
 Baker 默认仍使用 P2P。TURN 解决的是 P2P 在复杂 NAT 下的穿透和中继问题，但浏览器之间仍会尝试互相建立媒体连接。SFU 模式则会把语音和直播轨道转发到内置媒体后端，再由服务器分发给其他用户，对网络苛刻的用户通常更稳定。
@@ -204,6 +208,7 @@ docker run -d \
 - 对于公网、移动网络、VPN 或跨地区使用场景，建议额外启用 TURN
 - 一旦在公网部署里启用 TURN，就必须暴露中继端口，并提供 `TURN_EXTERNAL_IP` 或显式 `TURN_URLS`
 - SFU 模式需要设置 `SFU_ANNOUNCED_IP`，并让浏览器可以访问 `50000-50100` 的 TCP/UDP 端口范围
+- 如果服务器公网 IP 可能变化，请在管理后台启用公网 IP 自动化，让媒体地址自动刷新
 - 仓库里的 `docker-compose.yml` 现在只保留给本地开发基础设施使用（`postgres`、`redis`、可选 `turn`），不再作为第二套公开部署产品
 
 ## 当前限制

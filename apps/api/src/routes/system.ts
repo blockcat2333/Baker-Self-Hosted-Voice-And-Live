@@ -6,6 +6,8 @@ import {
   AdminApplyUpdateRequestSchema,
   AdminDeploymentSettingsSchema,
   AdminRuntimeHealthSchema,
+  AdminRuntimePublicIpCheckResultSchema,
+  AdminRuntimePublicIpSettingsSchema,
   AdminRuntimeRepairRequestSchema,
   AdminRuntimeRepairResultSchema,
   AdminRuntimeSelfRepairSettingsSchema,
@@ -13,6 +15,7 @@ import {
   AdminUpdateDeploymentSettingsRequestSchema,
   AdminUpdateChannelRequestSchema,
   AdminUpdateJobStatusSchema,
+  AdminUpdateRuntimePublicIpSettingsRequestSchema,
   AdminUpdateRuntimeSelfRepairSettingsRequestSchema,
   AdminUpdateSettingsRequestSchema,
   AdminUpdateVersionsResponseSchema,
@@ -49,9 +52,12 @@ import {
 import {
   readDeploymentPendingMarker,
   readDeploymentRuntimeSettings,
+  readRuntimePublicIpSettings,
+  updateRuntimePublicIpSettings,
   updateDeploymentRuntimeSettings,
   type DeploymentRuntimeSettings,
 } from '../lib/runtime-config';
+import { checkAndApplyRuntimePublicIp } from '../lib/runtime-public-ip';
 import {
   getOrCreateServerSettings,
   syncWorkspaceServerName,
@@ -654,6 +660,39 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     );
     return AdminRuntimeSelfRepairSettingsSchema.parse(
       await updateSelfRepairSettings(input),
+    );
+  });
+
+  app.get('/v1/admin/runtime/public-ip', async (request) => {
+    await requireAdmin(app, request);
+    return AdminRuntimePublicIpSettingsSchema.parse(
+      await readRuntimePublicIpSettings(),
+    );
+  });
+
+  app.patch('/v1/admin/runtime/public-ip', async (request) => {
+    await requireAdmin(app, request);
+    const input = AdminUpdateRuntimePublicIpSettingsRequestSchema.parse(
+      request.body,
+    );
+    return AdminRuntimePublicIpSettingsSchema.parse(
+      await updateRuntimePublicIpSettings(input),
+    );
+  });
+
+  app.post('/v1/admin/runtime/public-ip/check', async (request) => {
+    await requireAdmin(app, request);
+    const updateStatus = await readUpdateStatus();
+    if (updateStatus.status === 'running' || (await isRuntimeRepairRunning())) {
+      throw new ApiError(
+        409,
+        'VALIDATION_ERROR',
+        'Server update, deployment apply, or runtime repair is already running.',
+      );
+    }
+
+    return AdminRuntimePublicIpCheckResultSchema.parse(
+      await checkAndApplyRuntimePublicIp(),
     );
   });
 

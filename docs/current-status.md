@@ -48,6 +48,26 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-06-10 Baker 1.0.8 Beta Server and 1.0.8a Desktop Release Prep
+
+- bumped the server release line and all non-desktop workspace package metadata to `1.0.8`
+- reset the desktop/client release label to `1.0.8a`
+- updated the Windows installer artifact name to `Baker-Setup-1.0.8a-x64.exe`
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.8`
+- packaged runtime public IP automation in the beta release:
+  - admin runtime status now exposes public IP automation controls and manual check/apply
+  - API now persists public IP automation settings under the runtime config directory
+  - all-in-one watchdog can detect public IP changes, refresh managed TURN/SFU media addresses, and restart only affected services
+- validation completed:
+  - `pnpm release:check`
+  - `pnpm typecheck`
+  - `pnpm lint`
+  - `pnpm test`
+  - `pnpm build`
+  - `pnpm audit --prod`
+  - `pnpm --filter @baker/desktop dist:win`
+  - admin UI browser smoke for the new public IP automation controls
+
 ### 2026-05-31 Baker 1.0.7 Server and 1.0.7a Desktop/Web Release Prep
 
 - confirmed `Client voice UI rework and local preferences (#4)` changes the browser client UI through `packages/client` voice, stream, chat-shell, CSS, and i18n updates

@@ -1,5 +1,33 @@
 # Project History
 
+## 2026-06-10
+
+### Baker 1.0.8 beta server and 1.0.8a desktop release prep
+
+What changed:
+
+- bumped the server release line and non-desktop workspace package metadata to `1.0.8`
+- reset the desktop/client release label to `1.0.8a`
+- prepared Windows installer naming for `Baker-Setup-1.0.8a-x64.exe`
+- updated the English and Chinese deployment docs to use `blockcat233/baker:1.0.8`
+- added runtime public IP automation for managed TURN/SFU media address updates
+
+Why:
+
+- `1.0.8` beta packages the admin public IP automation, API runtime settings contract, and all-in-one watchdog behavior for testing before a stable release
+- the desktop client label resets to `a` for the new server version line
+
+Validation:
+
+- `pnpm release:check`
+- `pnpm typecheck`
+- `pnpm lint`
+- `pnpm test`
+- `pnpm build`
+- `pnpm audit --prod`
+- `pnpm --filter @baker/desktop dist:win`
+- real admin UI browser smoke for public IP automation
+
 ## 2026-05-31
 
 ### Baker 1.0.7 server and 1.0.7a desktop/web release prep

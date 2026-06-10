@@ -40,8 +40,11 @@ const desktopPackagePath = 'apps/desktop/package.json';
 const desktopPackage = readJson(desktopPackagePath);
 const desktopVersion = desktopPackage.version;
 const serverVersionPattern = /^\d+\.\d+\.\d+$/;
-const desktopVersionPattern = /^(\d+\.\d+\.\d+)[a-z]$/;
+const desktopVersionPattern = /^(\d+\.\d+\.\d+)-([a-z])$/;
 const desktopVersionMatch = desktopVersion.match(desktopVersionPattern);
+const desktopReleaseLabel = desktopVersionMatch
+  ? `${desktopVersionMatch[1]}${desktopVersionMatch[2]}`
+  : desktopVersion;
 
 check(
   'root package version',
@@ -51,7 +54,7 @@ check(
 check(
   'desktop package version',
   Boolean(desktopVersionMatch),
-  `expected client release label like ${serverVersion}a, found ${desktopVersion}`,
+  `expected semver client package version like ${serverVersion}-a, found ${desktopVersion}`,
 );
 check(
   'desktop package version base',
@@ -80,8 +83,8 @@ for (const packagePath of [...listPackageJsons('apps'), ...listPackageJsons('pac
 const desktopArtifactName = desktopPackage.build?.artifactName ?? '';
 check(
   'desktop artifact name',
-  desktopArtifactName.includes(desktopVersion),
-  `expected artifactName to include ${desktopVersion}, found ${desktopArtifactName}`,
+  desktopArtifactName.includes(desktopReleaseLabel),
+  `expected artifactName to include ${desktopReleaseLabel}, found ${desktopArtifactName}`,
 );
 
 const sharedVersionSource = readText('packages/shared/src/version.ts');
@@ -94,7 +97,7 @@ check(
 for (const readmePath of ['README.md', 'README.zh-CN.md']) {
   const readme = readText(readmePath);
   check(readmePath, readme.includes(serverVersion), `expected server version ${serverVersion}`);
-  check(readmePath, readme.includes(desktopVersion), `expected desktop version ${desktopVersion}`);
+  check(readmePath, readme.includes(desktopReleaseLabel), `expected desktop version ${desktopReleaseLabel}`);
 }
 
 for (const docsPath of [
@@ -128,6 +131,11 @@ check(
     desktopWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+[a-z]$'),
   'expected publish-desktop.yml to skip numeric server release tags',
 );
+check(
+  'desktop workflow release check',
+  desktopWorkflow.includes('pnpm release:check'),
+  'expected publish-desktop.yml to run pnpm release:check before building desktop assets',
+);
 
 if (failures.length > 0) {
   console.error('Release consistency check failed:');
@@ -138,5 +146,5 @@ if (failures.length > 0) {
 } else {
   console.log(`Release consistency OK: server ${serverVersion}, desktop ${desktopVersion}`);
   console.log(`Expected Docker tag: blockcat233/baker:${serverVersion}`);
-  console.log(`Expected GitHub Release tags: v${serverVersion} and v${desktopVersion}`);
+  console.log(`Expected GitHub Release tags: v${serverVersion} and v${desktopReleaseLabel}`);
 }

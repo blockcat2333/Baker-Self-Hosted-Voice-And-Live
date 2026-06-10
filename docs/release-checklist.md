@@ -17,7 +17,7 @@ Use this path for a new server image line such as `X.Y.Z`.
 - [ ] Set the root `package.json` version to `X.Y.Z`.
 - [ ] Set every non-desktop `apps/*/package.json` and `packages/*/package.json` version to `X.Y.Z`.
 - [ ] Set `packages/shared/src/version.ts` to `X.Y.Z`.
-- [ ] Set `apps/desktop/package.json` version and installer `artifactName` to the desktop label, for example `X.Y.Za`.
+- [ ] Set `apps/desktop/package.json` version to semver form `X.Y.Z-a`, and set installer `artifactName` to the public desktop label `X.Y.Za`.
 - [ ] Update `README.md` and `README.zh-CN.md` release lines and Docker examples.
 - [ ] Update `docs/beginner-deployment.md` and `docs/beginner-deployment.zh-CN.md` pinned Docker examples.
 - [ ] Run `pnpm release:check`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`.
@@ -30,7 +30,7 @@ Use this path for a new server image line such as `X.Y.Z`.
 Use this path for a desktop/client-only label such as `X.Y.Zb`.
 
 - [ ] Keep the root package, non-desktop workspace packages, and `packages/shared/src/version.ts` on the current numeric server version `X.Y.Z`.
-- [ ] Increment only `apps/desktop/package.json` and installer `artifactName` to the next client label, for example `X.Y.Zb`.
+- [ ] Increment only `apps/desktop/package.json` to semver form `X.Y.Z-b`, and installer `artifactName` to the next public client label `X.Y.Zb`.
 - [ ] Update README release lines if the public desktop label changes.
 - [ ] Run `pnpm release:check`, `pnpm --filter @baker/desktop typecheck`, and `pnpm --filter @baker/desktop test`.
 - [ ] Create the desktop GitHub Release tag as `vX.Y.Zb`.
@@ -40,4 +40,6 @@ Use this path for a desktop/client-only label such as `X.Y.Zb`.
 
 - Numeric tags such as `vX.Y.Z` are server releases and may publish Docker images.
 - Lettered tags such as `vX.Y.Za` are desktop/client releases and may publish desktop assets.
+- Electron package versions must use semver prerelease form such as `X.Y.Z-a`; public GitHub tags and installer names keep the compact label such as `X.Y.Za`.
+- Do not overwrite a published bad desktop tag with different assets. Advance the trailing letter, document the incident, and tell affected users to install the fixed installer manually if the broken app cannot start its updater.
 - Do not reuse one GitHub Release tag for both the Docker image line and a desktop-only client label.

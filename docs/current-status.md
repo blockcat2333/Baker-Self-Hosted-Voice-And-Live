@@ -48,6 +48,30 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-06-10 Baker Desktop 1.0.8b Updater Semver Hotfix
+
+- reissued the desktop client as public label `1.0.8b` with Electron package version `1.0.8-b`
+- kept the Windows installer artifact label compact as `Baker-Setup-1.0.8b-x64.exe`
+- fixed the desktop updater release metadata contract:
+  - Electron and `electron-updater` read `app.getVersion()` from package metadata and require semver
+  - compact labels such as `1.0.6a` and `1.0.8a` are not valid semver app versions
+  - semver prerelease labels such as `1.0.8-b` are valid and still map to public release tag `v1.0.8b`
+- hardened the release process:
+  - `pnpm release:check` now rejects compact desktop package versions such as `1.0.8b`
+  - `pnpm release:check` still requires README/release assets to use public label `1.0.8b`
+  - the desktop publish workflow runs `pnpm release:check` before building assets
+  - the release checklist now says not to overwrite a bad published desktop tag; advance the trailing letter instead
+- deployment note: users already on broken lettered desktop builds may need to install `1.0.8b` manually once because the broken updater can fail before it downloads a fixed build
+- validation completed:
+  - `pnpm release:check`
+  - `pnpm --filter @baker/desktop test`
+  - `pnpm --filter @baker/desktop typecheck`
+  - `pnpm --filter @baker/desktop lint`
+  - `node scripts/build-excluded-system-audio.mjs --required`
+  - `pnpm exec vite build`
+  - `npm exec --yes --package=pnpm@9.15.0 -- pnpm exec electron-builder --win nsis --x64 --publish never`
+  - verified packaged `app.asar` reports semver-valid package version `1.0.8-b`
+
 ### 2026-06-10 Baker 1.0.8 Beta Server and 1.0.8a Desktop Release Prep
 
 - bumped the server release line and all non-desktop workspace package metadata to `1.0.8`

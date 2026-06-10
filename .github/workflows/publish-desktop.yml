@@ -48,6 +48,10 @@ jobs:
         if: steps.release_tag.outputs.is_desktop_tag == 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: Check release consistency
+        if: steps.release_tag.outputs.is_desktop_tag == 'true'
+        run: pnpm release:check
+
       - name: Build Windows desktop
         if: steps.release_tag.outputs.is_desktop_tag == 'true'
         run: pnpm --filter @baker/desktop dist:win

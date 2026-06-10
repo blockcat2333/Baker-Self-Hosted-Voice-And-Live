@@ -19,6 +19,13 @@ import {
   MediaSfuProduceAckDataSchema,
 } from '@baker/protocol';
 
+import {
+  summarizeAggregateVideoSendStats,
+  summarizeLocalOutboundAudioNetworkStats,
+  type AggregatePeerVideoSendSample,
+  type LocalOutboundNetworkSample,
+} from './webrtc-manager';
+
 interface SfuSessionDescriptor {
   channelId: string;
   mode: SessionMode;
@@ -72,6 +79,46 @@ export class SfuClientSession {
     for (const producer of producers) {
       await producer.replaceTrack({ track });
     }
+  }
+
+  async getVideoSendSample(): Promise<AggregatePeerVideoSendSample | null> {
+    const videoProducers = [...this.producers.values()].filter(
+      (producer) => producer.kind === 'video' && !producer.closed,
+    );
+    if (videoProducers.length === 0) {
+      return null;
+    }
+
+    const reports: RTCStatsReport[] = [];
+    for (const producer of videoProducers) {
+      try {
+        reports.push(await producer.getStats());
+      } catch {
+        continue;
+      }
+    }
+
+    return summarizeAggregateVideoSendStats(reports);
+  }
+
+  async getLocalOutboundNetworkSample(): Promise<LocalOutboundNetworkSample | null> {
+    const audioProducers = [...this.producers.values()].filter(
+      (producer) => producer.kind === 'audio' && !producer.closed,
+    );
+    if (audioProducers.length === 0) {
+      return null;
+    }
+
+    const reports: RTCStatsReport[] = [];
+    for (const producer of audioProducers) {
+      try {
+        reports.push(await producer.getStats());
+      } catch {
+        continue;
+      }
+    }
+
+    return summarizeLocalOutboundAudioNetworkStats(reports);
   }
 
   async consumeProducer(producer: SfuProducer): Promise<SfuRemoteTrack | null> {

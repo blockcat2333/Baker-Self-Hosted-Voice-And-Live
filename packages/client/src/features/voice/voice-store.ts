@@ -767,21 +767,24 @@ function stopUniqueStreamTracks(...streams: Array<MediaStream | null>) {
 
 async function pollPeerNetworkStats() {
   const manager = webrtcManager;
-  if (!manager) return;
+  const session = sfuSession;
+  if (!manager && !session) return;
   if (networkStatsInFlight) return;
   networkStatsInFlight = true;
   try {
-    const peerIds = manager.getPeerIds();
+    const peerIds = manager?.getPeerIds() ?? [];
     const samples = peerIds.length > 0
       ? await Promise.all(
           peerIds.map(async (userId) => {
-            const sample = await manager.getPeerNetworkSample(userId);
+            const sample = await manager?.getPeerNetworkSample(userId) ?? null;
             return { userId, sample };
           }),
         )
       : [];
 
-    const localOutboundSample = await manager.getLocalOutboundNetworkSample();
+    const localOutboundSample = manager
+      ? await manager.getLocalOutboundNetworkSample()
+      : await (session?.getLocalOutboundNetworkSample() ?? null);
     const now = Date.now();
     const next: Record<string, { lossPct: number | null; rttMs: number | null; updatedAt: number }> = {};
 
@@ -858,6 +861,23 @@ async function pollPeerNetworkStats() {
   } finally {
     networkStatsInFlight = false;
   }
+}
+
+function startNetworkStatsPolling() {
+  if (networkStatsTimer !== null) {
+    return;
+  }
+
+  // Only poll WebRTC stats in real browser environments. In unit tests, the
+  // WebRTC/SFU layers are often mocked and may not implement stats APIs.
+  if (typeof window === 'undefined' || typeof RTCPeerConnection === 'undefined') {
+    return;
+  }
+
+  networkStatsTimer = setInterval(() => {
+    void pollPeerNetworkStats();
+  }, 1000);
+  void pollPeerNetworkStats();
 }
 
 export const useVoiceStore = create<VoiceState>((set, get) => ({
@@ -1016,16 +1036,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     startSpeakingDetection();
     syncRemoteAudioElementVolumes();
 
-    if (ackData.mediaMode === 'p2p' && networkStatsTimer === null) {
-      // Only poll WebRTC stats in real browser environments. In unit tests, the
-      // WebRtcManager is often mocked and may not implement stats APIs.
-      if (typeof window !== 'undefined' && typeof RTCPeerConnection !== 'undefined') {
-        networkStatsTimer = setInterval(() => {
-          void pollPeerNetworkStats();
-        }, 1000);
-        void pollPeerNetworkStats();
-      }
-    }
+    startNetworkStatsPolling();
 
     set({
       status: 'active',
@@ -1513,14 +1524,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     startSpeakingDetection();
     syncRemoteAudioElementVolumes();
 
-    if (ackData.mediaMode === 'p2p' && networkStatsTimer === null) {
-      if (typeof window !== 'undefined' && typeof RTCPeerConnection !== 'undefined') {
-        networkStatsTimer = setInterval(() => {
-          void pollPeerNetworkStats();
-        }, 1000);
-        void pollPeerNetworkStats();
-      }
-    }
+    startNetworkStatsPolling();
 
     set({
       status: 'active',

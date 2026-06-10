@@ -108,6 +108,194 @@ function readCodecLabel(record: RTCStats | null): string | null {
   return slashIndex >= 0 ? mimeType.slice(slashIndex + 1).toUpperCase() : mimeType.toUpperCase();
 }
 
+export function summarizeAggregateVideoSendStats(
+  reports: Iterable<RTCStatsReport>,
+): AggregatePeerVideoSendSample | null {
+  let activePeerCount = 0;
+  let totalBytesSent = 0;
+  let totalFramesEncoded = 0;
+  let totalPacketsSent = 0;
+  let totalFramesPerSecond = 0;
+  let codec: string | null = null;
+  let frameRateSampleCount = 0;
+  let maxFrameWidth: number | null = null;
+  let maxFrameHeight: number | null = null;
+  let latestTimestampMs: number | null = null;
+  let hasBytesSent = false;
+  let hasFramesEncoded = false;
+  let hasPacketsSent = false;
+  const limitationReasons = new Set<string>();
+
+  for (const report of reports) {
+    const stats: RTCStats[] = [];
+    report.forEach((stat) => {
+      stats.push(stat);
+    });
+
+    let outboundVideo: RTCStats | null = null;
+    let trackVideo: RTCStats | null = null;
+
+    for (const stat of stats) {
+      if (stat.type !== 'outbound-rtp') continue;
+      const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
+      if (kind === 'video') {
+        outboundVideo = stat;
+        break;
+      }
+    }
+
+    for (const stat of stats) {
+      if ((stat.type as string) !== 'track') continue;
+      const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
+      if (kind === 'video') {
+        trackVideo = stat;
+        break;
+      }
+    }
+
+    if (!outboundVideo && !trackVideo) {
+      continue;
+    }
+
+    activePeerCount += 1;
+    const primaryVideoStat = outboundVideo ?? trackVideo;
+    if (!primaryVideoStat) {
+      continue;
+    }
+
+    const codecId = readStringField(primaryVideoStat, 'codecId');
+    const codecStat = codecId ? stats.find((stat) => stat.id === codecId) ?? null : null;
+    codec ??= readCodecLabel(codecStat);
+
+    const bytesSent = readNumberField(primaryVideoStat, 'bytesSent');
+    if (bytesSent !== null) {
+      totalBytesSent += bytesSent;
+      hasBytesSent = true;
+    }
+
+    const framesEncoded = readNumberField(primaryVideoStat, 'framesEncoded');
+    if (framesEncoded !== null) {
+      totalFramesEncoded += framesEncoded;
+      hasFramesEncoded = true;
+    }
+
+    const packetsSent = readNumberField(primaryVideoStat, 'packetsSent');
+    if (packetsSent !== null) {
+      totalPacketsSent += packetsSent;
+      hasPacketsSent = true;
+    }
+
+    const framesPerSecond = readNumberField(trackVideo ?? outboundVideo!, 'framesPerSecond');
+    if (framesPerSecond !== null) {
+      totalFramesPerSecond += framesPerSecond;
+      frameRateSampleCount += 1;
+    }
+
+    const frameWidth = readNumberField(trackVideo ?? outboundVideo!, 'frameWidth');
+    if (frameWidth !== null) {
+      maxFrameWidth = maxFrameWidth === null ? frameWidth : Math.max(maxFrameWidth, frameWidth);
+    }
+
+    const frameHeight = readNumberField(trackVideo ?? outboundVideo!, 'frameHeight');
+    if (frameHeight !== null) {
+      maxFrameHeight = maxFrameHeight === null ? frameHeight : Math.max(maxFrameHeight, frameHeight);
+    }
+
+    const qualityLimitationReason = readStringField(primaryVideoStat, 'qualityLimitationReason');
+    if (qualityLimitationReason) {
+      limitationReasons.add(qualityLimitationReason);
+    }
+
+    if (Number.isFinite(primaryVideoStat.timestamp)) {
+      latestTimestampMs = latestTimestampMs === null
+        ? Math.round(primaryVideoStat.timestamp)
+        : Math.max(latestTimestampMs, Math.round(primaryVideoStat.timestamp));
+    }
+  }
+
+  if (activePeerCount === 0) {
+    return null;
+  }
+
+  let qualityLimitationReason: AggregatePeerVideoSendSample['qualityLimitationReason'] = 'none';
+  if (limitationReasons.has('cpu')) {
+    qualityLimitationReason = 'cpu';
+  } else if (limitationReasons.has('bandwidth')) {
+    qualityLimitationReason = 'bandwidth';
+  } else if ([...limitationReasons].some((reason) => reason !== 'none')) {
+    qualityLimitationReason = 'other';
+  }
+
+  return {
+    activePeerCount,
+    bytesSent: hasBytesSent ? totalBytesSent : null,
+    codec,
+    frameHeight: maxFrameHeight,
+    frameWidth: maxFrameWidth,
+    framesEncoded: hasFramesEncoded ? totalFramesEncoded : null,
+    framesPerSecond: frameRateSampleCount > 0 ? totalFramesPerSecond / frameRateSampleCount : null,
+    packetsSent: hasPacketsSent ? totalPacketsSent : null,
+    qualityLimitationReason,
+    timestampMs: latestTimestampMs,
+  };
+}
+
+export function summarizeLocalOutboundAudioNetworkStats(
+  reports: Iterable<RTCStatsReport>,
+): LocalOutboundNetworkSample | null {
+  let totalPacketsSent = 0;
+  let totalPacketsLost = 0;
+  let hasPacketsSent = false;
+  let hasPacketsLost = false;
+
+  for (const report of reports) {
+    const stats: RTCStats[] = [];
+    report.forEach((stat) => {
+      stats.push(stat);
+    });
+
+    const outboundAudioIds = new Set<string>();
+    for (const stat of stats) {
+      if (stat.type !== 'outbound-rtp') continue;
+      const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
+      if (kind !== 'audio') continue;
+      outboundAudioIds.add(stat.id);
+
+      const sent = readNumberField(stat, 'packetsSent');
+      if (sent !== null) {
+        totalPacketsSent += sent;
+        hasPacketsSent = true;
+      }
+    }
+
+    for (const stat of stats) {
+      if (stat.type !== 'remote-inbound-rtp') continue;
+      const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
+      if (kind !== 'audio') continue;
+
+      const localId = readStringField(stat, 'localId');
+      if (!localId || !outboundAudioIds.has(localId)) {
+        continue;
+      }
+
+      const lost = readNumberField(stat, 'packetsLost');
+      if (lost !== null) {
+        totalPacketsLost += lost;
+        hasPacketsLost = true;
+      }
+    }
+  }
+
+  if (!hasPacketsSent && !hasPacketsLost) {
+    return null;
+  }
+
+  return {
+    packetsLost: hasPacketsLost ? totalPacketsLost : null,
+    packetsSent: hasPacketsSent ? totalPacketsSent : null,
+  };
+}
+
 function codecMimeTypeMatches(mimeType: string | null, preferredCodec: VideoCodecPreference): boolean {
   if (!mimeType || preferredCodec === 'default') {
     return false;
@@ -533,68 +721,21 @@ export class WebRtcManager {
       return null;
     }
 
-    let totalPacketsSent = 0;
-    let totalPacketsLost = 0;
-    let hasPacketsSent = false;
-    let hasPacketsLost = false;
+    const reports: RTCStatsReport[] = [];
 
     for (const pc of pcs) {
       if (typeof pc.getStats !== 'function') {
         continue;
       }
 
-      let report: RTCStatsReport;
       try {
-        report = await pc.getStats();
+        reports.push(await pc.getStats());
       } catch {
         continue;
       }
-
-      const stats: RTCStats[] = [];
-      report.forEach((stat) => {
-        stats.push(stat);
-      });
-
-      const outboundAudioIds = new Set<string>();
-      for (const stat of stats) {
-        if (stat.type !== 'outbound-rtp') continue;
-        const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-        if (kind !== 'audio') continue;
-        outboundAudioIds.add(stat.id);
-
-        const sent = readNumberField(stat, 'packetsSent');
-        if (sent !== null) {
-          totalPacketsSent += sent;
-          hasPacketsSent = true;
-        }
-      }
-
-      for (const stat of stats) {
-        if (stat.type !== 'remote-inbound-rtp') continue;
-        const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-        if (kind !== 'audio') continue;
-
-        const localId = readStringField(stat, 'localId');
-        if (!localId || !outboundAudioIds.has(localId)) {
-          continue;
-        }
-
-        const lost = readNumberField(stat, 'packetsLost');
-        if (lost !== null) {
-          totalPacketsLost += lost;
-          hasPacketsLost = true;
-        }
-      }
     }
 
-    if (!hasPacketsSent && !hasPacketsLost) {
-      return null;
-    }
-
-    return {
-      packetsLost: hasPacketsLost ? totalPacketsLost : null,
-      packetsSent: hasPacketsSent ? totalPacketsSent : null,
-    };
+    return summarizeLocalOutboundAudioNetworkStats(reports);
   }
 
   /**
@@ -685,143 +826,20 @@ export class WebRtcManager {
       return null;
     }
 
-    let activePeerCount = 0;
-    let totalBytesSent = 0;
-    let totalFramesEncoded = 0;
-    let totalPacketsSent = 0;
-    let totalFramesPerSecond = 0;
-    let codec: string | null = null;
-    let frameRateSampleCount = 0;
-    let maxFrameWidth: number | null = null;
-    let maxFrameHeight: number | null = null;
-    let latestTimestampMs: number | null = null;
-    let hasBytesSent = false;
-    let hasFramesEncoded = false;
-    let hasPacketsSent = false;
-    const limitationReasons = new Set<string>();
+    const reports: RTCStatsReport[] = [];
 
     for (const pc of pcs) {
       if (typeof pc.getStats !== 'function') {
         continue;
       }
 
-      let report: RTCStatsReport;
       try {
-        report = await pc.getStats();
+        reports.push(await pc.getStats());
       } catch {
         continue;
       }
-
-      const stats: RTCStats[] = [];
-      report.forEach((stat) => {
-        stats.push(stat);
-      });
-
-      let outboundVideo: RTCStats | null = null;
-      let trackVideo: RTCStats | null = null;
-
-      for (const stat of stats) {
-        if (stat.type !== 'outbound-rtp') continue;
-        const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-        if (kind === 'video') {
-          outboundVideo = stat;
-          break;
-        }
-      }
-
-      for (const stat of stats) {
-        if ((stat.type as string) !== 'track') continue;
-        const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-        if (kind === 'video') {
-          trackVideo = stat;
-          break;
-        }
-      }
-
-      if (!outboundVideo && !trackVideo) {
-        continue;
-      }
-
-      activePeerCount += 1;
-      const primaryVideoStat = outboundVideo ?? trackVideo;
-      if (!primaryVideoStat) {
-        continue;
-      }
-
-      const codecId = readStringField(primaryVideoStat, 'codecId');
-      const codecStat = codecId ? stats.find((stat) => stat.id === codecId) ?? null : null;
-      codec ??= readCodecLabel(codecStat);
-
-      const bytesSent = readNumberField(primaryVideoStat, 'bytesSent');
-      if (bytesSent !== null) {
-        totalBytesSent += bytesSent;
-        hasBytesSent = true;
-      }
-
-      const framesEncoded = readNumberField(primaryVideoStat, 'framesEncoded');
-      if (framesEncoded !== null) {
-        totalFramesEncoded += framesEncoded;
-        hasFramesEncoded = true;
-      }
-
-      const packetsSent = readNumberField(primaryVideoStat, 'packetsSent');
-      if (packetsSent !== null) {
-        totalPacketsSent += packetsSent;
-        hasPacketsSent = true;
-      }
-
-      const framesPerSecond = readNumberField(trackVideo ?? outboundVideo!, 'framesPerSecond');
-      if (framesPerSecond !== null) {
-        totalFramesPerSecond += framesPerSecond;
-        frameRateSampleCount += 1;
-      }
-
-      const frameWidth = readNumberField(trackVideo ?? outboundVideo!, 'frameWidth');
-      if (frameWidth !== null) {
-        maxFrameWidth = maxFrameWidth === null ? frameWidth : Math.max(maxFrameWidth, frameWidth);
-      }
-
-      const frameHeight = readNumberField(trackVideo ?? outboundVideo!, 'frameHeight');
-      if (frameHeight !== null) {
-        maxFrameHeight = maxFrameHeight === null ? frameHeight : Math.max(maxFrameHeight, frameHeight);
-      }
-
-      const qualityLimitationReason = readStringField(primaryVideoStat, 'qualityLimitationReason');
-      if (qualityLimitationReason) {
-        limitationReasons.add(qualityLimitationReason);
-      }
-
-      if (Number.isFinite(primaryVideoStat.timestamp)) {
-        latestTimestampMs = latestTimestampMs === null
-          ? Math.round(primaryVideoStat.timestamp)
-          : Math.max(latestTimestampMs, Math.round(primaryVideoStat.timestamp));
-      }
     }
 
-    if (activePeerCount === 0) {
-      return null;
-    }
-
-    let qualityLimitationReason: AggregatePeerVideoSendSample['qualityLimitationReason'] = 'none';
-    if (limitationReasons.has('cpu')) {
-      qualityLimitationReason = 'cpu';
-    } else if (limitationReasons.has('bandwidth')) {
-      qualityLimitationReason = 'bandwidth';
-    } else if ([...limitationReasons].some((reason) => reason !== 'none')) {
-      qualityLimitationReason = 'other';
-    }
-
-    return {
-      activePeerCount,
-      bytesSent: hasBytesSent ? totalBytesSent : null,
-      codec,
-      frameHeight: maxFrameHeight,
-      frameWidth: maxFrameWidth,
-      framesEncoded: hasFramesEncoded ? totalFramesEncoded : null,
-      framesPerSecond: frameRateSampleCount > 0 ? totalFramesPerSecond / frameRateSampleCount : null,
-      packetsSent: hasPacketsSent ? totalPacketsSent : null,
-      qualityLimitationReason,
-      timestampMs: latestTimestampMs,
-    };
+    return summarizeAggregateVideoSendStats(reports);
   }
 }

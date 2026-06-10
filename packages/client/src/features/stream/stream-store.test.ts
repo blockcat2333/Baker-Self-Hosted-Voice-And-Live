@@ -11,6 +11,10 @@ const getPeerIds = vi.fn(() => []);
 const getRemoteTracks = vi.fn(() => []);
 const getAggregatePeerVideoSendSample = vi.fn();
 const getPeerVideoReceiveSample = vi.fn();
+const sfuLoad = vi.fn();
+const sfuProduceTracks = vi.fn();
+const sfuGetVideoSendSample = vi.fn();
+const sfuClose = vi.fn();
 const getDisplayMedia = vi.fn();
 const getUserMedia = vi.fn();
 const enumerateDevices = vi.fn();
@@ -71,6 +75,12 @@ vi.mock('@baker/sdk', () => {
   }
 
   return {
+    SfuClientSession: class MockSfuClientSession {
+      load = sfuLoad;
+      produceTracks = sfuProduceTracks;
+      getVideoSendSample = sfuGetVideoSendSample;
+      close = sfuClose;
+    },
     WebRtcManager: MockWebRtcManager,
   };
 });
@@ -131,6 +141,13 @@ beforeEach(() => {
   getAggregatePeerVideoSendSample.mockResolvedValue(null);
   getPeerVideoReceiveSample.mockReset();
   getPeerVideoReceiveSample.mockResolvedValue(null);
+  sfuLoad.mockReset();
+  sfuLoad.mockResolvedValue(undefined);
+  sfuProduceTracks.mockReset();
+  sfuProduceTracks.mockResolvedValue(undefined);
+  sfuGetVideoSendSample.mockReset();
+  sfuGetVideoSendSample.mockResolvedValue(null);
+  sfuClose.mockReset();
   getDisplayMedia.mockReset();
   getUserMedia.mockReset();
   enumerateDevices.mockReset();
@@ -891,6 +908,80 @@ describe('stream store watch startup', () => {
       encoderLimited: true,
       frameRate: 40,
       qualityLimitationReason: 'cpu',
+      resolution: '1920x1080',
+    });
+  });
+
+  it('summarizes SFU owned-stream sender stats for broadcaster diagnostics', async () => {
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      iceServers: [],
+      mediaMode: 'sfu',
+      sessionId: hostSessionId,
+      sfu: {
+        producers: [],
+        routerRtpCapabilities: {},
+      },
+      streamId,
+    });
+    const sendRawCommand = vi.fn();
+
+    await useStreamStore
+      .getState()
+      .startSharing(
+        channelId,
+        { bitrateKbps: 6000, frameRate: 60, resolution: '1080p' },
+        'screen',
+        sendCommandAwaitAck,
+        sendRawCommand,
+      );
+
+    sfuGetVideoSendSample
+      .mockResolvedValueOnce({
+        activePeerCount: 1,
+        bytesSent: 1000,
+        codec: 'H264',
+        frameHeight: 1080,
+        frameWidth: 1920,
+        framesEncoded: 100,
+        framesPerSecond: null,
+        packetsSent: 100,
+        qualityLimitationReason: 'none',
+        timestampMs: 1000,
+      })
+      .mockResolvedValueOnce({
+        activePeerCount: 1,
+        bytesSent: 751000,
+        codec: 'H264',
+        frameHeight: 1080,
+        frameWidth: 1920,
+        framesEncoded: 160,
+        framesPerSecond: null,
+        packetsSent: 160,
+        qualityLimitationReason: 'none',
+        timestampMs: 2000,
+      });
+
+    const first = await getOwnedStreamVideoStats();
+    const second = await getOwnedStreamVideoStats();
+
+    expect(sfuLoad).toHaveBeenCalledOnce();
+    expect(sfuProduceTracks).toHaveBeenCalledWith([localPreviewTrack]);
+    expect(first).toMatchObject({
+      activePeerCount: 1,
+      bitrateKbps: null,
+      codec: 'H264',
+      encoderLimited: false,
+      qualityLimitationReason: 'none',
+      resolution: '1920x1080',
+    });
+    expect(second).toMatchObject({
+      activePeerCount: 1,
+      bitrateKbps: 6000,
+      codec: 'H264',
+      encoderLimited: false,
+      frameRate: 60,
+      qualityLimitationReason: 'none',
       resolution: '1920x1080',
     });
   });

@@ -10,6 +10,13 @@ const replaceOutgoingAudioTrack = vi.fn();
 const closePeer = vi.fn();
 const closeAll = vi.fn();
 const getPeerIds = vi.fn((): string[] => []);
+const getLocalOutboundNetworkSample = vi.fn();
+const sfuLoad = vi.fn();
+const sfuProduceTracks = vi.fn();
+const sfuConsumeProducer = vi.fn();
+const sfuReplaceProducedTrack = vi.fn();
+const sfuGetLocalOutboundNetworkSample = vi.fn();
+const sfuClose = vi.fn();
 let latestCallbacks: WebRtcManagerCallbacks | null = null;
 const { playVoiceSfx } = vi.hoisted(() => ({
   playVoiceSfx: vi.fn(),
@@ -19,6 +26,7 @@ const OriginalAudio = globalThis.Audio;
 const OriginalMediaStream = globalThis.MediaStream;
 const OriginalAudioContext = globalThis.AudioContext;
 const OriginalNavigator = globalThis.navigator;
+const OriginalRTCPeerConnection = globalThis.RTCPeerConnection;
 const OriginalWindow = globalThis.window;
 const audioElements: MockAudio[] = [];
 const mockGainNodes: Array<{ gain: { value: number } }> = [];
@@ -146,9 +154,18 @@ vi.mock('@baker/sdk', () => {
     closePeer = closePeer;
     closeAll = closeAll;
     getPeerIds = getPeerIds;
+    getLocalOutboundNetworkSample = getLocalOutboundNetworkSample;
   }
 
   return {
+    SfuClientSession: class MockSfuClientSession {
+      load = sfuLoad;
+      produceTracks = sfuProduceTracks;
+      consumeProducer = sfuConsumeProducer;
+      replaceProducedTrack = sfuReplaceProducedTrack;
+      getLocalOutboundNetworkSample = sfuGetLocalOutboundNetworkSample;
+      close = sfuClose;
+    },
     WebRtcManager: MockWebRtcManager,
   };
 });
@@ -207,6 +224,19 @@ beforeEach(() => {
   closeAll.mockReset();
   getPeerIds.mockReset();
   getPeerIds.mockReturnValue([]);
+  getLocalOutboundNetworkSample.mockReset();
+  getLocalOutboundNetworkSample.mockResolvedValue(null);
+  sfuLoad.mockReset();
+  sfuLoad.mockResolvedValue(undefined);
+  sfuProduceTracks.mockReset();
+  sfuProduceTracks.mockResolvedValue(undefined);
+  sfuConsumeProducer.mockReset();
+  sfuConsumeProducer.mockResolvedValue(null);
+  sfuReplaceProducedTrack.mockReset();
+  sfuReplaceProducedTrack.mockResolvedValue(undefined);
+  sfuGetLocalOutboundNetworkSample.mockReset();
+  sfuGetLocalOutboundNetworkSample.mockResolvedValue(null);
+  sfuClose.mockReset();
   playVoiceSfx.mockReset();
   latestCallbacks = null;
   audioElements.length = 0;
@@ -303,6 +333,10 @@ afterEach(async () => {
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: OriginalNavigator,
+  });
+  Object.defineProperty(globalThis, 'RTCPeerConnection', {
+    configurable: true,
+    value: OriginalRTCPeerConnection,
   });
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -648,6 +682,54 @@ describe('voice join cues', () => {
 
     expect(playVoiceSfx).toHaveBeenCalledWith('peer_join');
     expect(createOffer).not.toHaveBeenCalled();
+  });
+});
+
+describe('voice media network stats', () => {
+  it('self-reports SFU local media loss from outbound producer stats', async () => {
+    Object.defineProperty(globalThis, 'RTCPeerConnection', {
+      configurable: true,
+      value: function MockRTCPeerConnection() {},
+    });
+
+    const sendRawCommand = vi.fn();
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      iceServers: [],
+      mediaMode: 'sfu',
+      participants: [{ isMuted: false, sessionId, userId }],
+      sessionId,
+      sfu: {
+        producers: [],
+        routerRtpCapabilities: {},
+      },
+    });
+
+    sfuGetLocalOutboundNetworkSample
+      .mockResolvedValueOnce({ packetsLost: 0, packetsSent: 100 })
+      .mockResolvedValueOnce({ packetsLost: 2, packetsSent: 198 });
+
+    await useVoiceStore
+      .getState()
+      .joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+    await Promise.resolve();
+
+    expect(sfuLoad).toHaveBeenCalledOnce();
+    expect(sfuProduceTracks).toHaveBeenCalledWith([
+      expect.objectContaining({ id: 'send-audio-track', kind: 'audio' }),
+    ]);
+    expect(sendRawCommand).not.toHaveBeenCalledWith(
+      'voice.network.self_report',
+      expect.anything(),
+    );
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(useVoiceStore.getState().localMediaSelfLossPct).toBe(2);
+    expect(sendRawCommand).toHaveBeenCalledWith('voice.network.self_report', {
+      channelId,
+      mediaSelfLossPct: 2,
+    });
   });
 });
 

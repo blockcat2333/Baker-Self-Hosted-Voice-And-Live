@@ -1226,8 +1226,9 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
     return null;
   }
 
-  if (!ownedRuntime.manager) return null;
-  const sample = await ownedRuntime.manager.getAggregatePeerVideoSendSample();
+  const sample = ownedRuntime.manager
+    ? await ownedRuntime.manager.getAggregatePeerVideoSendSample()
+    : await (ownedRuntime.sfuSession?.getVideoSendSample() ?? null);
   if (!sample) {
     return {
       activePeerCount: 0,

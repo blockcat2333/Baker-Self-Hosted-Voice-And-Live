@@ -48,6 +48,28 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-06-27 Baker 1.0.9 Voice Media Failure Feedback Release Prep
+
+- bumped the server release line and all non-desktop workspace package metadata to `1.0.9`
+- reset the desktop/client release label to `1.0.9a`
+- updated the Windows installer artifact name to `Baker-Setup-1.0.9a-x64.exe`
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.9`
+- fixed the voice failure mode where a public IP change could leave users apparently connected to voice while audio and livestream media were unusable:
+  - P2P voice now turns sustained all-peer media failure into a terminal `connection_error`
+  - SFU voice now observes send/recv transport connection state and uses the same terminal media-failure handling
+  - voice cleanup now best-effort leaves the channel, tears down mic/WebRTC/SFU/audio resources, clears `channelId`, and shows a localized connection error
+  - multi-user voice rooms keep the session active when at least one remote audio path is still working, while still surfacing a connection warning for the failed peer
+- included the SFU media statistics display fix from the release branch so voice and livestream diagnostics continue reporting through SFU sessions
+- validation completed:
+  - `node scripts/check-release-consistency.mjs`
+  - direct workspace `tsc --noEmit -p <workspace>/tsconfig.json`
+  - direct workspace `eslint` over all package/app lint targets
+  - `vitest run` (181 tests)
+  - production package/service builds through workspace-local `tsup`
+  - production Web/Admin/Desktop builds through workspace-local `vite build`
+  - `docker build -t ghcr.io/blockcat2333/baker:1.0.9 -t ghcr.io/blockcat2333/baker:latest -t blockcat233/baker:1.0.9 -t blockcat233/baker:latest --target allinone-runtime .`
+  - Docker all-in-one smoke: `ghcr.io/blockcat2333/baker:1.0.9` served Web `/health`, Admin `/health`, and `/v1/meta/public-config`
+
 ### 2026-06-10 Baker Desktop 1.0.8b Updater Semver Hotfix
 
 - reissued the desktop client as public label `1.0.8b` with Electron package version `1.0.8-b`

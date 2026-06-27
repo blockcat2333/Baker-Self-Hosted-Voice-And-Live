@@ -18,6 +18,10 @@ const sfuReplaceProducedTrack = vi.fn();
 const sfuGetLocalOutboundNetworkSample = vi.fn();
 const sfuClose = vi.fn();
 let latestCallbacks: WebRtcManagerCallbacks | null = null;
+interface MockSfuClientCallbacks {
+  onTransportConnectionStateChange?: (direction: 'recv' | 'send', state: RTCPeerConnectionState) => void;
+}
+let latestSfuCallbacks: MockSfuClientCallbacks | null = null;
 const { playVoiceSfx } = vi.hoisted(() => ({
   playVoiceSfx: vi.fn(),
 }));
@@ -159,6 +163,10 @@ vi.mock('@baker/sdk', () => {
 
   return {
     SfuClientSession: class MockSfuClientSession {
+      constructor(...args: unknown[]) {
+        latestSfuCallbacks = (args[2] as MockSfuClientCallbacks | undefined) ?? null;
+      }
+
       load = sfuLoad;
       produceTracks = sfuProduceTracks;
       consumeProducer = sfuConsumeProducer;
@@ -239,6 +247,7 @@ beforeEach(() => {
   sfuClose.mockReset();
   playVoiceSfx.mockReset();
   latestCallbacks = null;
+  latestSfuCallbacks = null;
   audioElements.length = 0;
   mockGainNodes.length = 0;
 
@@ -734,33 +743,120 @@ describe('voice media network stats', () => {
 });
 
 describe('voice connection issues', () => {
-  it('surfaces and clears a connection error when a peer stays failed', async () => {
+  it('leaves voice and shows an error when the only peer stays failed', async () => {
     const sendRawCommand = vi.fn();
     const peerId = '77777777-7777-4777-8777-777777777777';
+    const sendCommandAwaitAck = vi.fn(async (command: string) => {
+      if (command === 'voice.join') {
+        return {
+          channelId,
+          iceServers: [],
+          participants: [
+            { isMuted: false, sessionId, userId },
+            { isMuted: false, sessionId: peerSessionId, userId: peerId },
+          ],
+          sessionId,
+        };
+      }
+      return {};
+    });
+    const captureTrack = new MockTrack(
+      'connection-issue-capture-track',
+      'audio',
+    ) as unknown as MediaStreamTrack;
 
-    await useVoiceStore.getState().joinVoiceChannel(
-      channelId,
-      async () => ({
-        channelId,
-        iceServers: [],
-        participants: [
-          { isMuted: false, sessionId, userId },
-          { isMuted: false, sessionId: peerSessionId, userId: peerId },
-        ],
-        sessionId,
-      }),
-      sendRawCommand,
-    );
+    getUserMedia.mockResolvedValueOnce(new MockMediaStream([captureTrack]));
+
+    await useVoiceStore.getState().joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
 
     expect(latestCallbacks).not.toBeNull();
 
+    getPeerIds.mockReturnValue([peerId]);
     latestCallbacks!.onPeerConnectionStateChange(peerId, 'failed');
-    vi.advanceTimersByTime(2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
 
-    expect(useVoiceStore.getState().connectionIssue).toBe('connection_error');
+    expect(useVoiceStore.getState().status).toBe('error');
+    expect(useVoiceStore.getState().error).toBe('connection_error');
+    expect(useVoiceStore.getState().channelId).toBeNull();
+    expect(useVoiceStore.getState().connectionIssue).toBeNull();
+    expect(captureTrack.stop).toHaveBeenCalledOnce();
+    expect(closeAll).toHaveBeenCalledOnce();
+    expect(sendRawCommand).toHaveBeenCalledWith(
+      'media.signal.end',
+      expect.objectContaining({ targetUserId: peerId }),
+    );
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('voice.leave', { channelId });
+  });
+
+  it('keeps voice active when another remote audio path is available', async () => {
+    const sendRawCommand = vi.fn();
+    const peerId = '77777777-7777-4777-8777-777777777777';
+    const healthyPeerId = '88888888-8888-4888-8888-888888888888';
+    const sendCommandAwaitAck = vi.fn(async () => ({
+      channelId,
+      iceServers: [],
+      participants: [
+        { isMuted: false, sessionId, userId },
+        { isMuted: false, sessionId: peerSessionId, userId: peerId },
+        { isMuted: false, sessionId: sessionIdB, userId: '88888888-8888-4888-8888-888888888888' },
+      ],
+      sessionId,
+    }));
+
+    await useVoiceStore.getState().joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+
+    const track = new MockTrack(
+      'healthy-remote-audio-track',
+      'audio',
+    ) as unknown as MediaStreamTrack;
+    const stream = new MockMediaStream([track]) as unknown as MediaStream;
+    latestCallbacks!.onRemoteTrack(healthyPeerId, track, [stream]);
 
     latestCallbacks!.onPeerConnectionStateChange(peerId, 'connected');
+    latestCallbacks!.onPeerConnectionStateChange(peerId, 'failed');
+    await vi.advanceTimersByTimeAsync(2_000);
 
+    expect(useVoiceStore.getState().status).toBe('active');
+    expect(useVoiceStore.getState().channelId).toBe(channelId);
+    expect(useVoiceStore.getState().connectionIssue).toBe('connection_error');
+    expect(sendCommandAwaitAck).not.toHaveBeenCalledWith('voice.leave', expect.anything());
+  });
+
+  it('leaves voice and shows an error when the SFU transport stays failed', async () => {
+    const sendRawCommand = vi.fn();
+    const peerId = '77777777-7777-4777-8777-777777777777';
+    const sendCommandAwaitAck = vi.fn(async (command: string) => {
+      if (command === 'voice.join') {
+        return {
+          channelId,
+          iceServers: [],
+          mediaMode: 'sfu',
+          participants: [
+            { isMuted: false, sessionId, userId },
+            { isMuted: false, sessionId: peerSessionId, userId: peerId },
+          ],
+          sessionId,
+          sfu: {
+            producers: [],
+            routerRtpCapabilities: {},
+          },
+        };
+      }
+      return {};
+    });
+
+    await useVoiceStore.getState().joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+
+    expect(latestSfuCallbacks?.onTransportConnectionStateChange).toBeDefined();
+
+    latestSfuCallbacks!.onTransportConnectionStateChange!('send', 'failed');
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(useVoiceStore.getState().status).toBe('error');
+    expect(useVoiceStore.getState().error).toBe('connection_error');
+    expect(useVoiceStore.getState().channelId).toBeNull();
     expect(useVoiceStore.getState().connectionIssue).toBeNull();
+    expect(sfuClose).toHaveBeenCalledOnce();
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('voice.leave', { channelId });
   });
 });

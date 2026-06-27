@@ -1,4 +1,5 @@
 import type {
+  ConnectionState,
   Device,
   Producer,
   Transport,
@@ -35,6 +36,12 @@ interface SfuSessionDescriptor {
 
 type SendCommandAwaitAck = (command: GatewayCommandName, data: unknown, timeoutMs?: number) => Promise<unknown>;
 
+export type SfuTransportDirection = 'recv' | 'send';
+
+export interface SfuClientSessionCallbacks {
+  onTransportConnectionStateChange?(direction: SfuTransportDirection, state: ConnectionState): void;
+}
+
 export interface SfuRemoteTrack {
   consumerId: string;
   producer: SfuProducer;
@@ -51,6 +58,7 @@ export class SfuClientSession {
   constructor(
     private readonly descriptor: SfuSessionDescriptor,
     private readonly sendCommandAwaitAck: SendCommandAwaitAck,
+    private readonly callbacks: SfuClientSessionCallbacks = {},
   ) {}
 
   async load(info: SfuSessionInfo): Promise<void> {
@@ -201,6 +209,10 @@ export class SfuClientSession {
     const transport = direction === 'send'
       ? device.createSendTransport(options)
       : device.createRecvTransport(options);
+
+    transport.on('connectionstatechange', (state) => {
+      this.callbacks.onTransportConnectionStateChange?.(direction, state);
+    });
 
     transport.on('connect', ({ dtlsParameters }, callback, errback) => {
       this.sendCommandAwaitAck('media.sfu.connect_transport', {

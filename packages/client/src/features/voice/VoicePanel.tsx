@@ -720,6 +720,8 @@ export function VoicePanel() {
       errorMessage = t('voice.error_mic_denied');
     } else if (voiceError === 'not_connected') {
       errorMessage = t('voice.error_not_connected');
+    } else if (voiceError === 'connection_error') {
+      errorMessage = t('voice.error_connection_issue');
     } else {
       errorMessage = voiceError ?? t('voice.error_mic_denied');
     }

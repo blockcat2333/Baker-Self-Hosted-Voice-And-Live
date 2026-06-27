@@ -1,5 +1,37 @@
 # Project History
 
+## 2026-06-27
+
+### Baker 1.0.9 voice media failure feedback release prep
+
+What changed:
+
+- bumped the server release line and non-desktop workspace package metadata to `1.0.9`
+- reset the desktop/client release label to `1.0.9a`
+- prepared Windows installer naming for `Baker-Setup-1.0.9a-x64.exe`
+- updated the English and Chinese deployment docs to use `blockcat233/baker:1.0.9`
+- changed voice media failure handling so stale public IP / unreachable TURN-SFU media paths no longer leave the client looking connected with no audio
+- added SFU transport connection-state callbacks and wired voice SFU send/recv failures into the same terminal `connection_error` path
+- kept multi-user voice sessions active when at least one remote audio path is still established
+- included the SFU media statistics display fix from the release branch for voice and livestream diagnostics
+
+Why:
+
+- public IP changes can invalidate advertised TURN/SFU media addresses before users notice from the admin panel
+- previously the client could remain in a voice channel with dead media and no explicit error, which also made livestream viewing appear silently broken
+- `1.0.9` pairs the existing public IP automation with client-side failure visibility and cleanup
+
+Validation:
+
+- `node scripts/check-release-consistency.mjs`
+- direct workspace `tsc --noEmit -p <workspace>/tsconfig.json`
+- direct workspace `eslint` over all package/app lint targets
+- `vitest run` (181 tests)
+- production package/service builds through workspace-local `tsup`
+- production Web/Admin/Desktop builds through workspace-local `vite build`
+- Docker all-in-one image build for `1.0.9` and `latest`
+- Docker all-in-one smoke: Web `/health`, Admin `/health`, and `/v1/meta/public-config`
+
 ## 2026-06-10
 
 ### Baker Desktop 1.0.8b updater semver hotfix

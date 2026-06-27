@@ -118,6 +118,10 @@ const lastIceRestartRequestAt = new Map<string, number>();
 const pendingIceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingVoiceConnectionIssueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const peersWithRemoteAudio = new Set<string>();
+const SFU_VOICE_TRANSPORT_ISSUE_KEY = '__sfu_voice_transport__';
+type SfuVoiceTransportDirection = 'recv' | 'send';
+let sfuRecvTransportConnectionState: RTCPeerConnectionState | null = null;
+let sfuSendTransportConnectionState: RTCPeerConnectionState | null = null;
 let lastLocalMediaReportAtMs = 0;
 let lastLocalOutboundTotals: { packetsLost: number; packetsSent: number } | null = null;
 const SELF_REPORT_INTERVAL_MS = 2_000;
@@ -276,6 +280,9 @@ function attachRemoteAudioTrack(fromUserId: string, track: MediaStreamTrack, str
   if (track.kind !== 'audio') return;
   peersWithRemoteAudio.add(fromUserId);
   clearVoiceConnectionIssueTimer(fromUserId);
+  if (savedMediaMode === 'sfu') {
+    clearSfuVoiceTransportIssueTimers();
+  }
   clearVoiceConnectionIssueIfResolved();
   let audio = remoteAudioElements.get(fromUserId);
   if (!audio) {
@@ -311,31 +318,154 @@ function clearAllVoiceConnectionIssueTimers() {
   pendingVoiceConnectionIssueTimers.clear();
 }
 
+function sfuVoiceTransportIssueKey(direction: SfuVoiceTransportDirection) {
+  return `${SFU_VOICE_TRANSPORT_ISSUE_KEY}:${direction}`;
+}
+
+function getSfuVoiceTransportConnectionState(direction: SfuVoiceTransportDirection) {
+  return direction === 'recv' ? sfuRecvTransportConnectionState : sfuSendTransportConnectionState;
+}
+
+function setSfuVoiceTransportConnectionState(
+  direction: SfuVoiceTransportDirection,
+  state: RTCPeerConnectionState,
+) {
+  if (direction === 'recv') {
+    sfuRecvTransportConnectionState = state;
+    return;
+  }
+
+  sfuSendTransportConnectionState = state;
+}
+
+function getSfuVoiceTransportConnectionStates() {
+  return [sfuRecvTransportConnectionState, sfuSendTransportConnectionState].filter(
+    (state): state is RTCPeerConnectionState => state !== null,
+  );
+}
+
+function clearSfuVoiceTransportConnectionStates() {
+  sfuRecvTransportConnectionState = null;
+  sfuSendTransportConnectionState = null;
+}
+
+function clearSfuVoiceTransportIssueTimers() {
+  clearVoiceConnectionIssueTimer(sfuVoiceTransportIssueKey('recv'));
+  clearVoiceConnectionIssueTimer(sfuVoiceTransportIssueKey('send'));
+}
+
+function getRemoteVoiceParticipants(participants = useVoiceStore.getState().participants) {
+  const myUserId = savedMyUserId ?? useAuthStore.getState().user?.id ?? null;
+  return participants.filter((participant) => participant.userId !== myUserId);
+}
+
+function isVoicePeerConnectionIssue(
+  userId: string,
+  connectionState: RTCPeerConnectionState | undefined,
+) {
+  if (connectionState === 'failed' || connectionState === 'disconnected') {
+    return true;
+  }
+
+  return (
+    (connectionState === 'connecting' || connectionState === 'new') &&
+    !peersWithRemoteAudio.has(userId)
+  );
+}
+
+function isSfuVoiceTransportConnectionIssue(
+  participants = useVoiceStore.getState().participants,
+) {
+  const connectionStates = getSfuVoiceTransportConnectionStates();
+  if (connectionStates.some((state) => state === 'failed' || state === 'disconnected')) {
+    return true;
+  }
+
+  return (
+    connectionStates.some((state) => state === 'connecting' || state === 'new') &&
+    getRemoteVoiceParticipants(participants).length > 0 &&
+    peersWithRemoteAudio.size === 0
+  );
+}
+
 function hasOutstandingVoiceConnectionIssue() {
   const { participants, peerNetwork } = useVoiceStore.getState();
-  const myUserId = savedMyUserId ?? useAuthStore.getState().user?.id ?? null;
 
-  return participants.some((participant) => {
-    if (participant.userId === myUserId) {
-      return false;
-    }
+  if (savedMediaMode === 'sfu' && isSfuVoiceTransportConnectionIssue(participants)) {
+    return true;
+  }
 
-    const connectionState = peerNetwork[participant.userId]?.connectionState;
-    if (connectionState === 'failed' || connectionState === 'disconnected') {
-      return true;
-    }
-
-    return (
-      (connectionState === 'connecting' || connectionState === 'new') &&
-      !peersWithRemoteAudio.has(participant.userId)
-    );
-  });
+  return getRemoteVoiceParticipants(participants).some((participant) =>
+    isVoicePeerConnectionIssue(participant.userId, peerNetwork[participant.userId]?.connectionState),
+  );
 }
 
 function clearVoiceConnectionIssueIfResolved() {
   if (!hasOutstandingVoiceConnectionIssue()) {
     useVoiceStore.setState({ connectionIssue: null });
   }
+}
+
+function shouldFailP2pVoiceMediaSession() {
+  const { participants, peerNetwork } = useVoiceStore.getState();
+  const remoteParticipants = getRemoteVoiceParticipants(participants);
+  if (remoteParticipants.length === 0) {
+    return false;
+  }
+
+  return remoteParticipants.every((participant) =>
+    isVoicePeerConnectionIssue(participant.userId, peerNetwork[participant.userId]?.connectionState),
+  );
+}
+
+function shouldFailSfuVoiceMediaSession() {
+  const { participants } = useVoiceStore.getState();
+  if (savedMediaMode !== 'sfu') {
+    return false;
+  }
+
+  if (getSfuVoiceTransportConnectionStates().some((state) => state === 'failed' || state === 'disconnected')) {
+    return true;
+  }
+
+  return getRemoteVoiceParticipants(participants).length > 0 && peersWithRemoteAudio.size === 0;
+}
+
+function failVoiceMediaConnection(error = 'connection_error') {
+  const { channelId, status } = useVoiceStore.getState();
+  if (status !== 'active') {
+    return;
+  }
+
+  const leaveChannelId = channelId ?? savedChannelId;
+  const sendCommandAwaitAck = savedSendCommandAwaitAck;
+
+  if (webrtcManager) {
+    for (const peerId of webrtcManager.getPeerIds()) {
+      sendSignal(peerId, { type: 'end' });
+    }
+  }
+
+  teardown();
+
+  if (leaveChannelId && sendCommandAwaitAck) {
+    void sendCommandAwaitAck('voice.leave', { channelId: leaveChannelId }).catch(() => {
+      // Best-effort: local media has already been cleaned up.
+    });
+  }
+
+  useVoiceStore.setState({
+    status: 'error',
+    channelId: null,
+    error,
+    isMuted: false,
+    connectionIssue: null,
+    localMediaSelfLossPct: null,
+    localMediaSelfUpdatedAt: null,
+    participants: [],
+    speakingUserIds: new Set(),
+    peerNetwork: {},
+  });
 }
 
 function scheduleVoiceConnectionIssue(
@@ -346,6 +476,7 @@ function scheduleVoiceConnectionIssue(
   clearVoiceConnectionIssueTimer(userId);
 
   const timer = setTimeout(() => {
+    pendingVoiceConnectionIssueTimers.delete(userId);
     const { participants, peerNetwork, status } = useVoiceStore.getState();
     if (status !== 'active') {
       return;
@@ -368,9 +499,82 @@ function scheduleVoiceConnectionIssue(
     }
 
     useVoiceStore.setState({ connectionIssue: 'connection_error' });
+    if (shouldFailP2pVoiceMediaSession()) {
+      failVoiceMediaConnection();
+    }
   }, delayMs);
 
   pendingVoiceConnectionIssueTimers.set(userId, timer);
+}
+
+function scheduleSfuVoiceConnectionIssue(
+  direction: SfuVoiceTransportDirection,
+  delayMs: number,
+  expectedStates: RTCPeerConnectionState[],
+) {
+  const issueKey = sfuVoiceTransportIssueKey(direction);
+  clearVoiceConnectionIssueTimer(issueKey);
+
+  const timer = setTimeout(() => {
+    pendingVoiceConnectionIssueTimers.delete(issueKey);
+    const { status } = useVoiceStore.getState();
+    if (status !== 'active' || savedMediaMode !== 'sfu') {
+      return;
+    }
+
+    const connectionState = getSfuVoiceTransportConnectionState(direction);
+    if (!connectionState || !expectedStates.includes(connectionState)) {
+      return;
+    }
+
+    if (
+      (connectionState === 'connecting' || connectionState === 'new') &&
+      peersWithRemoteAudio.size > 0
+    ) {
+      return;
+    }
+
+    useVoiceStore.setState({ connectionIssue: 'connection_error' });
+    if (shouldFailSfuVoiceMediaSession()) {
+      failVoiceMediaConnection();
+    }
+  }, delayMs);
+
+  pendingVoiceConnectionIssueTimers.set(issueKey, timer);
+}
+
+function handleSfuVoiceTransportConnectionStateChange(
+  direction: SfuVoiceTransportDirection,
+  state: RTCPeerConnectionState,
+) {
+  setSfuVoiceTransportConnectionState(direction, state);
+  const store = useVoiceStore.getState();
+  if (store.status !== 'active') {
+    return;
+  }
+
+  clearVoiceConnectionIssueTimer(sfuVoiceTransportIssueKey(direction));
+
+  if (state === 'connected') {
+    clearVoiceConnectionIssueIfResolved();
+    return;
+  }
+
+  if (state === 'connecting' || state === 'new') {
+    scheduleSfuVoiceConnectionIssue(direction, VOICE_CONNECTING_ISSUE_DELAY_MS, ['connecting', 'new']);
+    return;
+  }
+
+  if (state !== 'disconnected' && state !== 'failed') {
+    clearVoiceConnectionIssueIfResolved();
+    return;
+  }
+
+  scheduleSfuVoiceConnectionIssue(
+    direction,
+    state === 'failed' ? VOICE_FAILED_ISSUE_DELAY_MS : VOICE_DISCONNECTED_ISSUE_DELAY_MS,
+    [state],
+  );
 }
 
 function createLocalSendStream(captureStream: MediaStream, inputVolume: number): MediaStream {
@@ -497,6 +701,11 @@ async function setupSfuVoiceSession(
       sessionId: savedMySessionId,
     },
     sendCommandAwaitAck,
+    {
+      onTransportConnectionStateChange(direction, state) {
+        handleSfuVoiceTransportConnectionStateChange(direction, state);
+      },
+    },
   );
   await sfuSession.load(ackData.sfu);
   await sfuSession.produceTracks(localSendStream.getAudioTracks());
@@ -648,6 +857,7 @@ function teardown() {
   sfuSession?.close();
   sfuSession = null;
   pendingSfuVoiceProducers = [];
+  clearSfuVoiceTransportConnectionStates();
 
   for (const [userId, audio] of remoteAudioElements) {
     detachRemoteAudioGain(userId);
@@ -690,6 +900,7 @@ function teardownPeersForReconnect() {
   sfuSession?.close();
   sfuSession = null;
   pendingSfuVoiceProducers = [];
+  clearSfuVoiceTransportConnectionStates();
 
   for (const [userId, audio] of remoteAudioElements) {
     detachRemoteAudioGain(userId);
@@ -1048,6 +1259,14 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       participants: activeParticipants,
       speakingUserIds: new Set(),
     });
+    if (ackData.mediaMode === 'sfu') {
+      if (sfuRecvTransportConnectionState) {
+        handleSfuVoiceTransportConnectionStateChange('recv', sfuRecvTransportConnectionState);
+      }
+      if (sfuSendTransportConnectionState) {
+        handleSfuVoiceTransportConnectionStateChange('send', sfuSendTransportConnectionState);
+      }
+    }
     playVoiceSfx('self_join');
   },
 
@@ -1536,6 +1755,14 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       participants: activeParticipants,
       speakingUserIds: new Set(),
     });
+    if (ackData.mediaMode === 'sfu') {
+      if (sfuRecvTransportConnectionState) {
+        handleSfuVoiceTransportConnectionStateChange('recv', sfuRecvTransportConnectionState);
+      }
+      if (sfuSendTransportConnectionState) {
+        handleSfuVoiceTransportConnectionStateChange('send', sfuSendTransportConnectionState);
+      }
+    }
 
     applyLocalMuteToTracks(isMuted);
     if (isMuted) {

@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.9
+  blockcat233/baker:1.0.10beta
 ```
 
 4. Read the first admin password:
@@ -53,6 +53,8 @@ docker logs baker
 
 - Web: `http://localhost:3000`
 - Admin: `http://localhost:3001`
+
+This guide assumes the official all-in-one image. The container includes the bundled services and `supervisorctl`, so the admin panel can restart Media/TURN after deployment-setting or public-IP changes. The repo's `docker-compose.yml` is for local development infrastructure, not the public deployment path.
 
 ## What To Do After The Container Starts
 
@@ -94,6 +96,8 @@ After the container restarts, check the logs and make sure the media service rep
 
 If your public IP may change, enable **Runtime Status -> Public IP Automation** in the admin panel after TURN/SFU is configured. Baker will periodically detect the current public IP and refresh the managed media addresses.
 
+Baker defaults to several public IP check endpoints, including `https://ip.3322.net`, `https://myip.ipip.net`, and `https://ifconfig.co/ip` for server networks that cannot reliably reach the older global endpoints. If your server still reports detection failures, set `BAKER_PUBLIC_IP_ENDPOINTS` to a comma-separated list that works from that server. The response may be a plain IP address, JSON with an `ip` field, or text that contains an IP address.
+
 ## Optional SFU Mode
 
 TURN keeps P2P media working through NAT. SFU mode is different: voice and livestream tracks go through Baker's media backend, which is useful when some users are on networks that block or degrade direct P2P paths.
@@ -110,7 +114,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.9
+  blockcat233/baker:1.0.10beta
 ```
 
 Then open the admin panel and change **Server settings -> Media mode** to `sfu`. Existing voice and livestream sessions reconnect immediately in the new mode, while text chat remains connected.
@@ -130,9 +134,10 @@ docker run -d \
   -e TURN_EXTERNAL_IP=203.0.113.10 \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
+  -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.9
+  blockcat233/baker:1.0.10beta
 ```
 
 You still need to place HTTPS in front of the web app for real users.
@@ -177,7 +182,7 @@ If you keep the same Docker volume, you can recreate the container without losin
 Typical upgrade flow:
 
 ```bash
-docker pull blockcat233/baker:1.0.9
+docker pull blockcat233/baker:1.0.10beta
 docker rm -f baker
 ```
 

@@ -1,5 +1,36 @@
 # Project History
 
+## 2026-06-29
+
+### Baker 1.0.10beta all-in-one public IP automation beta prep
+
+What changed:
+
+- bumped the public server beta label to `1.0.10beta` while keeping package metadata semver-compatible as `1.0.10-beta`
+- kept desktop at `1.0.9a`; this beta ships the server/all-in-one image only
+- updated deployment docs so public deployments are explicitly based on the all-in-one Supervisor container
+- documented that runtime repair, self-repair, deployment apply, and public IP automation service restarts require `supervisorctl`
+- added China-friendly public IP check endpoints and documented `BAKER_PUBLIC_IP_ENDPOINTS`
+- changed public IP parsing to accept localized text that contains an IP address
+- fixed the all-in-one watchdog `runtime.env` write path by importing `rename`
+- changed public IP automation to retry Media/TURN restarts after a previous supervisor restart failure instead of marking the IP fully applied
+- updated Docker Hub update discovery to include compact beta tags such as `1.0.10beta`
+
+Why:
+
+- users can run into public IP automation failures when their server cannot reach `api.ipify`, `ifconfig.me`, or `checkip.amazonaws.com`
+- the admin panel's repair and managed restart features only work in the all-in-one Supervisor environment, so deployment docs need to make that requirement explicit
+- a failed supervisor restart should remain visible and retryable; otherwise a new IP can be written to config but not actually applied to running Media/TURN services
+
+Validation:
+
+- targeted runtime public IP tests
+- update-version discovery tests
+- API typecheck and lint
+- all-in-one watchdog syntax check
+- release consistency check
+- full test, typecheck, lint, production build, Docker build, and Docker smoke validation before release
+
 ## 2026-06-27
 
 ### Baker 1.0.9 voice media failure feedback release prep

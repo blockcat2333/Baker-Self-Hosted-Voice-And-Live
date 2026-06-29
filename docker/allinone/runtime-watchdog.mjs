@@ -6,6 +6,7 @@ import {
   mkdir,
   open,
   readFile,
+  rename,
   rm,
   stat,
   writeFile,
@@ -32,10 +33,17 @@ const bakerImageRepository =
 const bakerVersion = process.env.BAKER_VERSION || 'latest';
 const repairLockStaleMs = 15 * 60 * 1000;
 const defaultPublicIpEndpoints = [
+  'https://ip.3322.net',
+  'https://myip.ipip.net',
+  'https://ifconfig.co/ip',
   'https://api.ipify.org?format=json',
   'https://ifconfig.me/ip',
   'https://checkip.amazonaws.com',
 ];
+const restartFailurePrefix =
+  'Runtime config requires a service restart, but service restart failed:';
+const legacyRestartFailurePrefix =
+  'Runtime config was updated, but service restart failed:';
 
 const serviceOrder = [
   'postgres',
@@ -204,7 +212,16 @@ function parseIpFromBody(body) {
     // Plain-text endpoints are expected.
   }
 
-  return trimmed.split(/\s+/)[0]?.trim() || null;
+  const tokens = trimmed.split(/\s+/);
+  const embeddedIpv4 = trimmed.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [];
+  for (const candidate of [...tokens, ...embeddedIpv4]) {
+    const normalized = candidate
+      .trim()
+      .replace(/^[^\dA-Fa-f:.]+|[^\dA-Fa-f:.]+$/g, '');
+    if (normalized && isValidDetectedPublicIp(normalized)) return normalized;
+  }
+
+  return null;
 }
 
 function isValidDetectedPublicIp(value) {
@@ -227,6 +244,42 @@ function shouldUpdateAutoTurnUrls({
     return true;
   if (!lastAppliedIp) return false;
   return currentTurnUrls === buildAutoTurnUrls(lastAppliedIp, turnPort);
+}
+
+function previousRestartFailed(error) {
+  return (
+    String(error || '').startsWith(restartFailurePrefix) ||
+    String(error || '').startsWith(legacyRestartFailurePrefix)
+  );
+}
+
+function addPendingRestartServices({
+  detectedIp,
+  lastAppliedIp,
+  lastError,
+  runtimeSettings,
+  servicesToRestart,
+}) {
+  if (lastAppliedIp === detectedIp || !previousRestartFailed(lastError)) {
+    return;
+  }
+
+  if (runtimeSettings.turnEnabled) {
+    const currentAutoTurnUrls = buildAutoTurnUrls(
+      detectedIp,
+      runtimeSettings.turnPort,
+    );
+    if (runtimeSettings.turnExternalIp === detectedIp) {
+      servicesToRestart.add('turn');
+      servicesToRestart.add('media');
+    } else if (runtimeSettings.turnUrls === currentAutoTurnUrls) {
+      servicesToRestart.add('media');
+    }
+  }
+
+  if (runtimeSettings.sfuAnnouncedIp === detectedIp) {
+    servicesToRestart.add('media');
+  }
 }
 
 async function detectPublicIp(timeoutMs = 4000) {
@@ -284,12 +337,14 @@ async function checkAndApplyPublicIp() {
   const runtimeSettings = await readRuntimeSettings();
   const nextEnv = { ...env };
   const servicesToRestart = new Set();
+  let runtimeConfigChanged = false;
 
   if (runtimeSettings.turnEnabled) {
     if (runtimeSettings.turnExternalIp !== detectedIp) {
       nextEnv.TURN_EXTERNAL_IP = detectedIp;
       servicesToRestart.add('turn');
       servicesToRestart.add('media');
+      runtimeConfigChanged = true;
     }
 
     const nextTurnUrls = buildAutoTurnUrls(
@@ -307,6 +362,7 @@ async function checkAndApplyPublicIp() {
     ) {
       nextEnv.TURN_URLS = nextTurnUrls;
       servicesToRestart.add('media');
+      runtimeConfigChanged = true;
     }
   }
 
@@ -316,12 +372,24 @@ async function checkAndApplyPublicIp() {
   ) {
     nextEnv.SFU_ANNOUNCED_IP = detectedIp;
     servicesToRestart.add('media');
+    runtimeConfigChanged = true;
   }
 
-  const changed = servicesToRestart.size > 0;
+  addPendingRestartServices({
+    detectedIp,
+    lastAppliedIp: current.lastAppliedIp,
+    lastError: current.lastError,
+    runtimeSettings,
+    servicesToRestart,
+  });
+
+  const shouldRestartServices = servicesToRestart.size > 0;
   const restartErrors = [];
-  if (changed) {
+  if (runtimeConfigChanged) {
     await writeRuntimeEnv(nextEnv);
+  }
+
+  if (shouldRestartServices) {
     for (const service of servicesToRestart) {
       try {
         await runSupervisorctl(['restart', service]);
@@ -333,19 +401,20 @@ async function checkAndApplyPublicIp() {
     }
   }
 
+  const applied = shouldRestartServices && restartErrors.length === 0;
   await writeJson(publicIpPath, {
     ...current,
-    lastAppliedAt: changed ? nowIso() : current.lastAppliedAt,
-    lastAppliedIp: changed ? detectedIp : current.lastAppliedIp,
+    lastAppliedAt: applied ? nowIso() : current.lastAppliedAt,
+    lastAppliedIp: applied ? detectedIp : current.lastAppliedIp,
     lastCheckedAt: nowIso(),
     lastDetectedIp: detectedIp,
     lastError:
       restartErrors.length > 0
-        ? `Runtime config was updated, but service restart failed: ${restartErrors.join(' ')}`
+        ? `${restartFailurePrefix} ${restartErrors.join(' ')}`
         : null,
     updatedAt: nowIso(),
   });
-  return changed;
+  return shouldRestartServices;
 }
 
 async function readRuntimeSettings() {

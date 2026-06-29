@@ -35,11 +35,17 @@ function listPackageJsons(directory) {
 }
 
 const rootPackage = readJson('package.json');
-const serverVersion = rootPackage.version;
+const serverPackageVersion = rootPackage.version;
 const desktopPackagePath = 'apps/desktop/package.json';
 const desktopPackage = readJson(desktopPackagePath);
 const desktopVersion = desktopPackage.version;
-const serverVersionPattern = /^\d+\.\d+\.\d+$/;
+const stableServerVersionPattern = /^\d+\.\d+\.\d+$/;
+const betaServerVersionPattern = /^(\d+\.\d+\.\d+)-beta$/;
+const betaServerVersionMatch = serverPackageVersion.match(betaServerVersionPattern);
+const serverReleaseLabel = betaServerVersionMatch
+  ? `${betaServerVersionMatch[1]}beta`
+  : serverPackageVersion;
+const isBetaServerRelease = Boolean(betaServerVersionMatch);
 const desktopVersionPattern = /^(\d+\.\d+\.\d+)-([a-z])$/;
 const desktopVersionMatch = desktopVersion.match(desktopVersionPattern);
 const desktopReleaseLabel = desktopVersionMatch
@@ -48,19 +54,21 @@ const desktopReleaseLabel = desktopVersionMatch
 
 check(
   'root package version',
-  serverVersionPattern.test(serverVersion),
-  `expected numeric server version, found ${serverVersion}`,
+  stableServerVersionPattern.test(serverPackageVersion) || isBetaServerRelease,
+  `expected numeric server version or semver beta version, found ${serverPackageVersion}`,
 );
 check(
   'desktop package version',
   Boolean(desktopVersionMatch),
-  `expected semver client package version like ${serverVersion}-a, found ${desktopVersion}`,
+  `expected semver client package version like X.Y.Z-a, found ${desktopVersion}`,
 );
-check(
-  'desktop package version base',
-  desktopVersionMatch?.[1] === serverVersion,
-  `expected ${desktopVersion} to use server base ${serverVersion}`,
-);
+if (!isBetaServerRelease) {
+  check(
+    'desktop package version base',
+    desktopVersionMatch?.[1] === serverPackageVersion,
+    `expected ${desktopVersion} to use server base ${serverPackageVersion}`,
+  );
+}
 check(
   'release check script',
   rootPackage.scripts?.['release:check'] === 'node scripts/check-release-consistency.mjs',
@@ -75,28 +83,30 @@ for (const packagePath of [...listPackageJsons('apps'), ...listPackageJsons('pac
 
   check(
     packagePath,
-    packageJson.version === serverVersion,
-    `expected version ${serverVersion}, found ${packageJson.version}`,
+    packageJson.version === serverPackageVersion,
+    `expected version ${serverPackageVersion}, found ${packageJson.version}`,
   );
 }
 
 const desktopArtifactName = desktopPackage.build?.artifactName ?? '';
-check(
-  'desktop artifact name',
-  desktopArtifactName.includes(desktopReleaseLabel),
-  `expected artifactName to include ${desktopReleaseLabel}, found ${desktopArtifactName}`,
-);
+if (!isBetaServerRelease) {
+  check(
+    'desktop artifact name',
+    desktopArtifactName.includes(desktopReleaseLabel),
+    `expected artifactName to include ${desktopReleaseLabel}, found ${desktopArtifactName}`,
+  );
+}
 
 const sharedVersionSource = readText('packages/shared/src/version.ts');
 check(
   'BAKER_VERSION',
-  new RegExp(`BAKER_VERSION\\s*=\\s*['"]${escapeRegExp(serverVersion)}['"]`).test(sharedVersionSource),
-  `expected packages/shared/src/version.ts to export ${serverVersion}`,
+  new RegExp(`BAKER_VERSION\\s*=\\s*['"]${escapeRegExp(serverReleaseLabel)}['"]`).test(sharedVersionSource),
+  `expected packages/shared/src/version.ts to export ${serverReleaseLabel}`,
 );
 
 for (const readmePath of ['README.md', 'README.zh-CN.md']) {
   const readme = readText(readmePath);
-  check(readmePath, readme.includes(serverVersion), `expected server version ${serverVersion}`);
+  check(readmePath, readme.includes(serverReleaseLabel), `expected server version ${serverReleaseLabel}`);
   check(readmePath, readme.includes(desktopReleaseLabel), `expected desktop version ${desktopReleaseLabel}`);
 }
 
@@ -113,15 +123,15 @@ for (const docsPath of [
 
   check(docsPath, pinnedDockerTags.length > 0, 'expected at least one pinned Baker Docker tag');
   for (const tag of pinnedDockerTags) {
-    check(docsPath, tag === serverVersion, `expected Docker tag ${serverVersion}, found ${tag}`);
+    check(docsPath, tag === serverReleaseLabel, `expected Docker tag ${serverReleaseLabel}, found ${tag}`);
   }
 }
 
 const imageWorkflow = readText('.github/workflows/publish-images.yml');
 check(
   'Docker image workflow tag guard',
-  imageWorkflow.includes('is_server_tag') && imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+$'),
-  'expected publish-images.yml to skip non-numeric release tags',
+  imageWorkflow.includes('is_server_tag') && imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+(beta)?$'),
+  'expected publish-images.yml to publish stable and compact beta server tags',
 );
 
 const desktopWorkflow = readText('.github/workflows/publish-desktop.yml');
@@ -144,7 +154,10 @@ if (failures.length > 0) {
   }
   process.exitCode = 1;
 } else {
-  console.log(`Release consistency OK: server ${serverVersion}, desktop ${desktopVersion}`);
-  console.log(`Expected Docker tag: blockcat233/baker:${serverVersion}`);
-  console.log(`Expected GitHub Release tags: v${serverVersion} and v${desktopReleaseLabel}`);
+  console.log(`Release consistency OK: server ${serverReleaseLabel}, package ${serverPackageVersion}, desktop ${desktopVersion}`);
+  console.log(`Expected Docker tag: blockcat233/baker:${serverReleaseLabel}`);
+  console.log(`Expected GitHub Release tag: v${serverReleaseLabel}`);
+  if (!isBetaServerRelease) {
+    console.log(`Expected desktop GitHub Release tag: v${desktopReleaseLabel}`);
+  }
 }

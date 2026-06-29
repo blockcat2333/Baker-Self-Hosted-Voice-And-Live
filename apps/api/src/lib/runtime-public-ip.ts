@@ -22,10 +22,17 @@ const supervisorConfigPath =
 const supervisorctlCommand =
   process.env.BAKER_SUPERVISORCTL_COMMAND ?? 'supervisorctl';
 const defaultPublicIpEndpoints = [
+  'https://ip.3322.net',
+  'https://myip.ipip.net',
+  'https://ifconfig.co/ip',
   'https://api.ipify.org?format=json',
   'https://ifconfig.me/ip',
   'https://checkip.amazonaws.com',
 ];
+const restartFailurePrefix =
+  'Runtime config requires a service restart, but service restart failed:';
+const legacyRestartFailurePrefix =
+  'Runtime config was updated, but service restart failed:';
 
 function nowIso() {
   return new Date().toISOString();
@@ -39,7 +46,7 @@ function publicIpEndpoints() {
     .concat(defaultPublicIpEndpoints);
 }
 
-function parseIpFromBody(body: string) {
+export function parseIpFromBody(body: string) {
   const trimmed = body.trim();
   if (!trimmed) {
     return null;
@@ -54,8 +61,18 @@ function parseIpFromBody(body: string) {
     // Plain-text endpoints are expected.
   }
 
-  const firstToken = trimmed.split(/\s+/)[0];
-  return firstToken?.trim() || null;
+  const tokens = trimmed.split(/\s+/);
+  const embeddedIpv4 = trimmed.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) ?? [];
+  for (const candidate of [...tokens, ...embeddedIpv4]) {
+    const normalized = candidate
+      .trim()
+      .replace(/^[^\dA-Fa-f:.]+|[^\dA-Fa-f:.]+$/g, '');
+    if (normalized && isValidDetectedPublicIp(normalized)) {
+      return normalized;
+    }
+  }
+
+  return null;
 }
 
 export function isValidDetectedPublicIp(value: string) {
@@ -136,6 +153,45 @@ function shouldUpdateAutoTurnUrls(input: {
   );
 }
 
+function previousRestartFailed(error: string | null) {
+  return (
+    error?.startsWith(restartFailurePrefix) === true ||
+    error?.startsWith(legacyRestartFailurePrefix) === true
+  );
+}
+
+function addPendingRestartServices(input: {
+  detectedIp: string;
+  deployment: ReturnType<typeof toDeploymentRuntimeSettings>;
+  lastAppliedIp: string | null;
+  lastError: string | null;
+  servicesToRestart: Set<AdminRuntimeManagedServiceName>;
+}) {
+  if (
+    input.lastAppliedIp === input.detectedIp ||
+    !previousRestartFailed(input.lastError)
+  ) {
+    return;
+  }
+
+  if (input.deployment.turnEnabled) {
+    const currentAutoTurnUrls = buildAutoTurnUrls(
+      input.detectedIp,
+      input.deployment.turnPort,
+    );
+    if (input.deployment.turnExternalIp === input.detectedIp) {
+      input.servicesToRestart.add('turn');
+      input.servicesToRestart.add('media');
+    } else if (input.deployment.turnUrls === currentAutoTurnUrls) {
+      input.servicesToRestart.add('media');
+    }
+  }
+
+  if (input.deployment.sfuAnnouncedIp === input.detectedIp) {
+    input.servicesToRestart.add('media');
+  }
+}
+
 async function writeDetectionFailure(
   current: RuntimePublicIpSettings,
   error: string,
@@ -172,12 +228,14 @@ export async function checkAndApplyRuntimePublicIp(): Promise<AdminRuntimePublic
   const nextEnv = { ...env };
   const servicesToRestart = new Set<AdminRuntimeManagedServiceName>();
   const checkedAt = nowIso();
+  let runtimeConfigChanged = false;
 
   if (deployment.turnEnabled) {
     if (deployment.turnExternalIp !== detectedIp) {
       nextEnv['TURN_EXTERNAL_IP'] = detectedIp;
       servicesToRestart.add('turn');
       servicesToRestart.add('media');
+      runtimeConfigChanged = true;
     }
 
     const nextTurnUrls = buildAutoTurnUrls(detectedIp, deployment.turnPort);
@@ -192,6 +250,7 @@ export async function checkAndApplyRuntimePublicIp(): Promise<AdminRuntimePublic
     ) {
       nextEnv['TURN_URLS'] = nextTurnUrls;
       servicesToRestart.add('media');
+      runtimeConfigChanged = true;
     }
   }
 
@@ -201,14 +260,26 @@ export async function checkAndApplyRuntimePublicIp(): Promise<AdminRuntimePublic
   ) {
     nextEnv['SFU_ANNOUNCED_IP'] = detectedIp;
     servicesToRestart.add('media');
+    runtimeConfigChanged = true;
   }
 
-  const changed = servicesToRestart.size > 0;
+  addPendingRestartServices({
+    deployment,
+    detectedIp,
+    lastAppliedIp: current.lastAppliedIp,
+    lastError: current.lastError,
+    servicesToRestart,
+  });
+
+  const shouldRestartServices = servicesToRestart.size > 0;
   const restartedServices: AdminRuntimeManagedServiceName[] = [];
   const restartErrors: string[] = [];
 
-  if (changed) {
+  if (runtimeConfigChanged) {
     await writeRuntimeEnvToDisk(nextEnv);
+  }
+
+  if (shouldRestartServices) {
     for (const service of servicesToRestart) {
       try {
         await restartSupervisorService(service);
@@ -221,22 +292,23 @@ export async function checkAndApplyRuntimePublicIp(): Promise<AdminRuntimePublic
     }
   }
 
+  const applied = shouldRestartServices && restartErrors.length === 0;
   const settings = await writeRuntimePublicIpSettings({
     ...current,
-    lastAppliedAt: changed ? nowIso() : current.lastAppliedAt,
-    lastAppliedIp: changed ? detectedIp : current.lastAppliedIp,
+    lastAppliedAt: applied ? nowIso() : current.lastAppliedAt,
+    lastAppliedIp: applied ? detectedIp : current.lastAppliedIp,
     lastCheckedAt: checkedAt,
     lastDetectedIp: detectedIp,
     lastError:
       restartErrors.length > 0
-        ? `Runtime config was updated, but service restart failed: ${restartErrors.join(' ')}`
+        ? `${restartFailurePrefix} ${restartErrors.join(' ')}`
         : null,
     updatedAt: nowIso(),
   });
 
   return {
-    applied: changed,
-    changed,
+    applied,
+    changed: runtimeConfigChanged,
     restartedServices,
     settings,
   };

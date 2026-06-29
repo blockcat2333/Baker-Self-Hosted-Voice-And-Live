@@ -1,6 +1,6 @@
 {
   "name": "baker",
-  "version": "1.0.9",
+  "version": "1.0.10-beta",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",

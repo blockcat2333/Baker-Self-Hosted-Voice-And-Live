@@ -48,6 +48,24 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-06-29 Baker 1.0.10beta All-In-One Public IP Automation Beta Prep
+
+- bumped the server beta release line to public label `1.0.10beta`, with semver package metadata stored as `1.0.10-beta`
+- kept the desktop/client release label at `1.0.9a`; this beta ships the server/all-in-one image only
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.10beta`
+- made the public deployment tutorial explicitly assume the all-in-one Supervisor image:
+  - admin runtime repair, self-repair, deployment apply, and public IP automation restarts depend on `supervisorctl`
+  - split-service/manual deployments must provide their own process supervision and Media/TURN restart hooks
+- expanded public IP detection for server networks that cannot reach the older global endpoints:
+  - added `https://ip.3322.net`
+  - added `https://myip.ipip.net`
+  - added `https://ifconfig.co/ip`
+  - kept `api.ipify.org`, `ifconfig.me`, and `checkip.amazonaws.com` as fallback endpoints
+- changed public IP response parsing so localized text containing an IP address, such as `当前 IP：x.x.x.x 来自于：...`, is accepted
+- fixed the all-in-one watchdog public IP apply path by importing `rename` before writing `runtime.env`
+- changed public IP automation so a failed Media/TURN Supervisor restart no longer marks the detected IP as fully applied, and later checks retry the pending restart
+- updated Docker Hub update discovery so compact beta tags such as `1.0.10beta` appear in the admin update picker
+
 ### 2026-06-27 Baker 1.0.9 Voice Media Failure Feedback Release Prep
 
 - bumped the server release line and all non-desktop workspace package metadata to `1.0.9`

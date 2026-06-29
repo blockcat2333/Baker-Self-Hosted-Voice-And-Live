@@ -24,10 +24,12 @@ export interface BakerUpdateVersion {
 
 const dockerHubTagsUrl = 'https://hub.docker.com/v2/namespaces/blockcat233/repositories/baker/tags?page_size=100';
 const githubReleasesUrl = 'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
-const semverTagPattern = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const dockerReleaseTagPattern =
+  /^\d+\.\d+\.\d+(?:beta|[-+][0-9A-Za-z.-]+)?$/;
 
 function semverParts(tag: string) {
-  const [version, suffix = ''] = tag.split(/[-+]/, 2);
+  const normalized = tag.replace(/(\d+\.\d+\.\d+)beta$/, '$1-beta');
+  const [version, suffix = ''] = normalized.split(/[-+]/, 2);
   const parts = version?.split('.').map((item) => Number(item)) ?? [];
   return {
     major: parts[0] ?? 0,
@@ -71,7 +73,11 @@ function parseDockerHubTags(value: unknown): DockerHubTag[] {
   }
 
   return value['results'].flatMap((item): DockerHubTag[] => {
-    if (!isRecord(item) || typeof item['name'] !== 'string' || !semverTagPattern.test(item['name'])) {
+    if (
+      !isRecord(item) ||
+      typeof item['name'] !== 'string' ||
+      !dockerReleaseTagPattern.test(item['name'])
+    ) {
       return [];
     }
 

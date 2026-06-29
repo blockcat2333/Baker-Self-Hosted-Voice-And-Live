@@ -27,7 +27,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.0.9`; desktop client `1.0.9a`
+- Release line: server `1.0.10beta`; desktop client `1.0.9a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -36,10 +36,10 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Versioning
 
-- Server releases use numeric tags such as `1.0.9` and Docker images such as `blockcat233/baker:1.0.9`.
+- Stable server releases use numeric tags such as `1.0.9`; server beta releases may use compact labels such as `1.0.10beta`. The matching Docker image is `blockcat233/baker:<version>`.
 - Client release labels follow the server version plus a letter, starting at `a`: `1.0.9a`, `1.0.9b`, and so on.
 - Client-only updates advance the trailing letter. Server releases advance the numeric version and reset the client letter to `a`.
-- Package metadata stays semver-compatible for tooling; the lettered client label is used for client distribution notes and assets.
+- Package metadata stays semver-compatible for tooling. For example, the `1.0.10beta` server label is stored as `1.0.10-beta` in `package.json`.
 - Before tagging a release, run `pnpm release:check` and follow the [Release Checklist](docs/release-checklist.md).
 
 ## Start Here If You Are New
@@ -65,7 +65,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.9
+  blockcat233/baker:1.0.10beta
 
 docker logs baker
 ```
@@ -77,7 +77,9 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-If you want to follow the newest rolling image instead of pinning this release, replace `1.0.9` with `latest`.
+If you want to follow the newest rolling image instead of pinning this release, replace `1.0.10beta` with `latest`.
+
+The public deployment guide assumes this all-in-one image. It contains PostgreSQL, Redis, API, Gateway, Media, Caddy, optional coturn, the runtime watchdog, and `supervisorctl` in one container. Admin runtime repair, self-repair, public IP automation restarts, and deployment-settings apply all depend on that supervisor environment. If you run split services manually, Baker can still serve traffic, but you must provide your own process supervision and restart Media/TURN after runtime config changes.
 
 The Docker socket mount is required for the admin panel's one-click update, deployment-settings apply, and container-level repair fallback. Without it, Baker still runs normally, and the admin panel can still inspect and restart bundled services through the all-in-one supervisor, but image updates and container rebuilds must be performed manually from the Docker host.
 
@@ -103,11 +105,13 @@ Self-repair mode stores its settings under `/var/lib/baker/runtime` and continue
 
 The same runtime card also includes public IP automation. When enabled, Baker periodically detects the server's current public IP and keeps the managed TURN/SFU media addresses current. If the IP changes, it updates the persistent runtime config and restarts only the affected Media/TURN supervisor services. This does not replace port publishing, HTTPS, or TURN credentials; those still need to be configured correctly.
 
+Baker tries several public IP endpoints by default, including endpoints that are commonly reachable from mainland China: `https://ip.3322.net`, `https://myip.ipip.net`, and `https://ifconfig.co/ip`, followed by `api.ipify.org`, `ifconfig.me`, and `checkip.amazonaws.com`. If your server cannot reach one or more defaults, override the list with `BAKER_PUBLIC_IP_ENDPOINTS` as a comma-separated list. Endpoints may return plain text, JSON like `{"ip":"203.0.113.10"}`, or localized text that contains an IP address.
+
 ### Docker Desktop Walkthrough
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:1.0.9`
+- Image: `blockcat233/baker:1.0.10beta`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -163,9 +167,10 @@ docker run -d \
   -e TURN_EXTERNAL_IP=203.0.113.10 \
   -e TURN_USERNAME=baker \
   -e TURN_PASSWORD=change-this \
+  -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.9
+  blockcat233/baker:1.0.10beta
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
@@ -196,7 +201,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.9
+  blockcat233/baker:1.0.10beta
 ```
 
 Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.
@@ -204,11 +209,13 @@ Then open the admin panel and switch **Server settings -> Media mode** from `p2p
 ## Deployment Notes
 
 - Public deployment is intentionally documented as a single-image path only: `blockcat233/baker`
+- Public deployment assumes the all-in-one supervisor image. Do not use the local-development `docker-compose.yml` as a public deployment path unless you also provide equivalent service supervision and restart hooks.
 - For browser voice, microphone, camera, and screen sharing, serve Baker over HTTPS
 - TURN is optional for small/local setups but strongly recommended for public internet, mobile, VPN, or cross-region usage
 - When TURN is enabled for public deployment, you must expose the relay ports and provide either `TURN_EXTERNAL_IP` or explicit `TURN_URLS`
 - SFU mode requires `SFU_ANNOUNCED_IP` and the `50000-50100` TCP/UDP range to be reachable from browsers
 - If the server's public IP may change, enable public IP automation in the admin panel so media addresses are refreshed automatically
+- If the public IP check fails from your server network, set `BAKER_PUBLIC_IP_ENDPOINTS` to endpoints reachable from that region.
 - `docker-compose.yml` remains in the repo for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment product
 
 ## Current Limits

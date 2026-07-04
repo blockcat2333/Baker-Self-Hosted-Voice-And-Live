@@ -1,4 +1,7 @@
+import { ProxyAgent } from 'undici';
+
 import { BAKER_IMAGE_REPOSITORY } from './docker-control';
+import { readRuntimeUpdateProxySettings } from './runtime-config';
 
 interface DockerHubTag {
   digest: string | null;
@@ -22,14 +25,16 @@ export interface BakerUpdateVersion {
   tag: string;
 }
 
-const dockerHubTagsUrl = 'https://hub.docker.com/v2/namespaces/blockcat233/repositories/baker/tags?page_size=100';
-const githubReleasesUrl = 'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
+const dockerHubTagsUrl =
+  'https://hub.docker.com/v2/namespaces/blockcat233/repositories/baker/tags?page_size=100';
+const githubReleasesUrl =
+  'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
 const dockerReleaseTagPattern =
-  /^\d+\.\d+\.\d+(?:beta\d*|[-+][0-9A-Za-z.-]+)?$/;
+  /^\d+\.\d+\.\d+(?:beta(?:\d*|\.\d+)?|[-+][0-9A-Za-z.-]+)?$/;
 
 function semverParts(tag: string) {
   const normalized = tag.replace(
-    /(\d+\.\d+\.\d+)beta(\d*)$/,
+    /(\d+\.\d+\.\d+)beta(?:\.?(\d+))?$/,
     (_, version: string, betaNumber: string) =>
       `${version}-beta${betaNumber ? `.${betaNumber}` : ''}`,
   );
@@ -91,7 +96,10 @@ function parseDockerHubTags(value: unknown): DockerHubTag[] {
     return [
       {
         digest: firstImageDigest(item['images']),
-        lastUpdated: typeof item['last_updated'] === 'string' ? item['last_updated'] : null,
+        lastUpdated:
+          typeof item['last_updated'] === 'string'
+            ? item['last_updated']
+            : null,
         name: item['name'],
       },
     ];
@@ -117,8 +125,19 @@ function parseGithubReleases(value: unknown): GithubRelease[] {
   });
 }
 
-async function fetchJson(url: string, headers: Record<string, string> = {}) {
-  const response = await fetch(url, { headers });
+type ProxyFetchInit = RequestInit & { dispatcher?: ProxyAgent };
+
+async function fetchJson(
+  url: string,
+  headers: Record<string, string> = {},
+  proxyUrl = '',
+) {
+  const init: ProxyFetchInit = { headers };
+  if (proxyUrl) {
+    init.dispatcher = new ProxyAgent(proxyUrl);
+  }
+
+  const response = await fetch(url, init as RequestInit);
   if (!response.ok) {
     throw new Error(`Fetch failed for ${url} with HTTP ${response.status}.`);
   }
@@ -126,21 +145,34 @@ async function fetchJson(url: string, headers: Record<string, string> = {}) {
 }
 
 export async function listBakerUpdateVersions(): Promise<BakerUpdateVersion[]> {
-  const dockerTags = parseDockerHubTags(await fetchJson(dockerHubTagsUrl));
+  const updateProxy = await readRuntimeUpdateProxySettings();
+  const proxyUrl =
+    updateProxy.enabled && updateProxy.proxyUrl ? updateProxy.proxyUrl : '';
+  const dockerTags = parseDockerHubTags(
+    await fetchJson(dockerHubTagsUrl, {}, proxyUrl),
+  );
 
   let releases = new Map<string, GithubRelease>();
   try {
     releases = new Map(
-      parseGithubReleases(await fetchJson(githubReleasesUrl, {
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2026-03-10',
-      })).map((release) => [release.tagName, release]),
+      parseGithubReleases(
+        await fetchJson(
+          githubReleasesUrl,
+          {
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2026-03-10',
+          },
+          proxyUrl,
+        ),
+      ).map((release) => [release.tagName, release]),
     );
   } catch {
     releases = new Map();
   }
 
-  const sortedTags = dockerTags.sort((left, right) => compareVersionTagsDesc(left.name, right.name));
+  const sortedTags = dockerTags.sort((left, right) =>
+    compareVersionTagsDesc(left.name, right.name),
+  );
   const latestTag = sortedTags[0]?.name ?? null;
 
   return sortedTags.map((tag) => {

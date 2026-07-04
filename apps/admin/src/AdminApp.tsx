@@ -9,6 +9,7 @@ import type {
   AdminRuntimeSelfRepairSettings,
   AdminServerSettings,
   AdminUpdateJobStatus,
+  AdminUpdateProxySettings,
   AdminUpdateVersionsResponse,
   AdminWorkspaceState,
   ChannelSummary,
@@ -23,6 +24,7 @@ import {
   AdminRuntimeSelfRepairSettingsSchema,
   AdminServerSettingsSchema,
   AdminUpdateJobStatusSchema,
+  AdminUpdateProxySettingsSchema,
   AdminUpdateVersionsResponseSchema,
   AdminVerifyPasswordResponseSchema,
   AdminWorkspaceStateSchema,
@@ -72,8 +74,11 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     useState<AdminRuntimeRepairResult | null>(null);
   const [selfRepair, setSelfRepair] =
     useState<AdminRuntimeSelfRepairSettings | null>(null);
-  const [publicIp, setPublicIp] =
-    useState<AdminRuntimePublicIpSettings | null>(null);
+  const [publicIp, setPublicIp] = useState<AdminRuntimePublicIpSettings | null>(
+    null,
+  );
+  const [updateProxy, setUpdateProxy] =
+    useState<AdminUpdateProxySettings | null>(null);
   const [updateVersions, setUpdateVersions] =
     useState<AdminUpdateVersionsResponse | null>(null);
   const [selectedUpdateTag, setSelectedUpdateTag] = useState('');
@@ -113,8 +118,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [selfRepairAllowContainerRepair, setSelfRepairAllowContainerRepair] =
     useState(true);
   const [publicIpEnabled, setPublicIpEnabled] = useState(false);
-  const [publicIpIntervalSeconds, setPublicIpIntervalSeconds] =
-    useState('300');
+  const [publicIpIntervalSeconds, setPublicIpIntervalSeconds] = useState('300');
+  const [updateProxyEnabled, setUpdateProxyEnabled] = useState(false);
+  const [updateProxyUrl, setUpdateProxyUrl] = useState('');
 
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserUsername, setNewUserUsername] = useState('');
@@ -178,6 +184,13 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setPublicIpIntervalSeconds(String(nextPublicIp.intervalSeconds));
   }
 
+  function applyUpdateProxySettingsToForm(
+    nextUpdateProxy: AdminUpdateProxySettings,
+  ) {
+    setUpdateProxyEnabled(nextUpdateProxy.enabled);
+    setUpdateProxyUrl(nextUpdateProxy.proxyUrl);
+  }
+
   const request = useCallback(
     async <T,>(
       path: string,
@@ -239,6 +252,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       nextRuntimeHealth,
       nextSelfRepair,
       nextPublicIp,
+      nextUpdateProxy,
     ] = await Promise.all([
       request(
         '/v1/admin/settings',
@@ -275,6 +289,11 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         { method: 'GET' },
         AdminRuntimePublicIpSettingsSchema,
       ),
+      request(
+        '/v1/admin/updates/proxy',
+        { method: 'GET' },
+        AdminUpdateProxySettingsSchema,
+      ),
     ]);
 
     setSettings(nextSettings);
@@ -285,6 +304,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setRuntimeRepairResult(nextRuntimeHealth.lastRepair);
     setSelfRepair(nextSelfRepair);
     setPublicIp(nextPublicIp);
+    setUpdateProxy(nextUpdateProxy);
     setServerName(nextSettings.serverName);
     setAllowPublicRegistration(nextSettings.allowPublicRegistration);
     setWebEnabled(nextSettings.webEnabled);
@@ -294,6 +314,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     applyDeploymentSettingsToForm(nextDeployment);
     applySelfRepairSettingsToForm(nextSelfRepair);
     applyPublicIpSettingsToForm(nextPublicIp);
+    applyUpdateProxySettingsToForm(nextUpdateProxy);
   }
 
   const refreshRuntimeHealth = useCallback(async () => {
@@ -414,6 +435,34 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     } catch (err) {
       setError(
         err instanceof Error ? err.message : t('admin.error_check_versions'),
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleSaveUpdateProxy(event: React.FormEvent) {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const nextUpdateProxy = await request(
+        '/v1/admin/updates/proxy',
+        {
+          body: JSON.stringify({
+            enabled: updateProxyEnabled,
+            proxyUrl: updateProxyEnabled ? updateProxyUrl : '',
+          }),
+          method: 'PATCH',
+        },
+        AdminUpdateProxySettingsSchema,
+      );
+      setUpdateProxy(nextUpdateProxy);
+      applyUpdateProxySettingsToForm(nextUpdateProxy);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('admin.error_save_update_proxy'),
       );
     } finally {
       setIsLoading(false);
@@ -1004,6 +1053,46 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
               {t('admin.refresh_status')}
             </button>
           </div>
+          <form className="admin-form" onSubmit={handleSaveUpdateProxy}>
+            <p className="admin-copy">{t('admin.update_proxy_copy')}</p>
+            <div className="admin-checkbox-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={updateProxyEnabled}
+                  onChange={(event) =>
+                    setUpdateProxyEnabled(event.currentTarget.checked)
+                  }
+                />
+                {t('admin.update_proxy_enabled')}
+              </label>
+            </div>
+            <label className="admin-field">
+              <span>{t('admin.update_proxy_url')}</span>
+              <input
+                value={updateProxyUrl}
+                onChange={(event) => setUpdateProxyUrl(event.target.value)}
+                placeholder="http://127.0.0.1:7890"
+                disabled={!updateProxyEnabled}
+              />
+            </label>
+            <div className="admin-inline-actions">
+              <button
+                type="submit"
+                className="admin-secondary-btn"
+                disabled={isLoading}
+              >
+                {t('admin.save_update_proxy')}
+              </button>
+            </div>
+            {updateProxy ? (
+              <p className="admin-copy">
+                {t('admin.update_proxy_saved_at', {
+                  time: updateProxy.updatedAt,
+                })}
+              </p>
+            ) : null}
+          </form>
           <label className="admin-field">
             <span>{t('admin.target_version')}</span>
             <select
@@ -1174,9 +1263,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                 <input
                   type="checkbox"
                   checked={publicIpEnabled}
-                  onChange={(event) =>
-                    setPublicIpEnabled(event.target.checked)
-                  }
+                  onChange={(event) => setPublicIpEnabled(event.target.checked)}
                 />{' '}
                 {t('admin.public_ip_enabled')}
               </label>

@@ -52,9 +52,9 @@ Use this path for a desktop/client-only label such as `X.Y.Zb`.
 ## Tag Rules
 
 - Numeric tags such as `vX.Y.Z` are server releases and may publish Docker images.
-- Compact beta tags such as `vX.Y.Zbeta` and `vX.Y.Zbeta2` are server prereleases and may publish Docker images.
+- Compact/dotted beta tags such as `vX.Y.Zbeta`, `vX.Y.Zbeta2`, and `vX.Y.Zbeta.3` are server prereleases and may publish Docker images.
 - Lettered tags such as `vX.Y.Za` are desktop/client releases and may publish desktop assets.
-- Server beta package metadata must use semver prerelease form such as `X.Y.Z-beta` or `X.Y.Z-beta.2`; the public GitHub/Docker label keeps compact form such as `X.Y.Zbeta` or `X.Y.Zbeta2`.
+- Server beta package metadata must use semver prerelease form such as `X.Y.Z-beta` or `X.Y.Z-beta.3`; the public GitHub/Docker label keeps compact/dotted form such as `X.Y.Zbeta`, `X.Y.Zbeta2`, or `X.Y.Zbeta.3`.
 - Electron package versions must use semver prerelease form such as `X.Y.Z-a`; public GitHub tags and installer names keep the compact label such as `X.Y.Za`.
 - Do not overwrite a published bad desktop tag with different assets. Advance the trailing letter, document the incident, and tell affected users to install the fixed installer manually if the broken app cannot start its updater.
 - Do not reuse one GitHub Release tag for both the Docker image line and a desktop-only client label.

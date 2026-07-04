@@ -539,6 +539,63 @@ describe('api app', () => {
     }
   });
 
+  it('serves and validates admin update proxy settings', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-update-proxy-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    try {
+      const unauthorizedResponse = await app.inject({
+        method: 'GET',
+        url: '/v1/admin/updates/proxy',
+      });
+      expect(unauthorizedResponse.statusCode).toBe(401);
+
+      const defaultsResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'GET',
+        url: '/v1/admin/updates/proxy',
+      });
+      expect(defaultsResponse.statusCode).toBe(200);
+      expect(defaultsResponse.json()).toMatchObject({
+        enabled: false,
+        proxyUrl: '',
+      });
+
+      const saveResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'PATCH',
+        payload: {
+          enabled: true,
+          proxyUrl: ' http://127.0.0.1:7890 ',
+        },
+        url: '/v1/admin/updates/proxy',
+      });
+      expect(saveResponse.statusCode).toBe(200);
+      expect(saveResponse.json()).toMatchObject({
+        enabled: true,
+        proxyUrl: 'http://127.0.0.1:7890',
+      });
+
+      const invalidResponse = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'PATCH',
+        payload: {
+          enabled: true,
+          proxyUrl: 'socks5://127.0.0.1:1080',
+        },
+        url: '/v1/admin/updates/proxy',
+      });
+      expect(invalidResponse.statusCode).toBe(400);
+    } finally {
+      await app.close();
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it('serves runtime health, repair status, and self-repair settings without supervisor access', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-runtime-'));
     vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);

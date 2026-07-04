@@ -9,9 +9,11 @@ import {
   parseRuntimeEnv,
   readDeploymentRuntimeSettings,
   readRuntimePublicIpSettings,
+  readRuntimeUpdateProxySettings,
   serializeRuntimeEnv,
   updateDeploymentRuntimeSettings,
   updateRuntimePublicIpSettings,
+  updateRuntimeUpdateProxySettings,
 } from './runtime-config';
 
 afterEach(() => {
@@ -20,7 +22,9 @@ afterEach(() => {
 
 describe('runtime deployment config', () => {
   it('parses and serializes shell-style runtime.env values', () => {
-    const parsed = parseRuntimeEnv("TURN_USERNAME='baker'\nTURN_PASSWORD='a'\\''b'\nWEB_PORT='3000'\n");
+    const parsed = parseRuntimeEnv(
+      "TURN_USERNAME='baker'\nTURN_PASSWORD='a'\\''b'\nWEB_PORT='3000'\n",
+    );
 
     expect(parsed).toEqual({
       TURN_PASSWORD: "a'b",
@@ -66,7 +70,13 @@ describe('runtime deployment config', () => {
       const pending = await readDeploymentPendingMarker();
       expect(pending?.pendingApply).toBe(true);
       expect(pending?.changedKeys).toEqual(
-        expect.arrayContaining(['adminHostPort', 'turnEnabled', 'turnPassword', 'turnUsername', 'webHostPort']),
+        expect.arrayContaining([
+          'adminHostPort',
+          'turnEnabled',
+          'turnPassword',
+          'turnUsername',
+          'webHostPort',
+        ]),
       );
 
       const reread = await readDeploymentRuntimeSettings();
@@ -101,6 +111,44 @@ describe('runtime deployment config', () => {
       expect(reread).toMatchObject({
         enabled: true,
         intervalSeconds: 600,
+      });
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it('persists update proxy settings outside runtime.env', async () => {
+    const tempDir = await mkdtemp(
+      join(tmpdir(), 'baker-runtime-update-proxy-'),
+    );
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    try {
+      const defaults = await readRuntimeUpdateProxySettings();
+      expect(defaults).toMatchObject({
+        enabled: false,
+        proxyUrl: '',
+      });
+
+      const updated = await updateRuntimeUpdateProxySettings({
+        enabled: true,
+        proxyUrl: ' http://127.0.0.1:7890 ',
+      });
+      expect(updated).toMatchObject({
+        enabled: true,
+        proxyUrl: 'http://127.0.0.1:7890',
+      });
+
+      const reread = await readRuntimeUpdateProxySettings();
+      expect(reread).toMatchObject({
+        enabled: true,
+        proxyUrl: 'http://127.0.0.1:7890',
+      });
+
+      await expect(
+        readFile(join(tempDir, 'runtime.env'), 'utf8'),
+      ).rejects.toMatchObject({
+        code: 'ENOENT',
       });
     } finally {
       await rm(tempDir, { force: true, recursive: true });

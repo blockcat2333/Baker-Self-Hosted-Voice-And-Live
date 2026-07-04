@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 4. Read the first admin password:
@@ -63,6 +63,8 @@ This guide assumes the official all-in-one image. The container includes the bun
 3. Keep the Docker socket mount if you want the admin panel to perform one-click updates later.
 4. Open the main web app and create the first user account.
 5. Create a second test account or ask one friend to join before you test voice and livestream.
+
+If your server needs a proxy to reach GitHub or Docker Hub metadata, open **Server Updates -> Update Proxy** in the admin panel and save an HTTP/HTTPS proxy URL before checking versions. This proxy is only for Baker update metadata requests; Public IP Automation still checks the server's real public IP directly. Docker image downloads are performed by the host Docker daemon, so failed image pulls still require a Docker daemon proxy or registry mirror on the Docker host.
 
 ## When You Must Use HTTPS
 
@@ -116,7 +118,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 Then open the admin panel and change **Server settings -> Media mode** to `sfu`. Existing voice and livestream sessions reconnect immediately in the new mode, while text chat remains connected.
@@ -139,7 +141,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 You still need to place HTTPS in front of the web app for real users.
@@ -184,7 +186,7 @@ If you keep the same Docker volume, you can recreate the container without losin
 Typical upgrade flow:
 
 ```bash
-docker pull blockcat233/baker:1.0.10beta2
+docker pull blockcat233/baker:1.0.10beta.3
 docker rm -f baker
 ```
 

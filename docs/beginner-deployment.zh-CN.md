@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 4. 读取首次启动打印出来的管理后台密码：
@@ -62,6 +62,8 @@ docker logs baker
 2. 先检查服务器名称、注册策略和其他实例设置。
 3. 打开主 Web 页面，创建第一个用户。
 4. 最好再准备第二个测试账号，或者找一位朋友一起测试语音和直播。
+
+如果服务器需要通过代理访问 GitHub 或 Docker Hub 元数据，请先在管理后台进入“服务器更新 -> 更新代理”，保存 HTTP/HTTPS 代理地址后再查找版本。这个代理只用于 Baker 更新元数据请求；自动公网 IP 仍会直接检测服务器真实公网 IP。Docker 镜像下载由宿主 Docker daemon 执行，所以镜像拉取失败时仍需要在 Docker 宿主机上配置 Docker daemon 代理或镜像源。
 
 ## 什么情况下必须使用 HTTPS
 
@@ -115,7 +117,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 然后进入管理后台，把“服务器设置 -> 媒体模式”切到 `sfu`。当前语音和直播会立即按新模式重连，文字聊天连接会保持在线。
@@ -138,7 +140,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 如果要给真实用户用，Web 入口前面仍然需要配好 HTTPS。
@@ -183,7 +185,7 @@ docker run -d \
 常见升级步骤：
 
 ```bash
-docker pull blockcat233/baker:1.0.10beta2
+docker pull blockcat233/baker:1.0.10beta.3
 docker rm -f baker
 ```
 

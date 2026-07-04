@@ -41,9 +41,11 @@ const desktopPackage = readJson(desktopPackagePath);
 const desktopVersion = desktopPackage.version;
 const stableServerVersionPattern = /^\d+\.\d+\.\d+$/;
 const betaServerVersionPattern = /^(\d+\.\d+\.\d+)-beta(?:\.(\d+))?$/;
-const betaServerVersionMatch = serverPackageVersion.match(betaServerVersionPattern);
+const betaServerVersionMatch = serverPackageVersion.match(
+  betaServerVersionPattern,
+);
 const serverReleaseLabel = betaServerVersionMatch
-  ? `${betaServerVersionMatch[1]}beta${betaServerVersionMatch[2] ?? ''}`
+  ? `${betaServerVersionMatch[1]}beta${betaServerVersionMatch[2] ? `.${betaServerVersionMatch[2]}` : ''}`
   : serverPackageVersion;
 const isBetaServerRelease = Boolean(betaServerVersionMatch);
 const desktopVersionPattern = /^(\d+\.\d+\.\d+)-([a-z])$/;
@@ -71,11 +73,15 @@ if (!isBetaServerRelease) {
 }
 check(
   'release check script',
-  rootPackage.scripts?.['release:check'] === 'node scripts/check-release-consistency.mjs',
+  rootPackage.scripts?.['release:check'] ===
+    'node scripts/check-release-consistency.mjs',
   'expected package.json scripts.release:check to run this script',
 );
 
-for (const packagePath of [...listPackageJsons('apps'), ...listPackageJsons('packages')]) {
+for (const packagePath of [
+  ...listPackageJsons('apps'),
+  ...listPackageJsons('packages'),
+]) {
   const packageJson = readJson(packagePath);
   if (packagePath === desktopPackagePath) {
     continue;
@@ -100,14 +106,24 @@ if (!isBetaServerRelease) {
 const sharedVersionSource = readText('packages/shared/src/version.ts');
 check(
   'BAKER_VERSION',
-  new RegExp(`BAKER_VERSION\\s*=\\s*['"]${escapeRegExp(serverReleaseLabel)}['"]`).test(sharedVersionSource),
+  new RegExp(
+    `BAKER_VERSION\\s*=\\s*['"]${escapeRegExp(serverReleaseLabel)}['"]`,
+  ).test(sharedVersionSource),
   `expected packages/shared/src/version.ts to export ${serverReleaseLabel}`,
 );
 
 for (const readmePath of ['README.md', 'README.zh-CN.md']) {
   const readme = readText(readmePath);
-  check(readmePath, readme.includes(serverReleaseLabel), `expected server version ${serverReleaseLabel}`);
-  check(readmePath, readme.includes(desktopReleaseLabel), `expected desktop version ${desktopReleaseLabel}`);
+  check(
+    readmePath,
+    readme.includes(serverReleaseLabel),
+    `expected server version ${serverReleaseLabel}`,
+  );
+  check(
+    readmePath,
+    readme.includes(desktopReleaseLabel),
+    `expected desktop version ${desktopReleaseLabel}`,
+  );
 }
 
 for (const docsPath of [
@@ -117,13 +133,21 @@ for (const docsPath of [
   'docs/beginner-deployment.zh-CN.md',
 ]) {
   const text = readText(docsPath);
-  const pinnedDockerTags = [...text.matchAll(/blockcat233\/baker:(?!latest\b)([A-Za-z0-9._-]+)/g)].map(
-    (match) => match[1],
-  );
+  const pinnedDockerTags = [
+    ...text.matchAll(/blockcat233\/baker:(?!latest\b)([A-Za-z0-9._-]+)/g),
+  ].map((match) => match[1]);
 
-  check(docsPath, pinnedDockerTags.length > 0, 'expected at least one pinned Baker Docker tag');
+  check(
+    docsPath,
+    pinnedDockerTags.length > 0,
+    'expected at least one pinned Baker Docker tag',
+  );
   for (const tag of pinnedDockerTags) {
-    check(docsPath, tag === serverReleaseLabel, `expected Docker tag ${serverReleaseLabel}, found ${tag}`);
+    check(
+      docsPath,
+      tag === serverReleaseLabel,
+      `expected Docker tag ${serverReleaseLabel}, found ${tag}`,
+    );
   }
 }
 
@@ -131,8 +155,10 @@ const imageWorkflow = readText('.github/workflows/publish-images.yml');
 check(
   'Docker image workflow tag guard',
   imageWorkflow.includes('is_server_tag') &&
-    imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+(beta[0-9]*|-beta(\\.[0-9]+)?)?$'),
-  'expected publish-images.yml to publish stable, compact beta/betaN, and semver beta server tags',
+    imageWorkflow.includes(
+      '^v[0-9]+\\.[0-9]+\\.[0-9]+(beta([0-9]*|\\.[0-9]+)?|-beta(\\.[0-9]+)?)?$',
+    ),
+  'expected publish-images.yml to publish stable, compact/dotted beta, and semver beta server tags',
 );
 
 const desktopWorkflow = readText('.github/workflows/publish-desktop.yml');
@@ -155,7 +181,9 @@ if (failures.length > 0) {
   }
   process.exitCode = 1;
 } else {
-  console.log(`Release consistency OK: server ${serverReleaseLabel}, package ${serverPackageVersion}, desktop ${desktopVersion}`);
+  console.log(
+    `Release consistency OK: server ${serverReleaseLabel}, package ${serverPackageVersion}, desktop ${desktopVersion}`,
+  );
   console.log(`Expected Docker tag: blockcat233/baker:${serverReleaseLabel}`);
   console.log(`Expected GitHub Release tag: v${serverReleaseLabel}`);
   if (!isBetaServerRelease) {

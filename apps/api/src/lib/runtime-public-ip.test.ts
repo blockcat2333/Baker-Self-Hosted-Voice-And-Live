@@ -16,6 +16,7 @@ import { readRuntimePublicIpSettings } from './runtime-config';
 import {
   buildAutoTurnUrls,
   checkAndApplyRuntimePublicIp,
+  detectPublicIp,
   parseIpFromBody,
 } from './runtime-public-ip';
 
@@ -35,9 +36,9 @@ describe('runtime public IP automation', () => {
   it('parses plain, JSON, and localized public IP responses', () => {
     expect(parseIpFromBody('198.51.100.42\n')).toBe('198.51.100.42');
     expect(parseIpFromBody('{"ip":"198.51.100.43"}')).toBe('198.51.100.43');
-    expect(parseIpFromBody('当前 IP：198.51.100.44 来自于：中国 广东 电信')).toBe(
-      '198.51.100.44',
-    );
+    expect(
+      parseIpFromBody('当前 IP：198.51.100.44 来自于：中国 广东 电信'),
+    ).toBe('198.51.100.44');
   });
 
   it('detects a new public IP and applies managed TURN/SFU runtime settings', async () => {
@@ -152,6 +153,37 @@ describe('runtime public IP automation', () => {
       expect(retryResult.restartedServices.sort()).toEqual(['media', 'turn']);
       expect(retryResult.settings.lastAppliedIp).toBe('198.51.100.42');
       expect(retryResult.settings.lastError).toBeNull();
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it('does not use the saved update proxy when detecting public IP', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-runtime-public-ip-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+    vi.stubEnv('BAKER_PUBLIC_IP_ENDPOINTS', 'https://example.test/ip');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => '198.51.100.42',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      await writeFile(
+        join(tempDir, 'update-proxy.json'),
+        JSON.stringify({
+          enabled: true,
+          proxyUrl: 'http://127.0.0.1:7890',
+          updatedAt: new Date(0).toISOString(),
+        }),
+      );
+
+      await expect(detectPublicIp()).resolves.toBe('198.51.100.42');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const init = fetchMock.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(init.signal).toBeDefined();
+      expect(Object.hasOwn(init, 'dispatcher')).toBe(false);
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

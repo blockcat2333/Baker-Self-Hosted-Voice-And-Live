@@ -7,8 +7,11 @@ const jobId = requiredEnv('BAKER_UPDATE_JOB_ID');
 const currentContainer = requiredEnv('BAKER_UPDATE_CURRENT_CONTAINER');
 const targetImage = requiredEnv('BAKER_UPDATE_TARGET_IMAGE');
 const targetTag = requiredEnv('BAKER_UPDATE_TARGET_TAG');
-const statusFile = process.env.BAKER_UPDATE_STATUS_FILE ?? '/var/lib/baker/runtime/update-status.json';
+const statusFile =
+  process.env.BAKER_UPDATE_STATUS_FILE ??
+  '/var/lib/baker/runtime/update-status.json';
 const pullPolicy = process.env.BAKER_UPDATE_PULL_POLICY ?? 'always';
+const updateProxyUrl = process.env.BAKER_UPDATE_PROXY_URL ?? '';
 const desiredSettings = readSettings('BAKER_UPDATE_DESIRED_SETTINGS');
 const previousSettings = readSettings('BAKER_UPDATE_PREVIOUS_SETTINGS');
 
@@ -20,6 +23,7 @@ const managedEnvKeys = new Set([
   'BAKER_UPDATE_JOB_ID',
   'BAKER_UPDATE_PREVIOUS_SETTINGS',
   'BAKER_UPDATE_PULL_POLICY',
+  'BAKER_UPDATE_PROXY_URL',
   'BAKER_UPDATE_STATUS_FILE',
   'BAKER_UPDATE_TARGET_IMAGE',
   'BAKER_UPDATE_TARGET_TAG',
@@ -78,7 +82,9 @@ async function docker(method, path, body) {
         response.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
           if ((response.statusCode ?? 500) >= 400) {
-            reject(new Error(readDockerError(text, response.statusCode ?? 500)));
+            reject(
+              new Error(readDockerError(text, response.statusCode ?? 500)),
+            );
             return;
           }
           resolve(text ? JSON.parse(text) : {});
@@ -114,7 +120,9 @@ async function dockerText(method, path, body) {
         response.on('end', () => {
           const text = Buffer.concat(chunks).toString('utf8');
           if ((response.statusCode ?? 500) >= 400) {
-            reject(new Error(readDockerError(text, response.statusCode ?? 500)));
+            reject(
+              new Error(readDockerError(text, response.statusCode ?? 500)),
+            );
             return;
           }
           resolve(text);
@@ -132,9 +140,13 @@ async function dockerText(method, path, body) {
 function readDockerError(text, statusCode) {
   try {
     const json = JSON.parse(text);
-    return json.message ? `Docker API ${statusCode}: ${json.message}` : `Docker API ${statusCode}`;
+    return json.message
+      ? `Docker API ${statusCode}: ${json.message}`
+      : `Docker API ${statusCode}`;
   } catch {
-    return text ? `Docker API ${statusCode}: ${text}` : `Docker API ${statusCode}`;
+    return text
+      ? `Docker API ${statusCode}: ${text}`
+      : `Docker API ${statusCode}`;
   }
 }
 
@@ -201,15 +213,51 @@ function createPortBindings(currentBindings) {
   addPort(bindings, exposed, 8080, 'tcp', desiredSettings.adminHostPort);
 
   if (desiredSettings.turnEnabled) {
-    addPort(bindings, exposed, desiredSettings.turnPort, 'tcp', desiredSettings.turnPort);
-    addPort(bindings, exposed, desiredSettings.turnPort, 'udp', desiredSettings.turnPort);
-    addRange(bindings, exposed, desiredSettings.turnMinPort, desiredSettings.turnMaxPort, 'tcp');
-    addRange(bindings, exposed, desiredSettings.turnMinPort, desiredSettings.turnMaxPort, 'udp');
+    addPort(
+      bindings,
+      exposed,
+      desiredSettings.turnPort,
+      'tcp',
+      desiredSettings.turnPort,
+    );
+    addPort(
+      bindings,
+      exposed,
+      desiredSettings.turnPort,
+      'udp',
+      desiredSettings.turnPort,
+    );
+    addRange(
+      bindings,
+      exposed,
+      desiredSettings.turnMinPort,
+      desiredSettings.turnMaxPort,
+      'tcp',
+    );
+    addRange(
+      bindings,
+      exposed,
+      desiredSettings.turnMinPort,
+      desiredSettings.turnMaxPort,
+      'udp',
+    );
   }
 
   if (desiredSettings.sfuAnnouncedIp) {
-    addRange(bindings, exposed, desiredSettings.sfuRtcMinPort, desiredSettings.sfuRtcMaxPort, 'tcp');
-    addRange(bindings, exposed, desiredSettings.sfuRtcMinPort, desiredSettings.sfuRtcMaxPort, 'udp');
+    addRange(
+      bindings,
+      exposed,
+      desiredSettings.sfuRtcMinPort,
+      desiredSettings.sfuRtcMaxPort,
+      'tcp',
+    );
+    addRange(
+      bindings,
+      exposed,
+      desiredSettings.sfuRtcMinPort,
+      desiredSettings.sfuRtcMaxPort,
+      'udp',
+    );
   }
 
   return { bindings, exposed };
@@ -270,7 +318,9 @@ function createContainerConfig(current) {
       NetworkMode: current.HostConfig?.NetworkMode ?? undefined,
       PortBindings: ports.bindings,
       Privileged: current.HostConfig?.Privileged ?? false,
-      RestartPolicy: current.HostConfig?.RestartPolicy ?? { Name: 'unless-stopped' },
+      RestartPolicy: current.HostConfig?.RestartPolicy ?? {
+        Name: 'unless-stopped',
+      },
       SecurityOpt: current.HostConfig?.SecurityOpt ?? undefined,
       ShmSize: current.HostConfig?.ShmSize ?? undefined,
     },
@@ -290,7 +340,10 @@ function createContainerConfig(current) {
 async function waitForHealthy(containerName) {
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
-    const inspect = await docker('GET', `/containers/${encodeURIComponent(containerName)}/json`);
+    const inspect = await docker(
+      'GET',
+      `/containers/${encodeURIComponent(containerName)}/json`,
+    );
     const state = inspect.State ?? {};
     if (state.Health?.Status === 'healthy') {
       return;
@@ -299,11 +352,15 @@ async function waitForHealthy(containerName) {
       return;
     }
     if (state.Health?.Status === 'unhealthy' || state.Running === false) {
-      throw new Error(`New container is ${state.Health?.Status ?? state.Status ?? 'not running'}.`);
+      throw new Error(
+        `New container is ${state.Health?.Status ?? state.Status ?? 'not running'}.`,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  throw new Error('Timed out waiting for the updated container to become healthy.');
+  throw new Error(
+    'Timed out waiting for the updated container to become healthy.',
+  );
 }
 
 async function containerExists(name) {
@@ -316,31 +373,57 @@ async function containerExists(name) {
 }
 
 async function rollback(oldName, previousName, failedName) {
-  await writeStatus('running', 'rollback', 'Rolling back to the previous container.');
+  await writeStatus(
+    'running',
+    'rollback',
+    'Rolling back to the previous container.',
+  );
 
   if (!(await containerExists(previousName))) {
     if (await containerExists(oldName)) {
-      await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/start`).catch(() => undefined);
+      await dockerText(
+        'POST',
+        `/containers/${encodeURIComponent(oldName)}/start`,
+      ).catch(() => undefined);
     }
     return;
   }
 
   if (await containerExists(oldName)) {
-    await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/stop?t=10`).catch(() => undefined);
-    await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/rename?name=${encodeURIComponent(failedName)}`).catch(() => undefined);
+    await dockerText(
+      'POST',
+      `/containers/${encodeURIComponent(oldName)}/stop?t=10`,
+    ).catch(() => undefined);
+    await dockerText(
+      'POST',
+      `/containers/${encodeURIComponent(oldName)}/rename?name=${encodeURIComponent(failedName)}`,
+    ).catch(() => undefined);
   }
-  await dockerText('POST', `/containers/${encodeURIComponent(previousName)}/rename?name=${encodeURIComponent(oldName)}`);
+  await dockerText(
+    'POST',
+    `/containers/${encodeURIComponent(previousName)}/rename?name=${encodeURIComponent(oldName)}`,
+  );
   await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/start`);
-  await dockerText('DELETE', `/containers/${encodeURIComponent(failedName)}?force=true&v=true`).catch(() => undefined);
+  await dockerText(
+    'DELETE',
+    `/containers/${encodeURIComponent(failedName)}?force=true&v=true`,
+  ).catch(() => undefined);
 }
 
 async function pullTargetImage() {
   if (pullPolicy === 'never') {
-    await writeStatus('running', 'pull-skipped', `Using existing image ${targetImage}.`);
+    await writeStatus(
+      'running',
+      'pull-skipped',
+      `Using existing image ${targetImage}.`,
+    );
     return;
   }
   const [fromImage, tag] = splitImageTag(targetImage);
-  await writeStatus('running', 'pull', `Pulling ${targetImage}.`);
+  const proxyHint = updateProxyUrl
+    ? ' The update proxy is saved for Baker metadata requests; Docker image pulls are performed by the host Docker daemon.'
+    : '';
+  await writeStatus('running', 'pull', `Pulling ${targetImage}.${proxyHint}`);
   await dockerText(
     'POST',
     `/images/create?fromImage=${encodeURIComponent(fromImage)}&tag=${encodeURIComponent(tag)}`,
@@ -359,7 +442,10 @@ function splitImageTag(image) {
 const startTime = new Date().toISOString();
 
 async function main() {
-  const current = await docker('GET', `/containers/${encodeURIComponent(currentContainer)}/json`);
+  const current = await docker(
+    'GET',
+    `/containers/${encodeURIComponent(currentContainer)}/json`,
+  );
   const oldName = String(current.Name ?? '').replace(/^\//, '');
   if (!oldName) {
     throw new Error('Current container name is unavailable.');
@@ -373,7 +459,11 @@ async function main() {
   await writeStatus('running', 'inspect', `Preparing to update ${oldName}.`);
   await pullTargetImage();
 
-  await writeStatus('running', 'create', `Creating replacement container ${nextName}.`);
+  await writeStatus(
+    'running',
+    'create',
+    `Creating replacement container ${nextName}.`,
+  );
   const created = await docker(
     'POST',
     `/containers/create?name=${encodeURIComponent(nextName)}`,
@@ -385,19 +475,36 @@ async function main() {
 
   try {
     await writeStatus('running', 'stop-current', `Stopping ${oldName}.`);
-    await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/stop?t=30`).catch(() => undefined);
+    await dockerText(
+      'POST',
+      `/containers/${encodeURIComponent(oldName)}/stop?t=30`,
+    ).catch(() => undefined);
 
     await writeStatus('running', 'swap', 'Swapping container names.');
-    await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/rename?name=${encodeURIComponent(previousName)}`);
-    await dockerText('POST', `/containers/${encodeURIComponent(nextName)}/rename?name=${encodeURIComponent(oldName)}`);
+    await dockerText(
+      'POST',
+      `/containers/${encodeURIComponent(oldName)}/rename?name=${encodeURIComponent(previousName)}`,
+    );
+    await dockerText(
+      'POST',
+      `/containers/${encodeURIComponent(nextName)}/rename?name=${encodeURIComponent(oldName)}`,
+    );
 
     await writeStatus('running', 'start', `Starting ${oldName}.`);
-    await dockerText('POST', `/containers/${encodeURIComponent(oldName)}/start`);
+    await dockerText(
+      'POST',
+      `/containers/${encodeURIComponent(oldName)}/start`,
+    );
     await waitForHealthy(oldName);
 
     await writeStatus('succeeded', 'complete', `Updated to ${targetImage}.`);
-    await rm('/var/lib/baker/runtime/deployment-pending.json', { force: true }).catch(() => undefined);
-    await dockerText('DELETE', `/containers/${encodeURIComponent(previousName)}?force=true&v=true`).catch(() => undefined);
+    await rm('/var/lib/baker/runtime/deployment-pending.json', {
+      force: true,
+    }).catch(() => undefined);
+    await dockerText(
+      'DELETE',
+      `/containers/${encodeURIComponent(previousName)}?force=true&v=true`,
+    ).catch(() => undefined);
   } catch (err) {
     await rollback(oldName, previousName, failedName).catch(() => undefined);
     throw err;
@@ -405,8 +512,12 @@ async function main() {
 }
 
 main().catch(async (err) => {
+  const errorMessage = err instanceof Error ? err.message : String(err);
+  const proxyHint = updateProxyUrl
+    ? ' Docker image pulls are performed by the host Docker daemon; configure the Docker host daemon proxy or mirror if registry access still fails.'
+    : '';
   await writeStatus('failed', 'failed', 'Update failed.', {
-    error: err instanceof Error ? err.message : String(err),
+    error: `${errorMessage}${proxyHint}`,
   }).catch(() => undefined);
   process.exitCode = 1;
 });

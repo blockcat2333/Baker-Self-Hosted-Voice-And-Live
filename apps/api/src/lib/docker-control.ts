@@ -5,7 +5,8 @@ import http from 'node:http';
 import type { DeploymentRuntimeSettings } from './runtime-config';
 import { getUpdateStatusPath } from './runtime-config';
 
-export const BAKER_IMAGE_REPOSITORY = process.env.BAKER_IMAGE_REPOSITORY ?? 'blockcat233/baker';
+export const BAKER_IMAGE_REPOSITORY =
+  process.env.BAKER_IMAGE_REPOSITORY ?? 'blockcat233/baker';
 
 export interface DockerContainerInfo {
   currentImage: string | null;
@@ -34,7 +35,10 @@ export interface DockerInspectResponse {
   Name?: string;
 }
 
-export type DockerPortBindings = Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>;
+export type DockerPortBindings = Record<
+  string,
+  Array<{ HostIp?: string; HostPort?: string }> | null
+>;
 
 interface DockerCreateResponse {
   Id?: string;
@@ -46,10 +50,14 @@ interface StartUpdateHelperInput {
   pullPolicy?: 'always' | 'never';
   targetImage: string;
   targetTag: string;
+  updateProxyUrl?: string;
 }
 
 export class DockerEngineClient {
-  constructor(private readonly socketPath = process.env.DOCKER_SOCKET_PATH ?? '/var/run/docker.sock') {}
+  constructor(
+    private readonly socketPath = process.env.DOCKER_SOCKET_PATH ??
+      '/var/run/docker.sock',
+  ) {}
 
   async isAvailable() {
     try {
@@ -70,7 +78,9 @@ export class DockerEngineClient {
 
     try {
       const response = await this.requestText('GET', '/_ping');
-      return response.trim() === 'OK' ? 'Docker socket is available.' : `Docker ping returned: ${response}`;
+      return response.trim() === 'OK'
+        ? 'Docker socket is available.'
+        : `Docker ping returned: ${response}`;
     } catch (err) {
       return err instanceof Error ? err.message : String(err);
     }
@@ -83,7 +93,10 @@ export class DockerEngineClient {
     }
 
     try {
-      return await this.requestJson<DockerInspectResponse>('GET', `/containers/${encodeURIComponent(id)}/json`);
+      return await this.requestJson<DockerInspectResponse>(
+        'GET',
+        `/containers/${encodeURIComponent(id)}/json`,
+      );
     } catch {
       return null;
     }
@@ -109,22 +122,26 @@ export class DockerEngineClient {
     const jobId = randomUUID();
     const helperName = `baker-update-${jobId.slice(0, 12)}`;
     const binds = this.buildHelperBinds(inspect);
+    const helperEnv = [
+      `BAKER_UPDATE_CURRENT_CONTAINER=${inspect.Id}`,
+      `BAKER_UPDATE_DESIRED_SETTINGS=${JSON.stringify(input.desiredSettings)}`,
+      `BAKER_UPDATE_JOB_ID=${jobId}`,
+      `BAKER_UPDATE_PREVIOUS_SETTINGS=${JSON.stringify(input.previousSettings)}`,
+      `BAKER_UPDATE_PULL_POLICY=${input.pullPolicy ?? 'always'}`,
+      `BAKER_UPDATE_STATUS_FILE=${getUpdateStatusPath()}`,
+      `BAKER_UPDATE_TARGET_IMAGE=${targetImage}`,
+      `BAKER_UPDATE_TARGET_TAG=${input.targetTag}`,
+    ];
+    if (input.updateProxyUrl) {
+      helperEnv.push(`BAKER_UPDATE_PROXY_URL=${input.updateProxyUrl}`);
+    }
 
     const createResponse = await this.requestJson<DockerCreateResponse>(
       'POST',
       `/containers/create?name=${encodeURIComponent(helperName)}`,
       {
         Entrypoint: ['node', '/opt/baker-allinone/update-helper.mjs'],
-        Env: [
-          `BAKER_UPDATE_CURRENT_CONTAINER=${inspect.Id}`,
-          `BAKER_UPDATE_DESIRED_SETTINGS=${JSON.stringify(input.desiredSettings)}`,
-          `BAKER_UPDATE_JOB_ID=${jobId}`,
-          `BAKER_UPDATE_PREVIOUS_SETTINGS=${JSON.stringify(input.previousSettings)}`,
-          `BAKER_UPDATE_PULL_POLICY=${input.pullPolicy ?? 'always'}`,
-          `BAKER_UPDATE_STATUS_FILE=${getUpdateStatusPath()}`,
-          `BAKER_UPDATE_TARGET_IMAGE=${targetImage}`,
-          `BAKER_UPDATE_TARGET_TAG=${input.targetTag}`,
-        ],
+        Env: helperEnv,
         Image: currentImage,
         Labels: {
           'org.baker.role': 'update-helper',
@@ -142,7 +159,10 @@ export class DockerEngineClient {
       throw new Error('Docker did not return an update helper container id.');
     }
 
-    await this.requestText('POST', `/containers/${encodeURIComponent(createResponse.Id)}/start`);
+    await this.requestText(
+      'POST',
+      `/containers/${encodeURIComponent(createResponse.Id)}/start`,
+    );
     return {
       jobId,
       targetImage,
@@ -172,23 +192,36 @@ export class DockerEngineClient {
       }
     }
 
-    const dataMount = inspect.Mounts?.find((mount) => mount.Destination === '/var/lib/baker');
-    if (dataMount && !Array.from(binds).some((bind) => bind.includes(':/var/lib/baker'))) {
+    const dataMount = inspect.Mounts?.find(
+      (mount) => mount.Destination === '/var/lib/baker',
+    );
+    if (
+      dataMount &&
+      !Array.from(binds).some((bind) => bind.includes(':/var/lib/baker'))
+    ) {
       if (dataMount.Type === 'volume' && dataMount.Name) {
         binds.add(`${dataMount.Name}:/var/lib/baker`);
       } else if (dataMount.Source) {
-        binds.add(`${dataMount.Source}:/var/lib/baker${dataMount.RW === false ? ':ro' : ''}`);
+        binds.add(
+          `${dataMount.Source}:/var/lib/baker${dataMount.RW === false ? ':ro' : ''}`,
+        );
       }
     }
 
     if (!Array.from(binds).some((bind) => bind.includes(':/var/lib/baker'))) {
-      throw new Error('The current container does not expose a /var/lib/baker data mount.');
+      throw new Error(
+        'The current container does not expose a /var/lib/baker data mount.',
+      );
     }
 
     return Array.from(binds);
   }
 
-  private requestJson<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private requestJson<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
     return this.request(method, path, body).then((text) => {
       if (!text) {
         return {} as T;
@@ -201,7 +234,11 @@ export class DockerEngineClient {
     return this.request(method, path, body);
   }
 
-  private request(method: string, path: string, body?: unknown): Promise<string> {
+  private request(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<string> {
     const payload = body === undefined ? null : JSON.stringify(body);
 
     return new Promise((resolve, reject) => {
@@ -223,7 +260,9 @@ export class DockerEngineClient {
           response.on('end', () => {
             const text = Buffer.concat(chunks).toString('utf8');
             if ((response.statusCode ?? 500) >= 400) {
-              reject(new Error(readDockerError(text, response.statusCode ?? 500)));
+              reject(
+                new Error(readDockerError(text, response.statusCode ?? 500)),
+              );
               return;
             }
             resolve(text);
@@ -243,9 +282,13 @@ export class DockerEngineClient {
 function readDockerError(text: string, statusCode: number) {
   try {
     const json = JSON.parse(text) as { message?: string };
-    return json.message ? `Docker API ${statusCode}: ${json.message}` : `Docker API ${statusCode}`;
+    return json.message
+      ? `Docker API ${statusCode}: ${json.message}`
+      : `Docker API ${statusCode}`;
   } catch {
-    return text ? `Docker API ${statusCode}: ${text}` : `Docker API ${statusCode}`;
+    return text
+      ? `Docker API ${statusCode}: ${text}`
+      : `Docker API ${statusCode}`;
   }
 }
 
@@ -258,9 +301,9 @@ export function readContainerHostPort(
   containerPort: number,
   protocol: 'tcp' | 'udp' = 'tcp',
 ) {
-  const binding = inspect?.HostConfig?.PortBindings?.[`${containerPort}/${protocol}`]?.find(
-    (entry) => entry?.HostPort,
-  );
+  const binding = inspect?.HostConfig?.PortBindings?.[
+    `${containerPort}/${protocol}`
+  ]?.find((entry) => entry?.HostPort);
   const value = Number(binding?.HostPort);
   return Number.isInteger(value) && value > 0 ? value : null;
 }

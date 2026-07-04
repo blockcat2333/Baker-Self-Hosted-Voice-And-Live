@@ -72,6 +72,45 @@ export const AdminUpdateVersionsResponseSchema = z.object({
   versions: z.array(AdminUpdateVersionSchema),
 });
 
+function isHttpProxyUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export const AdminUpdateProxySettingsSchema = z.object({
+  enabled: z.boolean(),
+  proxyUrl: z.string().max(2048),
+  updatedAt: z.string().datetime(),
+});
+
+export const AdminUpdateProxySettingsRequestSchema = z
+  .object({
+    enabled: z.boolean(),
+    proxyUrl: z.string().trim().max(2048),
+  })
+  .superRefine((value, ctx) => {
+    if (value.enabled && !value.proxyUrl) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Proxy URL is required when update proxy is enabled.',
+        path: ['proxyUrl'],
+      });
+      return;
+    }
+
+    if (value.proxyUrl && !isHttpProxyUrl(value.proxyUrl)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Proxy URL must use http:// or https://.',
+        path: ['proxyUrl'],
+      });
+    }
+  });
+
 export const AdminApplyUpdateRequestSchema = z.object({
   tag: z
     .string()
@@ -303,6 +342,12 @@ export type AdminServerSettings = z.infer<typeof AdminServerSettingsSchema>;
 export type AdminUpdateVersion = z.infer<typeof AdminUpdateVersionSchema>;
 export type AdminUpdateVersionsResponse = z.infer<
   typeof AdminUpdateVersionsResponseSchema
+>;
+export type AdminUpdateProxySettings = z.infer<
+  typeof AdminUpdateProxySettingsSchema
+>;
+export type AdminUpdateProxySettingsRequest = z.infer<
+  typeof AdminUpdateProxySettingsRequestSchema
 >;
 export type AdminApplyUpdateRequest = z.infer<
   typeof AdminApplyUpdateRequestSchema

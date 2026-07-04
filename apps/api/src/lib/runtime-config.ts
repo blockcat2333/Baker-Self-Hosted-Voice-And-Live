@@ -76,6 +76,17 @@ export interface RuntimePublicIpSettingsUpdate {
   intervalSeconds?: number;
 }
 
+export interface RuntimeUpdateProxySettings {
+  enabled: boolean;
+  proxyUrl: string;
+  updatedAt: string;
+}
+
+export interface RuntimeUpdateProxySettingsUpdate {
+  enabled: boolean;
+  proxyUrl: string;
+}
+
 export type RuntimeEnv = Record<string, string>;
 
 const defaultRuntimeDir = '/var/lib/baker/runtime';
@@ -96,6 +107,10 @@ export function getDeploymentPendingPath() {
 
 export function getUpdateStatusPath() {
   return join(getRuntimeDir(), 'update-status.json');
+}
+
+export function getRuntimeUpdateProxySettingsPath() {
+  return join(getRuntimeDir(), 'update-proxy.json');
 }
 
 export function getRuntimeRepairStatusPath() {
@@ -391,6 +406,14 @@ function defaultRuntimePublicIpSettings(): RuntimePublicIpSettings {
   };
 }
 
+function defaultRuntimeUpdateProxySettings(): RuntimeUpdateProxySettings {
+  return {
+    enabled: false,
+    proxyUrl: '',
+    updatedAt: new Date(0).toISOString(),
+  };
+}
+
 export async function readRuntimeSelfRepairSettings(
   path = getRuntimeSelfRepairSettingsPath(),
 ): Promise<RuntimeSelfRepairSettings> {
@@ -472,21 +495,16 @@ export async function readRuntimePublicIpSettings(
         typeof parsed.enabled === 'boolean' ? parsed.enabled : defaults.enabled,
       intervalSeconds,
       lastAppliedAt:
-        typeof parsed.lastAppliedAt === 'string'
-          ? parsed.lastAppliedAt
-          : null,
+        typeof parsed.lastAppliedAt === 'string' ? parsed.lastAppliedAt : null,
       lastAppliedIp:
         typeof parsed.lastAppliedIp === 'string' ? parsed.lastAppliedIp : null,
       lastCheckedAt:
-        typeof parsed.lastCheckedAt === 'string'
-          ? parsed.lastCheckedAt
-          : null,
+        typeof parsed.lastCheckedAt === 'string' ? parsed.lastCheckedAt : null,
       lastDetectedIp:
         typeof parsed.lastDetectedIp === 'string'
           ? parsed.lastDetectedIp
           : null,
-      lastError:
-        typeof parsed.lastError === 'string' ? parsed.lastError : null,
+      lastError: typeof parsed.lastError === 'string' ? parsed.lastError : null,
       updatedAt:
         typeof parsed.updatedAt === 'string'
           ? parsed.updatedAt
@@ -530,4 +548,61 @@ export async function updateRuntimePublicIpSettings(
   };
 
   return writeRuntimePublicIpSettings(next, path);
+}
+
+export async function readRuntimeUpdateProxySettings(
+  path = getRuntimeUpdateProxySettingsPath(),
+): Promise<RuntimeUpdateProxySettings> {
+  try {
+    const parsed = JSON.parse(
+      await readFile(path, 'utf8'),
+    ) as Partial<RuntimeUpdateProxySettings>;
+    const defaults = defaultRuntimeUpdateProxySettings();
+    return {
+      enabled:
+        typeof parsed.enabled === 'boolean' ? parsed.enabled : defaults.enabled,
+      proxyUrl:
+        typeof parsed.proxyUrl === 'string' ? parsed.proxyUrl.trim() : '',
+      updatedAt:
+        typeof parsed.updatedAt === 'string'
+          ? parsed.updatedAt
+          : defaults.updatedAt,
+    };
+  } catch (err) {
+    if (
+      err &&
+      typeof err === 'object' &&
+      'code' in err &&
+      err.code === 'ENOENT'
+    ) {
+      return defaultRuntimeUpdateProxySettings();
+    }
+    throw err;
+  }
+}
+
+export async function writeRuntimeUpdateProxySettings(
+  settings: RuntimeUpdateProxySettings,
+  path = getRuntimeUpdateProxySettingsPath(),
+) {
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.${process.pid}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(settings, null, 2), {
+    mode: 0o600,
+  });
+  await rename(tmpPath, path);
+  return settings;
+}
+
+export async function updateRuntimeUpdateProxySettings(
+  input: RuntimeUpdateProxySettingsUpdate,
+  path = getRuntimeUpdateProxySettingsPath(),
+) {
+  const next: RuntimeUpdateProxySettings = {
+    enabled: input.enabled,
+    proxyUrl: input.proxyUrl.trim(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return writeRuntimeUpdateProxySettings(next, path);
 }

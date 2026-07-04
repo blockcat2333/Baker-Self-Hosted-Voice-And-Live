@@ -25,7 +25,7 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 当前状态
 
-- 当前发布线：服务端 `1.0.10beta2`；桌面客户端 `1.0.9a`
+- 当前发布线：服务端 `1.0.10beta.3`；桌面客户端 `1.0.9a`
 - 当前已经完成并验证到 Milestone 5 的稳定性与部署加固阶段
 - 单仓库包含 Web、桌面壳层、管理后台、API、Gateway 和 Media 边界服务
 - 已实现认证、聊天、在线状态、语音、直播信令、弹窗观看和服务端设置
@@ -34,10 +34,10 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 版本规则
 
-- 稳定服务端发布使用纯数字版本号，例如 `1.0.9`；服务端 beta 发布可以使用 `1.0.10beta2` 这样的紧凑标签。对应 Docker 镜像为 `blockcat233/baker:<版本号>`。
+- 稳定服务端发布使用纯数字版本号，例如 `1.0.9`；服务端 beta 发布可以使用 `1.0.10beta.3` 这样的紧凑标签。对应 Docker 镜像为 `blockcat233/baker:<版本号>`。
 - 客户端发布标签使用服务端版本号加一个字母，从 `a` 开始，例如 `1.0.9a`、`1.0.9b`。
 - 只更新客户端时递增末尾字母；服务端大版本更新时递增数字版本，并把客户端字母重置为 `a`。
-- 仓库包元数据仍保持 semver 兼容。例如公开的 `1.0.10beta2` 服务端标签，在 `package.json` 里保存为 `1.0.10-beta.2`。
+- 仓库包元数据仍保持 semver 兼容。例如公开的 `1.0.10beta.3` 服务端标签，在 `package.json` 里保存为 `1.0.10-beta.3`。
 - 打发布标签前，请先运行 `pnpm release:check`，并按 [Release Checklist](docs/release-checklist.md) 核对。
 
 ## 如果你是新手，请先看这里
@@ -63,7 +63,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 
 docker logs baker
 ```
@@ -75,7 +75,7 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
-如果你想始终跟随最新滚动版本，也可以把 `1.0.10beta2` 换成 `latest`。
+如果你想始终跟随最新滚动版本，也可以把 `1.0.10beta.3` 换成 `latest`。
 
 公开部署教程默认使用这个 all-in-one 镜像。它在同一个容器里包含 PostgreSQL、Redis、API、Gateway、Media、Caddy、可选 coturn、运行时 watchdog 和 `supervisorctl`。管理后台里的服务修复、自我修复、公网 IP 自动化重启，以及部署设置应用，都依赖这个 Supervisor 环境。如果你手动拆分运行多个服务，Baker 仍然可以提供流量，但你需要自己提供进程守护，并在运行时配置变化后自行重启 Media/TURN。
 
@@ -90,6 +90,8 @@ docker logs baker
 - 拉取管理员选择的目标镜像
 - 重建 Baker 容器，同时保留 `/var/lib/baker` 数据卷、容器名、重启策略和受管理的端口映射
 - 如果新容器健康检查失败，自动回滚到旧容器
+
+如果服务器只能通过代理访问 GitHub 或 Docker Hub 元数据，可以在“服务器更新”卡片里配置“更新代理”。该设置保存到 `/var/lib/baker/runtime/update-proxy.json`，只用于 Baker 更新元数据请求。自动公网 IP 检测不会使用它。Docker 镜像拉取仍由宿主 Docker daemon 通过 `/var/run/docker.sock` 执行；如果镜像下载失败，需要在 Docker 宿主机上配置 Docker daemon 代理或镜像源。
 
 管理后台也提供了精选部署设置，不再需要手动改 Docker 参数：Web/Admin 宿主机端口、允许的 Host、STUN 地址、TURN 开关和中继端口、TURN 凭据、SFU 公网 IP、SFU RTC 端口范围。密码字段只允许写入，API 不会回显明文。
 
@@ -109,7 +111,7 @@ Baker 默认会尝试多个公网 IP 检测源，其中包含一些在中国大�
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
 
-- 镜像：`blockcat233/baker:1.0.10beta2`
+- 镜像：`blockcat233/baker:1.0.10beta.3`
 - 容器名：`baker` 或 `baker-test`
 - 端口：
   - 宿主机 `3000` -> 容器 `80/tcp`
@@ -170,7 +172,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 如果没有显式设置 `TURN_URLS`，Baker 会根据 `TURN_EXTERNAL_IP` 和 `TURN_PORT` 自动生成；如果你希望客户端拿到固定域名形式的 TURN 地址，也可以自己显式设置 `TURN_URLS`。
@@ -203,7 +205,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta2
+  blockcat233/baker:1.0.10beta.3
 ```
 
 然后进入管理后台，在“服务器设置 -> 媒体模式”里从 `p2p` 切换到 `sfu`。切换会立即重建当前语音和直播媒体会话，但不会断开文字聊天 WebSocket。如果 SFU 公网 IP 或端口范围没有配置好，管理 API 会明确拒绝切换，而不是静默退回 P2P。

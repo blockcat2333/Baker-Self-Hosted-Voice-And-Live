@@ -48,6 +48,14 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-04 Baker 1.0.10beta.3 Admin Update Proxy Settings
+
+- bumped the server beta release line to public label `1.0.10beta.3`, with semver package metadata stored as `1.0.10-beta.3`
+- added a persistent admin update proxy setting for Baker update metadata requests
+- scoped the proxy to DockerHub/GitHub version discovery and update-helper handoff only
+- kept Public IP Automation on direct fetch so detected media IPs still reflect the server's real public address
+- documented that Docker image pulls are performed by the host Docker daemon and still require Docker daemon proxy or mirror configuration when registry access fails
+
 ### 2026-07-04 Baker 1.0.10beta2 Runtime Media Address Precedence Fix
 
 - bumped the server beta release line to public label `1.0.10beta2`, with semver package metadata stored as `1.0.10-beta.2`

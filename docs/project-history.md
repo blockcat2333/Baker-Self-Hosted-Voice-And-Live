@@ -2,6 +2,25 @@
 
 ## 2026-07-04
 
+### Baker 1.0.10beta.3 admin update proxy settings
+
+What changed:
+
+- bumped the public server beta label to `1.0.10beta.3` while keeping package metadata semver-compatible as `1.0.10-beta.3`
+- added persistent admin update proxy settings for Baker update metadata requests
+- kept Public IP Automation on direct fetch so detected media IPs still reflect the server's real public address
+- documented that Docker image pulls are performed by the host Docker daemon and still require Docker daemon proxy or mirror configuration when registry access fails
+
+Why:
+
+- some server networks need a proxy to reach GitHub or Docker Hub metadata, but public IP detection must not use that proxy or it may detect the proxy's public IP instead of the server's media IP
+
+Validation:
+
+- protocol/API/Admin typecheck
+- targeted update proxy, update discovery, public IP automation, API route, and update-helper tests
+- lint, formatting, and update-helper syntax checks
+
 ### Baker 1.0.10beta2 runtime media address precedence fix
 
 What changed:
@@ -561,6 +580,7 @@ Why:
 What changed:
 
 **Primary fix (sidebar footer / account panel overflow):**
+
 - `.account-panel` switched from `display: grid` to `display: flex; flex-direction: column` with `min-width: 0; overflow: hidden`
 - `.account-panel-edit-btn` removed rigid `min-width: 72px`, replaced with `white-space: nowrap`
 - `.account-panel-header` given `min-width: 0` so flex children truncate properly
@@ -568,9 +588,11 @@ What changed:
 - reproduced and verified via Playwright at 700/768/820/900/1280px in EN and ZH — all 10 combinations show Edit button contained within account panel bounds
 
 **Additional layout hardening:**
+
 - added `min-width: 0` to `.stream-watch-row-summary > div:first-child` and `.stream-section-header > div:first-child` (prevents long usernames from overflowing stream watch rows)
 
 **i18n completeness:**
+
 - localized hardcoded English "Text" / "Voice" channel section headers in `ChannelList.tsx` with new i18n keys `chat.section_text` / `chat.section_voice` (EN: "Text" / "Voice", ZH: "文字" / "语音")
 - localized hardcoded voice network diagnostic labels in `VoicePanel.tsx` with new i18n keys `voice.net_label_gw_rtt`, `voice.net_label_gw_loss`, `voice.net_label_media_loss`, `voice.net_label_stale`, `voice.net_label_local` (EN: "GW RTT" / "GW Loss" / "Media Loss" / "stale" / "local", ZH: "网关延迟" / "网关丢包" / "媒体丢包" / "过期" / "本地")
 - added `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` to `chat-main-title` so long server names truncate instead of pushing the header layout
@@ -1224,7 +1246,6 @@ Important tradeoffs:
 - the admin panel currently authenticates with one shared management password rather than admin user accounts or granular permissions
 - stored web/app port changes update configuration and manifests, but they do not restart running frontend processes automatically
 - channel `voiceQuality` is currently a persisted/admin-facing channel setting only; it does not yet change the live P2P voice media pipeline
-
 
 ### Bilingual UI (Stages 1–4: foundation + client + admin)
 

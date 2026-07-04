@@ -15,6 +15,8 @@ import {
   AdminUpdateDeploymentSettingsRequestSchema,
   AdminUpdateChannelRequestSchema,
   AdminUpdateJobStatusSchema,
+  AdminUpdateProxySettingsRequestSchema,
+  AdminUpdateProxySettingsSchema,
   AdminUpdateRuntimePublicIpSettingsRequestSchema,
   AdminUpdateRuntimeSelfRepairSettingsRequestSchema,
   AdminUpdateSettingsRequestSchema,
@@ -53,7 +55,9 @@ import {
   readDeploymentPendingMarker,
   readDeploymentRuntimeSettings,
   readRuntimePublicIpSettings,
+  readRuntimeUpdateProxySettings,
   updateRuntimePublicIpSettings,
+  updateRuntimeUpdateProxySettings,
   updateDeploymentRuntimeSettings,
   type DeploymentRuntimeSettings,
 } from '../lib/runtime-config';
@@ -471,6 +475,21 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     });
   });
 
+  app.get('/v1/admin/updates/proxy', async (request) => {
+    await requireAdmin(app, request);
+    return AdminUpdateProxySettingsSchema.parse(
+      await readRuntimeUpdateProxySettings(),
+    );
+  });
+
+  app.patch('/v1/admin/updates/proxy', async (request) => {
+    await requireAdmin(app, request);
+    const input = AdminUpdateProxySettingsRequestSchema.parse(request.body);
+    return AdminUpdateProxySettingsSchema.parse(
+      await updateRuntimeUpdateProxySettings(input),
+    );
+  });
+
   app.get('/v1/admin/updates/status', async (request) => {
     await requireAdmin(app, request);
     return AdminUpdateJobStatusSchema.parse(await readUpdateStatus());
@@ -495,11 +514,13 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
       );
     }
 
-    const [runtimeSettings, pendingMarker, inspect] = await Promise.all([
-      readDeploymentRuntimeSettings(),
-      readDeploymentPendingMarker(),
-      docker.inspectCurrentContainer(),
-    ]);
+    const [runtimeSettings, pendingMarker, inspect, updateProxy] =
+      await Promise.all([
+        readDeploymentRuntimeSettings(),
+        readDeploymentPendingMarker(),
+        docker.inspectCurrentContainer(),
+        readRuntimeUpdateProxySettings(),
+      ]);
     const settings = resolveContainerHostPorts(
       runtimeSettings,
       inspect,
@@ -518,6 +539,10 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
         pullPolicy: 'always',
         targetImage,
         targetTag: input.tag,
+        updateProxyUrl:
+          updateProxy.enabled && updateProxy.proxyUrl
+            ? updateProxy.proxyUrl
+            : undefined,
       });
       return AdminUpdateJobStatusSchema.parse(
         await writeStartingUpdateStatus(started),

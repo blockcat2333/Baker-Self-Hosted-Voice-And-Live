@@ -25,13 +25,19 @@ export interface BakerUpdateVersion {
 const dockerHubTagsUrl = 'https://hub.docker.com/v2/namespaces/blockcat233/repositories/baker/tags?page_size=100';
 const githubReleasesUrl = 'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
 const dockerReleaseTagPattern =
-  /^\d+\.\d+\.\d+(?:beta|[-+][0-9A-Za-z.-]+)?$/;
+  /^\d+\.\d+\.\d+(?:beta\d*|[-+][0-9A-Za-z.-]+)?$/;
 
 function semverParts(tag: string) {
-  const normalized = tag.replace(/(\d+\.\d+\.\d+)beta$/, '$1-beta');
+  const normalized = tag.replace(
+    /(\d+\.\d+\.\d+)beta(\d*)$/,
+    (_, version: string, betaNumber: string) =>
+      `${version}-beta${betaNumber ? `.${betaNumber}` : ''}`,
+  );
   const [version, suffix = ''] = normalized.split(/[-+]/, 2);
   const parts = version?.split('.').map((item) => Number(item)) ?? [];
+  const betaMatch = /^beta(?:\.(\d+))?$/.exec(suffix);
   return {
+    betaNumber: betaMatch ? Number(betaMatch[1] ?? 0) : -1,
     major: parts[0] ?? 0,
     minor: parts[1] ?? 0,
     patch: parts[2] ?? 0,
@@ -47,6 +53,7 @@ export function compareVersionTagsDesc(left: string, right: string) {
     b.minor - a.minor ||
     b.patch - a.patch ||
     Number(b.stable) - Number(a.stable) ||
+    b.betaNumber - a.betaNumber ||
     right.localeCompare(left)
   );
 }

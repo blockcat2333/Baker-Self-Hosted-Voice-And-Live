@@ -1,5 +1,30 @@
 # Project History
 
+## 2026-07-04
+
+### Baker 1.0.10beta2 runtime media address precedence fix
+
+What changed:
+
+- bumped the public server beta label to `1.0.10beta2` while keeping package metadata semver-compatible as `1.0.10-beta.2`
+- changed all-in-one and Node service startup so `TURN_EXTERNAL_IP`, `TURN_URLS`, and `SFU_ANNOUNCED_IP` from stale Docker env no longer override persisted `runtime.env`
+- kept Docker env as a first-run bootstrap seed, then made `runtime.env` authoritative for runtime-managed media addresses
+- moved TURN URL auto-generation into the shared runtime shell library so Media and TURN derive URLs from the current runtime IP after stale env values are cleared
+- updated release tooling, DockerHub update discovery, and the Docker publish workflow to accept compact beta labels such as `1.0.10beta2`
+- documented the runtime media address precedence rule in English and Chinese deployment docs
+
+Why:
+
+- after a public IP change, `runtime-watchdog` could write the new IP to `runtime.env`, but restarting Media/TURN could restore an old Docker env value and keep advertising an unreachable IP
+- this left users connected to the voice channel while SFU/TURN media failed to establish
+
+Validation:
+
+- targeted Docker entrypoint/all-in-one shell tests
+- runtime public IP and update-version discovery tests
+- full Vitest suite
+- API typecheck, lint, syntax checks, release consistency check, Docker build, and Docker all-in-one smoke validation before release
+
 ## 2026-06-29
 
 ### Baker 1.0.10beta all-in-one public IP automation beta prep

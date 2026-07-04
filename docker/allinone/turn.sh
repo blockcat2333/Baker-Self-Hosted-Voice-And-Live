@@ -11,6 +11,7 @@ set -eu
 export BAKER_RUNTIME_DIR
 
 capture_turn_runtime_overrides
+clear_runtime_managed_media_env
 load_runtime_env
 apply_turn_runtime_overrides
 default_turn_urls_if_needed

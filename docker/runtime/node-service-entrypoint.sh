@@ -14,31 +14,26 @@ restore_env_override() {
 }
 
 preserve_env_override STUN_URLS
-preserve_env_override TURN_URLS
 preserve_env_override TURN_USERNAME
 preserve_env_override TURN_PASSWORD
 preserve_env_override TURN_REALM
 preserve_env_override TURN_PORT
 preserve_env_override TURN_MIN_PORT
 preserve_env_override TURN_MAX_PORT
-preserve_env_override TURN_EXTERNAL_IP
-preserve_env_override SFU_ANNOUNCED_IP
 preserve_env_override SFU_RTC_MIN_PORT
 preserve_env_override SFU_RTC_MAX_PORT
 preserve_env_override SFU_ENABLE_TCP
 
+clear_runtime_managed_media_env
 load_runtime_env
 
 restore_env_override STUN_URLS
-restore_env_override TURN_URLS
 restore_env_override TURN_USERNAME
 restore_env_override TURN_PASSWORD
 restore_env_override TURN_REALM
 restore_env_override TURN_PORT
 restore_env_override TURN_MIN_PORT
 restore_env_override TURN_MAX_PORT
-restore_env_override TURN_EXTERNAL_IP
-restore_env_override SFU_ANNOUNCED_IP
 restore_env_override SFU_RTC_MIN_PORT
 restore_env_override SFU_RTC_MAX_PORT
 restore_env_override SFU_ENABLE_TCP
@@ -63,6 +58,8 @@ restore_env_override SFU_ENABLE_TCP
 : "${SFU_RTC_MIN_PORT:=50000}"
 : "${SFU_RTC_MAX_PORT:=50100}"
 : "${SFU_ENABLE_TCP:=true}"
+
+default_turn_urls_if_needed
 
 export NODE_ENV
 export WEB_PORT

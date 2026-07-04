@@ -48,6 +48,19 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-04 Baker 1.0.10beta2 Runtime Media Address Precedence Fix
+
+- bumped the server beta release line to public label `1.0.10beta2`, with semver package metadata stored as `1.0.10-beta.2`
+- fixed the all-in-one restart path where stale Docker env values for dynamic media addresses could override updated `runtime.env` values:
+  - `TURN_EXTERNAL_IP`
+  - `TURN_URLS`
+  - `SFU_ANNOUNCED_IP`
+- kept Docker env compatibility for first-run bootstrap while making `runtime.env` authoritative after it exists
+- moved TURN URL auto-generation into the shared runtime shell library so Media still derives TURN URLs from the current runtime IP after stale env values are cleared
+- updated release tooling and Docker publish workflow to recognize compact beta labels with a numeric suffix such as `1.0.10beta2`
+- added Docker shell regression coverage for runtime-managed media address precedence
+- updated deployment docs to warn that all-in-one public media addresses should be maintained through runtime/admin settings after initialization
+
 ### 2026-06-29 Baker 1.0.10beta All-In-One Public IP Automation Beta Prep
 
 - bumped the server beta release line to public label `1.0.10beta`, with semver package metadata stored as `1.0.10-beta`

@@ -27,7 +27,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.0.10beta`; desktop client `1.0.9a`
+- Release line: server `1.0.10beta2`; desktop client `1.0.9a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -36,10 +36,10 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Versioning
 
-- Stable server releases use numeric tags such as `1.0.9`; server beta releases may use compact labels such as `1.0.10beta`. The matching Docker image is `blockcat233/baker:<version>`.
+- Stable server releases use numeric tags such as `1.0.9`; server beta releases may use compact labels such as `1.0.10beta2`. The matching Docker image is `blockcat233/baker:<version>`.
 - Client release labels follow the server version plus a letter, starting at `a`: `1.0.9a`, `1.0.9b`, and so on.
 - Client-only updates advance the trailing letter. Server releases advance the numeric version and reset the client letter to `a`.
-- Package metadata stays semver-compatible for tooling. For example, the `1.0.10beta` server label is stored as `1.0.10-beta` in `package.json`.
+- Package metadata stays semver-compatible for tooling. For example, the `1.0.10beta2` server label is stored as `1.0.10-beta.2` in `package.json`.
 - Before tagging a release, run `pnpm release:check` and follow the [Release Checklist](docs/release-checklist.md).
 
 ## Start Here If You Are New
@@ -65,7 +65,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 
 docker logs baker
 ```
@@ -77,7 +77,7 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-If you want to follow the newest rolling image instead of pinning this release, replace `1.0.10beta` with `latest`.
+If you want to follow the newest rolling image instead of pinning this release, replace `1.0.10beta2` with `latest`.
 
 The public deployment guide assumes this all-in-one image. It contains PostgreSQL, Redis, API, Gateway, Media, Caddy, optional coturn, the runtime watchdog, and `supervisorctl` in one container. Admin runtime repair, self-repair, public IP automation restarts, and deployment-settings apply all depend on that supervisor environment. If you run split services manually, Baker can still serve traffic, but you must provide your own process supervision and restart Media/TURN after runtime config changes.
 
@@ -111,7 +111,7 @@ Baker tries several public IP endpoints by default, including endpoints that are
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:1.0.10beta`
+- Image: `blockcat233/baker:1.0.10beta2`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -170,10 +170,12 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
+
+In the all-in-one image, `TURN_EXTERNAL_IP`, `TURN_URLS`, and `SFU_ANNOUNCED_IP` from Docker env are only bootstrap seeds for the first `runtime.env`. After `/var/lib/baker/runtime/runtime.env` exists, that file is authoritative for these media addresses; the admin panel and Public IP Automation update it and then restart Media/TURN through `supervisorctl`. If the server public IP changes, update the admin/runtime settings instead of relying on stale Docker env values.
 
 For public internet deployments, treat these as mandatory requirements, not optional tuning:
 
@@ -201,7 +203,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.

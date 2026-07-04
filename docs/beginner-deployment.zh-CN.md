@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 4. 读取首次启动打印出来的管理后台密码：
@@ -97,6 +97,8 @@ docker logs baker
 
 Baker 默认会尝试多个公网 IP 检测源，其中包括 `https://ip.3322.net`、`https://myip.ipip.net` 和 `https://ifconfig.co/ip`，用于服务端网络无法稳定访问旧全球接口的情况。如果你的服务器仍然显示检测失败，可以用 `BAKER_PUBLIC_IP_ENDPOINTS` 设置一个逗号分隔的接口列表。接口可以返回纯文本 IP、带 `ip` 字段的 JSON，或者包含 IP 的文本。
 
+all-in-one Docker env 里的 `TURN_EXTERNAL_IP`、`TURN_URLS` 和 `SFU_ANNOUNCED_IP` 只用于首次初始化。`runtime.env` 创建后，Baker 会以运行时文件为准，这样公网 IP 自动化才能替换失效的媒体地址，而不会被旧容器 env 再次覆盖。
+
 ## 可选：SFU 模式
 
 TURN 是让 P2P 媒体在 NAT 后面也能连通。SFU 模式不同：语音和直播轨道会先进入 Baker 的媒体后端，再由服务器转发给其他用户，适合有些用户所在网络会阻断或严重影响 P2P 的场景。
@@ -113,7 +115,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 然后进入管理后台，把“服务器设置 -> 媒体模式”切到 `sfu`。当前语音和直播会立即按新模式重连，文字聊天连接会保持在线。
@@ -136,7 +138,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 如果要给真实用户用，Web 入口前面仍然需要配好 HTTPS。
@@ -181,7 +183,7 @@ docker run -d \
 常见升级步骤：
 
 ```bash
-docker pull blockcat233/baker:1.0.10beta
+docker pull blockcat233/baker:1.0.10beta2
 docker rm -f baker
 ```
 

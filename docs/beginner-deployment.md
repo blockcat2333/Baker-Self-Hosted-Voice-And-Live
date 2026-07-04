@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 4. Read the first admin password:
@@ -98,6 +98,8 @@ If your public IP may change, enable **Runtime Status -> Public IP Automation** 
 
 Baker defaults to several public IP check endpoints, including `https://ip.3322.net`, `https://myip.ipip.net`, and `https://ifconfig.co/ip` for server networks that cannot reliably reach the older global endpoints. If your server still reports detection failures, set `BAKER_PUBLIC_IP_ENDPOINTS` to a comma-separated list that works from that server. The response may be a plain IP address, JSON with an `ip` field, or text that contains an IP address.
 
+All-in-one Docker env values for `TURN_EXTERNAL_IP`, `TURN_URLS`, and `SFU_ANNOUNCED_IP` are first-run seeds only. After `runtime.env` exists, Baker uses the runtime file as the source of truth so Public IP Automation can replace stale media addresses without being overridden by old container env values.
+
 ## Optional SFU Mode
 
 TURN keeps P2P media working through NAT. SFU mode is different: voice and livestream tracks go through Baker's media backend, which is useful when some users are on networks that block or degrade direct P2P paths.
@@ -114,7 +116,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 Then open the admin panel and change **Server settings -> Media mode** to `sfu`. Existing voice and livestream sessions reconnect immediately in the new mode, while text chat remains connected.
@@ -137,7 +139,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10beta
+  blockcat233/baker:1.0.10beta2
 ```
 
 You still need to place HTTPS in front of the web app for real users.
@@ -182,7 +184,7 @@ If you keep the same Docker volume, you can recreate the container without losin
 Typical upgrade flow:
 
 ```bash
-docker pull blockcat233/baker:1.0.10beta
+docker pull blockcat233/baker:1.0.10beta2
 docker rm -f baker
 ```
 

@@ -1,17 +1,5 @@
 #!/bin/sh
 
-is_true() {
-  value="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
-  case "$value" in
-    1|true|yes|on)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 capture_env_override() {
   var="$1"
   eval "if [ \"\${$var+x}\" = x ]; then export BAKER_OVERRIDE_HAS_${var}=1; export BAKER_OVERRIDE_${var}=\"\${$var}\"; fi"
@@ -24,15 +12,12 @@ apply_env_override() {
 
 capture_turn_runtime_overrides() {
   capture_env_override STUN_URLS
-  capture_env_override TURN_URLS
   capture_env_override TURN_USERNAME
   capture_env_override TURN_PASSWORD
   capture_env_override TURN_REALM
   capture_env_override TURN_PORT
   capture_env_override TURN_MIN_PORT
   capture_env_override TURN_MAX_PORT
-  capture_env_override TURN_EXTERNAL_IP
-  capture_env_override SFU_ANNOUNCED_IP
   capture_env_override SFU_RTC_MIN_PORT
   capture_env_override SFU_RTC_MAX_PORT
   capture_env_override SFU_ENABLE_TCP
@@ -40,31 +25,15 @@ capture_turn_runtime_overrides() {
 
 apply_turn_runtime_overrides() {
   apply_env_override STUN_URLS
-  apply_env_override TURN_URLS
   apply_env_override TURN_USERNAME
   apply_env_override TURN_PASSWORD
   apply_env_override TURN_REALM
   apply_env_override TURN_PORT
   apply_env_override TURN_MIN_PORT
   apply_env_override TURN_MAX_PORT
-  apply_env_override TURN_EXTERNAL_IP
-  apply_env_override SFU_ANNOUNCED_IP
   apply_env_override SFU_RTC_MIN_PORT
   apply_env_override SFU_RTC_MAX_PORT
   apply_env_override SFU_ENABLE_TCP
-}
-
-default_turn_urls_if_needed() {
-  if ! is_true "${TURN_ENABLED:-false}"; then
-    return 0
-  fi
-
-  if [ -n "${TURN_URLS:-}" ] || [ -z "${TURN_EXTERNAL_IP:-}" ]; then
-    return 0
-  fi
-
-  TURN_URLS="turn:${TURN_EXTERNAL_IP}:${TURN_PORT:-3478}?transport=udp,turn:${TURN_EXTERNAL_IP}:${TURN_PORT:-3478}?transport=tcp"
-  export TURN_URLS
 }
 
 wait_for_tcp() {

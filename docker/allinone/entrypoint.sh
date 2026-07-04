@@ -113,6 +113,7 @@ run_database_migrations() {
 create_runtime_dirs
 capture_turn_runtime_overrides
 /opt/baker-runtime/bootstrap.sh
+clear_runtime_managed_media_env
 load_runtime_env
 apply_turn_runtime_overrides
 default_turn_urls_if_needed

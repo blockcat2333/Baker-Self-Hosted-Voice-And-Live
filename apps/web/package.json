@@ -1,6 +1,6 @@
 {
   "name": "@baker/web",
-  "version": "1.0.10-beta",
+  "version": "1.0.10-beta.2",
   "private": true,
   "type": "module",
   "scripts": {

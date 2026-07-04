@@ -26,7 +26,7 @@ const shellPath = resolveShellPath();
 const maybeIt = shellPath ? it : it.skip;
 
 describe('docker runtime node-service-entrypoint', () => {
-  maybeIt('preserves TURN and STUN overrides after loading runtime.env', () => {
+  maybeIt('keeps runtime-managed media addresses from runtime.env', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'baker-node-entrypoint-'));
 
     try {
@@ -43,9 +43,13 @@ describe('docker runtime node-service-entrypoint', () => {
       writeFileSync(
         join(runtimeDir, 'runtime.env'),
         [
+          "TURN_ENABLED='true'",
           "TURN_URLS=''",
+          "TURN_EXTERNAL_IP='198.51.100.77'",
+          "SFU_ANNOUNCED_IP='198.51.100.77'",
           "TURN_USERNAME='runtime-user'",
           "TURN_PASSWORD='runtime-pass'",
+          "TURN_PORT='3478'",
           "STUN_URLS='stun:runtime.example.com:3478'",
           '',
         ].join('\n'),
@@ -65,7 +69,17 @@ describe('docker runtime node-service-entrypoint', () => {
           tempEntrypointPath,
           'node',
           '-e',
-          "process.stdout.write(JSON.stringify({TURN_URLS: process.env.TURN_URLS, STUN_URLS: process.env.STUN_URLS, TURN_USERNAME: process.env.TURN_USERNAME}))",
+          [
+            'process.stdout.write(JSON.stringify({',
+            'SFU_ANNOUNCED_IP: process.env.SFU_ANNOUNCED_IP,',
+            'STUN_URLS: process.env.STUN_URLS,',
+            'TURN_EXTERNAL_IP: process.env.TURN_EXTERNAL_IP,',
+            'TURN_PASSWORD: process.env.TURN_PASSWORD,',
+            'TURN_PORT: process.env.TURN_PORT,',
+            'TURN_URLS: process.env.TURN_URLS,',
+            'TURN_USERNAME: process.env.TURN_USERNAME',
+            '}))',
+          ].join(''),
         ],
         {
           encoding: 'utf8',
@@ -75,8 +89,12 @@ describe('docker runtime node-service-entrypoint', () => {
             POSTGRES_DB: 'baker',
             POSTGRES_PASSWORD: 'postgres-pass',
             POSTGRES_USER: 'postgres-user',
+            SFU_ANNOUNCED_IP: '192.0.2.10',
             STUN_URLS: 'stun:override.example.com:3478',
-            TURN_URLS: 'turn:turn.example.com:3478?transport=udp',
+            TURN_EXTERNAL_IP: '192.0.2.10',
+            TURN_PASSWORD: 'override-pass',
+            TURN_PORT: '5349',
+            TURN_URLS: 'turn:old.example.com:3478?transport=udp',
             TURN_USERNAME: 'override-user',
           },
         },
@@ -85,8 +103,13 @@ describe('docker runtime node-service-entrypoint', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual({
+        SFU_ANNOUNCED_IP: '198.51.100.77',
         STUN_URLS: 'stun:override.example.com:3478',
-        TURN_URLS: 'turn:turn.example.com:3478?transport=udp',
+        TURN_EXTERNAL_IP: '198.51.100.77',
+        TURN_PASSWORD: 'override-pass',
+        TURN_PORT: '5349',
+        TURN_URLS:
+          'turn:198.51.100.77:5349?transport=udp,turn:198.51.100.77:5349?transport=tcp',
         TURN_USERNAME: 'override-user',
       });
     } finally {

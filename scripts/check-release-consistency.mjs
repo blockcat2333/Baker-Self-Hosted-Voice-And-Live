@@ -40,10 +40,10 @@ const desktopPackagePath = 'apps/desktop/package.json';
 const desktopPackage = readJson(desktopPackagePath);
 const desktopVersion = desktopPackage.version;
 const stableServerVersionPattern = /^\d+\.\d+\.\d+$/;
-const betaServerVersionPattern = /^(\d+\.\d+\.\d+)-beta$/;
+const betaServerVersionPattern = /^(\d+\.\d+\.\d+)-beta(?:\.(\d+))?$/;
 const betaServerVersionMatch = serverPackageVersion.match(betaServerVersionPattern);
 const serverReleaseLabel = betaServerVersionMatch
-  ? `${betaServerVersionMatch[1]}beta`
+  ? `${betaServerVersionMatch[1]}beta${betaServerVersionMatch[2] ?? ''}`
   : serverPackageVersion;
 const isBetaServerRelease = Boolean(betaServerVersionMatch);
 const desktopVersionPattern = /^(\d+\.\d+\.\d+)-([a-z])$/;
@@ -130,8 +130,8 @@ for (const docsPath of [
 const imageWorkflow = readText('.github/workflows/publish-images.yml');
 check(
   'Docker image workflow tag guard',
-  imageWorkflow.includes('is_server_tag') && imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+(beta)?$'),
-  'expected publish-images.yml to publish stable and compact beta server tags',
+  imageWorkflow.includes('is_server_tag') && imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+(beta[0-9]*)?$'),
+  'expected publish-images.yml to publish stable and compact beta/betaN server tags',
 );
 
 const desktopWorkflow = readText('.github/workflows/publish-desktop.yml');

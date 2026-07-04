@@ -48,6 +48,17 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-04 Baker 1.0.10 Stable Release And Desktop 1.0.10a
+
+- promoted the 1.0.10 server line from beta to stable public label `1.0.10`
+- reset the desktop/client release label to `1.0.10a`, with Electron package metadata stored as `1.0.10-a`
+- updated the Windows installer artifact name to `Baker-Setup-1.0.10a-x64.exe`
+- kept the 1.0.10 beta series fixes in the stable line:
+  - all-in-one public IP automation
+  - runtime-managed TURN/SFU media address precedence
+  - admin update proxy settings scoped to Baker update metadata requests
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.10`
+
 ### 2026-07-04 Baker 1.0.10beta.3 Admin Update Proxy Settings
 
 - bumped the server beta release line to public label `1.0.10beta.3`, with semver package metadata stored as `1.0.10-beta.3`

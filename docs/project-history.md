@@ -2,6 +2,28 @@
 
 ## 2026-07-04
 
+### Baker 1.0.10 stable release and desktop 1.0.10a
+
+What changed:
+
+- promoted the public server label from `1.0.10beta.3` to stable `1.0.10`
+- reset the desktop/client label to `1.0.10a`, with Electron metadata stored as semver `1.0.10-a`
+- updated the desktop installer artifact name to `Baker-Setup-1.0.10a-x64.exe`
+- updated English and Chinese deployment docs to pin `blockcat233/baker:1.0.10`
+- added release notes for the stable server image and matching desktop installer
+
+Why:
+
+- the 1.0.10 beta line has accumulated the public IP automation, media address precedence, and update proxy fixes needed for a stable all-in-one release
+- the matching desktop installer should follow the documented server-version-plus-letter model for client releases
+
+Validation:
+
+- release consistency check
+- protocol/API/Admin/Desktop typechecks
+- targeted update proxy, update discovery, public IP automation, API route, update-helper, and desktop tests
+- lint, formatting, update-helper syntax checks, and desktop installer build
+
 ### Baker 1.0.10beta.3 admin update proxy settings
 
 What changed:

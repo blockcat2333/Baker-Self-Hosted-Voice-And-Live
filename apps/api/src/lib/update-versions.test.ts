@@ -63,6 +63,11 @@ describe('update version discovery', () => {
               name: '1.0.10beta',
             },
             {
+              images: [{ digest: 'sha256:stable' }],
+              last_updated: '2026-06-01T00:00:00.000Z',
+              name: '1.0.10',
+            },
+            {
               images: [{ digest: 'sha256:beta3' }],
               last_updated: '2026-05-01T00:00:00.000Z',
               name: '1.0.10beta.3',
@@ -94,10 +99,10 @@ describe('update version discovery', () => {
       .mockResolvedValueOnce({
         json: async () => [
           {
-            body: 'Beta 3 release notes',
+            body: 'Stable release notes',
             html_url:
-              'https://github.com/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases/tag/v1.0.10beta.3',
-            tag_name: 'v1.0.10beta.3',
+              'https://github.com/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases/tag/v1.0.10',
+            tag_name: 'v1.0.10',
           },
         ],
         ok: true,
@@ -108,6 +113,7 @@ describe('update version discovery', () => {
       const versions = await listBakerUpdateVersions();
 
       expect(versions.map((version) => version.tag)).toEqual([
+        '1.0.10',
         '1.0.10beta.3',
         '1.0.10beta2',
         '1.0.10-beta.2',
@@ -116,10 +122,10 @@ describe('update version discovery', () => {
         '1.0.3',
       ]);
       expect(versions[0]).toMatchObject({
-        digest: 'sha256:beta3',
+        digest: 'sha256:stable',
         isLatest: true,
-        releaseNotes: 'Beta 3 release notes',
-        tag: '1.0.10beta.3',
+        releaseNotes: 'Stable release notes',
+        tag: '1.0.10',
       });
     } finally {
       await rm(tempDir, { force: true, recursive: true });

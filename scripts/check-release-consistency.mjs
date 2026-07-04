@@ -130,8 +130,9 @@ for (const docsPath of [
 const imageWorkflow = readText('.github/workflows/publish-images.yml');
 check(
   'Docker image workflow tag guard',
-  imageWorkflow.includes('is_server_tag') && imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+(beta[0-9]*)?$'),
-  'expected publish-images.yml to publish stable and compact beta/betaN server tags',
+  imageWorkflow.includes('is_server_tag') &&
+    imageWorkflow.includes('^v[0-9]+\\.[0-9]+\\.[0-9]+(beta[0-9]*|-beta(\\.[0-9]+)?)?$'),
+  'expected publish-images.yml to publish stable, compact beta/betaN, and semver beta server tags',
 );
 
 const desktopWorkflow = readText('.github/workflows/publish-desktop.yml');

@@ -58,6 +58,7 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 - kept Docker env compatibility for first-run bootstrap while making `runtime.env` authoritative after it exists
 - moved TURN URL auto-generation into the shared runtime shell library so Media still derives TURN URLs from the current runtime IP after stale env values are cleared
 - updated release tooling and Docker publish workflow to recognize compact beta labels with a numeric suffix such as `1.0.10beta2`
+- added a semver Docker tag compatibility path (`1.0.10-beta.2`) so servers still running `1.0.10beta` can discover the beta2 image with their older update filter
 - added Docker shell regression coverage for runtime-managed media address precedence
 - updated deployment docs to warn that all-in-one public media addresses should be maintained through runtime/admin settings after initialization
 

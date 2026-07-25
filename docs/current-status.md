@@ -48,6 +48,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-25 Baker 1.0.13 Stable Release And Desktop 1.0.13a
+
+- bumped the stable server release line to public label `1.0.13`
+- reset the desktop/client release label to `1.0.13a`, with Electron package metadata stored as `1.0.13-a`
+- fixed all-in-one update helper port regeneration to preserve the current Docker `HostIp`
+- this keeps NAS deployments bound to `192.168.233.2` from broadening media ports to `0.0.0.0` during update replacement
+- kept the 1.0.12 stop-before-create update ordering fix
+- added a regression check for HostIp-preserving managed port bindings
+
 ### 2026-07-25 Baker 1.0.12 Stable Release And Desktop 1.0.12a
 
 - bumped the stable server release line to public label `1.0.12`

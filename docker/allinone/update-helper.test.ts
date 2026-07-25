@@ -49,4 +49,19 @@ describe('docker all-in-one update helper', () => {
     expect(waitIndex).toBeGreaterThan(stopIndex);
     expect(createIndex).toBeGreaterThan(waitIndex);
   });
+
+  it('preserves the current host IP when regenerating managed ports', () => {
+    const source = readFileSync(
+      resolve('docker/allinone/update-helper.mjs'),
+      'utf8',
+    );
+
+    expect(source).toContain('function resolvePortHostIp(');
+    expect(source).toContain('function resolveFallbackHostIp(');
+    expect(source).toContain('function addManagedPort(');
+    expect(source).toContain('HostIp: hostIp');
+    expect(source).toContain(
+      'resolvePortHostIp(currentBindings, containerPort, protocol, fallbackHostIp)',
+    );
+  });
 });

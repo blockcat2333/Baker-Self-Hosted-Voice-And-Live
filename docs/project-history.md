@@ -2,6 +2,30 @@
 
 ## 2026-07-25
 
+### Baker 1.0.13 HostIp-preserving update helper and desktop 1.0.13a
+
+What changed:
+
+- bumped the public server label to stable `1.0.13`
+- reset the desktop/client label to `1.0.13a`, with Electron metadata stored as semver `1.0.13-a`
+- preserved Docker `HostIp` values when the all-in-one update helper regenerates Web, TURN, and SFU port bindings
+- kept new managed ports on the current container's existing host IP instead of defaulting to all interfaces
+- added a regression check for HostIp-preserving port generation
+
+Why:
+
+- NAS deployments can have multiple local addresses and system services listening on the same high ports on another address
+- broadening Baker media ports from `192.168.233.2:<port>` to `0.0.0.0:<port>` can collide with those services even though the original Baker binding was valid
+- Baker updates should preserve the operator's existing Docker binding scope while replacing only the Baker container
+
+Validation:
+
+- update-helper syntax check
+- update-helper regression tests
+- release consistency check
+- full workspace test suite
+- Docker all-in-one production build
+
 ### Baker 1.0.12 update-helper port release fix and desktop 1.0.12a
 
 What changed:

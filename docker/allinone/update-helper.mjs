@@ -183,15 +183,73 @@ function deleteRange(bindings, min, max) {
   }
 }
 
-function addPort(bindings, exposed, containerPort, protocol, hostPort) {
+function addPort(
+  bindings,
+  exposed,
+  containerPort,
+  protocol,
+  hostPort,
+  hostIp,
+) {
   const key = portKey(containerPort, protocol);
   exposed[key] = {};
-  bindings[key] = [{ HostIp: '', HostPort: String(hostPort) }];
+  bindings[key] = [{ HostIp: hostIp, HostPort: String(hostPort) }];
 }
 
-function addRange(bindings, exposed, min, max, protocol) {
+function resolvePortHostIp(currentBindings, containerPort, protocol, fallback) {
+  const key = portKey(containerPort, protocol);
+  const currentHostIp = currentBindings?.[key]?.[0]?.HostIp;
+  return typeof currentHostIp === 'string' ? currentHostIp : fallback;
+}
+
+function resolveFallbackHostIp(currentBindings) {
+  for (const entries of Object.values(currentBindings ?? {})) {
+    const hostIp = entries?.[0]?.HostIp;
+    if (typeof hostIp === 'string' && hostIp.length > 0) {
+      return hostIp;
+    }
+  }
+  return '';
+}
+
+function addManagedPort(
+  bindings,
+  exposed,
+  currentBindings,
+  fallbackHostIp,
+  containerPort,
+  protocol,
+  hostPort,
+) {
+  addPort(
+    bindings,
+    exposed,
+    containerPort,
+    protocol,
+    hostPort,
+    resolvePortHostIp(currentBindings, containerPort, protocol, fallbackHostIp),
+  );
+}
+
+function addRange(
+  bindings,
+  exposed,
+  currentBindings,
+  fallbackHostIp,
+  min,
+  max,
+  protocol,
+) {
   for (let port = min; port <= max; port += 1) {
-    addPort(bindings, exposed, port, protocol, port);
+    addManagedPort(
+      bindings,
+      exposed,
+      currentBindings,
+      fallbackHostIp,
+      port,
+      protocol,
+      port,
+    );
   }
 }
 
@@ -245,24 +303,45 @@ function removeManagedPorts(bindings, settings) {
 
 function createPortBindings(currentBindings) {
   const bindings = { ...(currentBindings ?? {}) };
+  const fallbackHostIp = resolveFallbackHostIp(currentBindings);
   removeManagedPorts(bindings, previousSettings);
   removeManagedPorts(bindings, desiredSettings);
 
   const exposed = {};
-  addPort(bindings, exposed, 80, 'tcp', desiredSettings.webHostPort);
-  addPort(bindings, exposed, 8080, 'tcp', desiredSettings.adminHostPort);
+  addManagedPort(
+    bindings,
+    exposed,
+    currentBindings,
+    fallbackHostIp,
+    80,
+    'tcp',
+    desiredSettings.webHostPort,
+  );
+  addManagedPort(
+    bindings,
+    exposed,
+    currentBindings,
+    fallbackHostIp,
+    8080,
+    'tcp',
+    desiredSettings.adminHostPort,
+  );
 
   if (desiredSettings.turnEnabled) {
-    addPort(
+    addManagedPort(
       bindings,
       exposed,
+      currentBindings,
+      fallbackHostIp,
       desiredSettings.turnPort,
       'tcp',
       desiredSettings.turnPort,
     );
-    addPort(
+    addManagedPort(
       bindings,
       exposed,
+      currentBindings,
+      fallbackHostIp,
       desiredSettings.turnPort,
       'udp',
       desiredSettings.turnPort,
@@ -270,6 +349,8 @@ function createPortBindings(currentBindings) {
     addRange(
       bindings,
       exposed,
+      currentBindings,
+      fallbackHostIp,
       desiredSettings.turnMinPort,
       desiredSettings.turnMaxPort,
       'tcp',
@@ -277,6 +358,8 @@ function createPortBindings(currentBindings) {
     addRange(
       bindings,
       exposed,
+      currentBindings,
+      fallbackHostIp,
       desiredSettings.turnMinPort,
       desiredSettings.turnMaxPort,
       'udp',
@@ -287,6 +370,8 @@ function createPortBindings(currentBindings) {
     addRange(
       bindings,
       exposed,
+      currentBindings,
+      fallbackHostIp,
       range.min,
       range.max,
       'tcp',
@@ -294,6 +379,8 @@ function createPortBindings(currentBindings) {
     addRange(
       bindings,
       exposed,
+      currentBindings,
+      fallbackHostIp,
       range.min,
       range.max,
       'udp',

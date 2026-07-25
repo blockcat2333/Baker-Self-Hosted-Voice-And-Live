@@ -40,7 +40,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 4. 读取首次启动打印出来的管理后台密码：
@@ -117,10 +117,25 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 然后进入管理后台，把“服务器设置 -> 媒体模式”切到 `sfu`。当前语音和直播会立即按新模式重连，文字聊天连接会保持在线。
+
+## 可选：大陆/海外双区域媒体
+
+如果用户明显分成两个网络区域，例如大陆用户主要访问 `violet.evergarden.space`，海外用户主要访问 `hkserver.evergarden.space`，可以配置 `MEDIA_REGION_PROFILES`。这样用户打开哪个 Web 域名，后续语音、音乐分享和直播就会拿到同一区域的 TURN/SFU 地址。
+
+需要满足这些条件：
+
+- 两个入口域名都能访问同一个 Baker Web 服务。
+- 每个 profile 的 `hosts` 写对应 Web 域名。
+- 每个 profile 的 `turnUrls` 和 `sfuAnnouncedIp` 必须是该区域用户能访问的地址。
+- SFU RTC 端口必须做同端口映射。例如香港 profile 写 `23335-23400`，frp 就应该映射 `23335-23400 -> Baker:23335-23400`。
+
+不要把 `23335 -> 50000` 这类不等端口映射用于 SFU。浏览器会按 Baker 返回的 candidate 端口连接，端口号不一致时媒体连接会失败。
+
+双区域 profile 可以在管理后台“部署设置 -> 媒体区域 Profiles JSON”里保存。保存后需要点击“应用并重启容器”，让 all-in-one 容器重新发布新增端口。
 
 ## 公网部署示例
 
@@ -140,7 +155,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 如果要给真实用户用，Web 入口前面仍然需要配好 HTTPS。
@@ -185,7 +200,7 @@ docker run -d \
 常见升级步骤：
 
 ```bash
-docker pull blockcat233/baker:1.0.10
+docker pull blockcat233/baker:1.0.11
 docker rm -f baker
 ```
 

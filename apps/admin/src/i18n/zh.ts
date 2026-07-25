@@ -76,6 +76,11 @@ export const zh = {
     sfu_enable_tcp: '启用 SFU TCP',
     sfu_rtc_min_port: 'SFU RTC 起始端口',
     sfu_rtc_max_port: 'SFU RTC 结束端口',
+    media_region_profiles: '媒体区域 Profiles JSON',
+    media_region_profiles_placeholder:
+      '[{"id":"mainland","hosts":["violet.example.com"],"sfuAnnouncedIp":"203.0.113.10","sfuRtcMinPort":50000,"sfuRtcMaxPort":50100},{"id":"hongkong","hosts":["hk.example.com"],"sfuAnnouncedIp":"198.51.100.20","sfuRtcMinPort":23335,"sfuRtcMaxPort":23400}]',
+    media_region_profiles_hint:
+      '可选。Gateway 会按 WebSocket 访问域名匹配 profile，Media 再返回该区域的 TURN/SFU 候选地址。单区域部署可以留空。',
     save_deployment_settings: '保存部署设置',
     apply_deployment_settings: '应用并重启容器',
     confirm_start_update: '确定更新 Baker 到 {{tag}} 吗？容器会自动重启。',
@@ -146,6 +151,8 @@ export const zh = {
     error_select_version: '请先选择目标版本。',
     error_start_update: '启动更新失败。',
     error_save_deployment: '保存部署设置失败。',
+    error_media_region_profiles_json:
+      '媒体区域 profiles 必须是有效的 JSON 数组。',
     error_apply_deployment: '应用部署设置失败。',
     error_runtime_health: '刷新运行状态失败。',
     error_runtime_repair: '修复运行服务失败。',

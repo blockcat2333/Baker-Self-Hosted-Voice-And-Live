@@ -27,7 +27,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.0.10`; desktop client `1.0.10a`
+- Release line: server `1.0.11`; desktop client `1.0.11a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -36,10 +36,10 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Versioning
 
-- Stable server releases use numeric tags such as `1.0.10`; server beta releases may use compact labels such as `1.0.11beta.1`. The matching Docker image is `blockcat233/baker:<version>`.
+- Stable server releases use numeric tags such as `1.0.11`; server beta releases may use compact labels such as `1.0.11beta.1`. The matching Docker image is `blockcat233/baker:<version>`.
 - Client release labels follow the server version plus a letter, starting at `a`: `1.0.9a`, `1.0.9b`, and so on.
 - Client-only updates advance the trailing letter. Server releases advance the numeric version and reset the client letter to `a`.
-- Package metadata stays semver-compatible for tooling. Stable server labels such as `1.0.10` are stored directly in `package.json`; beta labels such as `1.0.11beta.1` are stored as `1.0.11-beta.1`.
+- Package metadata stays semver-compatible for tooling. Stable server labels such as `1.0.11` are stored directly in `package.json`; beta labels such as `1.0.11beta.1` are stored as `1.0.11-beta.1`.
 - Before tagging a release, run `pnpm release:check` and follow the [Release Checklist](docs/release-checklist.md).
 
 ## Start Here If You Are New
@@ -65,7 +65,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 
 docker logs baker
 ```
@@ -77,7 +77,7 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-If you want to follow the newest rolling image instead of pinning this release, replace `1.0.10` with `latest`.
+If you want to follow the newest rolling image instead of pinning this release, replace `1.0.11` with `latest`.
 
 The public deployment guide assumes this all-in-one image. It contains PostgreSQL, Redis, API, Gateway, Media, Caddy, optional coturn, the runtime watchdog, and `supervisorctl` in one container. Admin runtime repair, self-repair, public IP automation restarts, and deployment-settings apply all depend on that supervisor environment. If you run split services manually, Baker can still serve traffic, but you must provide your own process supervision and restart Media/TURN after runtime config changes.
 
@@ -113,7 +113,7 @@ Baker tries several public IP endpoints by default, including endpoints that are
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:1.0.10`
+- Image: `blockcat233/baker:1.0.11`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -172,7 +172,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
@@ -205,10 +205,55 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.
+
+### Dual-Region Media Profiles
+
+Advanced deployments can expose the same Baker media service through more than one public network path. Set `MEDIA_REGION_PROFILES` to a JSON array. Gateway selects a profile from the WebSocket `Host`, `X-Forwarded-Host`, or `Origin` header, then Media uses that profile's ICE/TURN/SFU addresses for voice, music share, and livestream sessions.
+
+Example:
+
+```bash
+MEDIA_REGION_PROFILES='[
+  {
+    "id": "mainland",
+    "hosts": ["violet.evergarden.space"],
+    "sfuAnnouncedIp": "113.80.68.23",
+    "sfuRtcMinPort": 50000,
+    "sfuRtcMaxPort": 50100,
+    "turnUrls": [
+      "turn:violet.evergarden.space:3478?transport=udp",
+      "turn:violet.evergarden.space:3478?transport=tcp"
+    ]
+  },
+  {
+    "id": "hongkong",
+    "hosts": ["hkserver.evergarden.space"],
+    "sfuAnnouncedIp": "168.70.50.141",
+    "sfuRtcMinPort": 23335,
+    "sfuRtcMaxPort": 23400,
+    "turnUrls": [
+      "turn:hkserver.evergarden.space:23304?transport=udp",
+      "turn:hkserver.evergarden.space:23304?transport=tcp"
+    ]
+  }
+]'
+```
+
+Profile fields inherit the legacy global values when omitted: `STUN_URLS`, `TURN_URLS`, `TURN_USERNAME`, `TURN_PASSWORD`, `SFU_ANNOUNCED_IP`, `SFU_RTC_MIN_PORT`, `SFU_RTC_MAX_PORT`, and `SFU_ENABLE_TCP`.
+
+For SFU media, the announced address and candidate port must both be reachable by the browser. If you use frp or another TCP/UDP forwarder, map the remote RTC ports to the same local port numbers, or change Baker's profile port range to match the remote ports. A remote `23335 -> local 50000` mapping will not work for SFU candidates because the browser would still receive port `50000`.
+
+Operational notes:
+
+- Mainland users should open the mainland web host, for example `https://violet.evergarden.space/`.
+- Overseas users should open the overseas web host, for example `https://hkserver.evergarden.space:23303/` unless the relay server also exposes standard `443/tcp`.
+- `MEDIA_REGION_PROFILES` is stored in `runtime.env` after first boot and can be edited from **Deployment Settings -> Media Region Profiles JSON** in the admin panel.
+- Public IP Automation only manages the legacy global TURN/SFU values. Multi-region profile addresses are intentional static routes and must be updated explicitly when a relay IP or port range changes.
+- The web entry, TURN relay, and SFU RTC ports may use different published ports, but every SFU candidate port announced in a profile must be reachable at that same number from the user's browser.
 
 ## Deployment Notes
 
@@ -217,7 +262,7 @@ Then open the admin panel and switch **Server settings -> Media mode** from `p2p
 - For browser voice, microphone, camera, and screen sharing, serve Baker over HTTPS
 - TURN is optional for small/local setups but strongly recommended for public internet, mobile, VPN, or cross-region usage
 - When TURN is enabled for public deployment, you must expose the relay ports and provide either `TURN_EXTERNAL_IP` or explicit `TURN_URLS`
-- SFU mode requires `SFU_ANNOUNCED_IP` and the `50000-50100` TCP/UDP range to be reachable from browsers
+- SFU mode requires `SFU_ANNOUNCED_IP` or at least one `MEDIA_REGION_PROFILES` entry with `sfuAnnouncedIp`, plus the configured TCP/UDP RTC port range, to be reachable from browsers
 - If the server's public IP may change, enable public IP automation in the admin panel so media addresses are refreshed automatically
 - If the public IP check fails from your server network, set `BAKER_PUBLIC_IP_ENDPOINTS` to endpoints reachable from that region.
 - `docker-compose.yml` remains in the repo for local development infrastructure (`postgres`, `redis`, optional `turn`), not as a second public deployment product

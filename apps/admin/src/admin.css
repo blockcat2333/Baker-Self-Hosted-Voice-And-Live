@@ -30,7 +30,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -132,13 +133,27 @@ select {
 }
 
 .admin-field input,
-.admin-field select {
+.admin-field select,
+.admin-field textarea {
   background: rgba(2, 6, 23, 0.5);
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 10px;
   color: #f8fafc;
   min-height: 42px;
   padding: 0 12px;
+}
+
+.admin-field textarea {
+  line-height: 1.5;
+  min-height: 180px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.admin-json-field textarea {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  white-space: pre;
 }
 
 .admin-inline-grid {

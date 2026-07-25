@@ -577,6 +577,63 @@ describe('routeGatewayMessage', () => {
     expect(conn.voiceChannelId).toBe(channelId);
   });
 
+  it('passes the connection media region to media session creation', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000083';
+    const guildId = '00000000-0000-0000-0000-000000000084';
+    const userId = '00000000-0000-0000-0000-000000000085';
+    const createMediaSession = vi.fn().mockResolvedValue({
+      iceServers: [],
+      sessionId: '00000000-0000-0000-0000-000000000086',
+    });
+
+    const sharedConnections = new ConnectionManager();
+    const successRuntime = makeRuntime({
+      connections: sharedConnections,
+      createMediaSession,
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            id === channelId
+              ? { id: channelId, guildId, name: 'Regional Voice', type: 'voice', position: 0, topic: null, createdAt: new Date() }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && uId === userId
+              ? { guildId, userId: uId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+      presence: new PresenceManager(sharedConnections, null),
+      voiceRoom: new VoiceRoomManager(sharedConnections),
+    });
+
+    const conn = sharedConnections.attach(
+      { close() {}, send() {} },
+      { mediaRegionId: 'hongkong', requestHosts: ['hkserver.evergarden.space'] },
+    );
+    conn.userId = userId;
+
+    const reply = await routeGatewayMessage(
+      conn,
+      JSON.stringify({
+        command: 'voice.join',
+        data: { channelId },
+        op: 'command',
+        reqId: 'req-vj-region',
+        ts: ts(),
+        v: 1,
+      }),
+      successRuntime,
+    );
+
+    expect(reply.op).toBe('ack');
+    expect(createMediaSession).toHaveBeenCalledWith(expect.objectContaining({
+      mediaRegionId: 'hongkong',
+      mode: 'voice',
+    }));
+  });
+
   it('includes sfu session info in voice.join ack when media mode is sfu', async () => {
     const channelId = '00000000-0000-0000-0000-000000000180';
     const guildId = '00000000-0000-0000-0000-000000000181';

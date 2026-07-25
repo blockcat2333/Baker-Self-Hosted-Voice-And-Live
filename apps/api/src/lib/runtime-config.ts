@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 export interface DeploymentRuntimeSettings {
   adminHostPort: number;
   allowedHosts: string;
+  mediaRegionProfiles: string;
   sfuAnnouncedIp: string;
   sfuEnableTcp: boolean;
   sfuRtcMaxPort: number;
@@ -24,6 +25,7 @@ export interface DeploymentRuntimeSettings {
 export interface DeploymentRuntimeUpdate {
   adminHostPort?: number;
   allowedHosts?: string;
+  mediaRegionProfiles?: string;
   sfuAnnouncedIp?: string;
   sfuEnableTcp?: boolean;
   sfuRtcMaxPort?: number;
@@ -252,6 +254,7 @@ export function toDeploymentRuntimeSettings(
       'ALLOWED_HOSTS',
       sourceValue(env, 'VITE_ALLOWED_HOSTS', ''),
     ),
+    mediaRegionProfiles: sourceValue(env, 'MEDIA_REGION_PROFILES', ''),
     sfuAnnouncedIp: sourceValue(env, 'SFU_ANNOUNCED_IP', ''),
     sfuEnableTcp: readBoolean(env, 'SFU_ENABLE_TCP', true),
     sfuRtcMaxPort: readInt(env, 'SFU_RTC_MAX_PORT', 50100),
@@ -294,6 +297,7 @@ export async function updateDeploymentRuntimeSettings(
   setRuntimeValue(env, 'ADMIN_HTTP_PORT', input.adminHostPort);
   setRuntimeValue(env, 'ALLOWED_HOSTS', input.allowedHosts);
   setRuntimeValue(env, 'VITE_ALLOWED_HOSTS', input.allowedHosts);
+  setRuntimeValue(env, 'MEDIA_REGION_PROFILES', input.mediaRegionProfiles);
   setRuntimeValue(env, 'SFU_ANNOUNCED_IP', input.sfuAnnouncedIp);
   setRuntimeValue(env, 'SFU_ENABLE_TCP', input.sfuEnableTcp);
   setRuntimeValue(env, 'SFU_RTC_MAX_PORT', input.sfuRtcMaxPort);

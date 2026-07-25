@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 const socketPath = process.env.DOCKER_SOCKET_PATH ?? '/var/run/docker.sock';
@@ -27,6 +27,7 @@ const managedEnvKeys = new Set([
   'BAKER_UPDATE_STATUS_FILE',
   'BAKER_UPDATE_TARGET_IMAGE',
   'BAKER_UPDATE_TARGET_TAG',
+  'MEDIA_REGION_PROFILES',
   'SFU_ANNOUNCED_IP',
   'SFU_ENABLE_TCP',
   'SFU_RTC_MAX_PORT',
@@ -194,13 +195,52 @@ function addRange(bindings, exposed, min, max, protocol) {
   }
 }
 
+function parseMediaRegionProfiles(settings) {
+  const raw = String(settings.mediaRegionProfiles || '').trim();
+  if (!raw) {
+    return [];
+  }
+  const parsed = JSON.parse(raw);
+  if (!Array.isArray(parsed)) {
+    return [];
+  }
+  return parsed.filter((profile) => profile && typeof profile === 'object');
+}
+
+function sfuPortRanges(settings) {
+  const ranges = [];
+  if (settings.sfuAnnouncedIp) {
+    ranges.push({
+      max: settings.sfuRtcMaxPort,
+      min: settings.sfuRtcMinPort,
+    });
+  }
+  for (const profile of parseMediaRegionProfiles(settings)) {
+    if (!profile.sfuAnnouncedIp) {
+      continue;
+    }
+    ranges.push({
+      max: Number(profile.sfuRtcMaxPort ?? settings.sfuRtcMaxPort),
+      min: Number(profile.sfuRtcMinPort ?? settings.sfuRtcMinPort),
+    });
+  }
+  return ranges.filter((range) =>
+    Number.isInteger(range.min) &&
+    Number.isInteger(range.max) &&
+    range.min > 0 &&
+    range.max >= range.min
+  );
+}
+
 function removeManagedPorts(bindings, settings) {
   delete bindings[portKey(80, 'tcp')];
   delete bindings[portKey(8080, 'tcp')];
   delete bindings[portKey(settings.turnPort, 'tcp')];
   delete bindings[portKey(settings.turnPort, 'udp')];
   deleteRange(bindings, settings.turnMinPort, settings.turnMaxPort);
-  deleteRange(bindings, settings.sfuRtcMinPort, settings.sfuRtcMaxPort);
+  for (const range of sfuPortRanges(settings)) {
+    deleteRange(bindings, range.min, range.max);
+  }
 }
 
 function createPortBindings(currentBindings) {
@@ -243,19 +283,19 @@ function createPortBindings(currentBindings) {
     );
   }
 
-  if (desiredSettings.sfuAnnouncedIp) {
+  for (const range of sfuPortRanges(desiredSettings)) {
     addRange(
       bindings,
       exposed,
-      desiredSettings.sfuRtcMinPort,
-      desiredSettings.sfuRtcMaxPort,
+      range.min,
+      range.max,
       'tcp',
     );
     addRange(
       bindings,
       exposed,
-      desiredSettings.sfuRtcMinPort,
-      desiredSettings.sfuRtcMaxPort,
+      range.min,
+      range.max,
       'udp',
     );
   }

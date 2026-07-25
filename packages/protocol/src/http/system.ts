@@ -257,6 +257,7 @@ export const AdminDeploymentSettingsSchema = z.object({
   currentImage: z.string().nullable(),
   dockerEnabled: z.boolean(),
   dockerStatus: z.string().nullable(),
+  mediaRegionProfiles: z.string(),
   pendingApply: z.boolean(),
   sfuAnnouncedIp: z.string(),
   sfuEnableTcp: z.boolean(),
@@ -278,6 +279,7 @@ export const AdminDeploymentSettingsSchema = z.object({
 export const AdminUpdateDeploymentSettingsRequestSchema = z.object({
   adminHostPort: z.number().int().min(1).max(65535).optional(),
   allowedHosts: z.string().max(1000).optional(),
+  mediaRegionProfiles: z.string().max(20000).optional(),
   sfuAnnouncedIp: z.string().max(255).optional(),
   sfuEnableTcp: z.boolean().optional(),
   sfuRtcMaxPort: z.number().int().min(1).max(65535).optional(),

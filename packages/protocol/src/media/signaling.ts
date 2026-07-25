@@ -12,6 +12,7 @@ export const SessionModeSchema = z.enum(['music_listen', 'music_publish', 'strea
 
 export const MediaSessionDescriptorSchema = z.object({
   channelId: z.string().uuid(),
+  mediaRegionId: z.string().min(1).optional(),
   mode: SessionModeSchema,
   sessionId: z.string().uuid(),
   streamId: z.string().uuid().optional(),

@@ -39,7 +39,12 @@ import type {
   SfuProducer,
 } from '@baker/protocol';
 
-import { createLogger } from '@baker/shared';
+import {
+  createLogger,
+  normalizeMediaRegionHost,
+  resolveMediaRegionProfileForHosts,
+  type MediaRegionProfile,
+} from '@baker/shared';
 
 import type { DatabaseAccess } from '@baker/db';
 
@@ -66,6 +71,7 @@ export interface GatewayRuntimeOptions {
   fanoutEnabled: boolean;
   mediaBaseUrl: string;
   mediaInternalSecret: string;
+  mediaRegionProfiles?: MediaRegionProfile[];
   pubClient: RedisClient | null;
   subClient: RedisClient | null;
   tokenVerifier: TokenVerifier;
@@ -84,6 +90,7 @@ export class GatewayRuntime {
 
   private readonly mediaBaseUrl: string;
   private readonly mediaInternalSecret: string;
+  private readonly mediaRegionProfiles: MediaRegionProfile[];
   private readonly pubClient: RedisClient | null;
   private readonly subClient: RedisClient | null;
 
@@ -93,6 +100,7 @@ export class GatewayRuntime {
     this.fanoutEnabled = options.fanoutEnabled;
     this.mediaBaseUrl = options.mediaBaseUrl;
     this.mediaInternalSecret = options.mediaInternalSecret;
+    this.mediaRegionProfiles = options.mediaRegionProfiles ?? [];
     this.pubClient = options.pubClient;
     this.subClient = options.subClient;
     this.tokenVerifier = options.tokenVerifier;
@@ -108,6 +116,7 @@ export class GatewayRuntime {
    */
   async createMediaSession(descriptor: {
     channelId: string;
+    mediaRegionId?: string | null;
     mode: SessionMode;
     sessionId: string;
     streamId?: string;
@@ -120,7 +129,11 @@ export class GatewayRuntime {
 
     try {
       const response = await fetch(url, {
-        body: JSON.stringify({ ...descriptor, transportMode: this.mediaMode }),
+        body: JSON.stringify({
+          ...descriptor,
+          ...(descriptor.mediaRegionId ? { mediaRegionId: descriptor.mediaRegionId } : {}),
+          transportMode: this.mediaMode,
+        }),
         headers: {
           'Content-Type': 'application/json',
           'x-baker-internal-secret': this.mediaInternalSecret,
@@ -145,6 +158,14 @@ export class GatewayRuntime {
   async refreshMediaMode(): Promise<void> {
     const settings = await this.db.serverSettings.findById('default');
     this.mediaMode = settings?.mediaMode ?? 'p2p';
+  }
+
+  resolveMediaRegionIdForRequestHosts(hosts: string[]): string | null {
+    const profile = resolveMediaRegionProfileForHosts(
+      this.mediaRegionProfiles,
+      hosts.map(normalizeMediaRegionHost),
+    );
+    return profile?.id ?? null;
   }
 
   async createSfuTransport(data: MediaSfuCreateTransportCommandData): Promise<MediaSfuCreateTransportAckData> {

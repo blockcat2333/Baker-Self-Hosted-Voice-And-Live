@@ -56,6 +56,19 @@ function normalizeApiOrigin(apiBaseUrl?: string): string {
   }
 }
 
+function normalizeMediaRegionProfilesJson(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const parsed = JSON.parse(trimmed);
+  if (!Array.isArray(parsed)) {
+    throw new Error('Media region profiles must be a JSON array.');
+  }
+  return JSON.stringify(parsed, null, 2);
+}
+
 export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const { t } = useTranslation();
   const [password, setPassword] = useState('');
@@ -112,6 +125,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
   const [sfuEnableTcp, setSfuEnableTcp] = useState(true);
   const [sfuRtcMinPort, setSfuRtcMinPort] = useState('50000');
   const [sfuRtcMaxPort, setSfuRtcMaxPort] = useState('50100');
+  const [mediaRegionProfiles, setMediaRegionProfiles] = useState('');
   const [selfRepairEnabled, setSelfRepairEnabled] = useState(false);
   const [selfRepairIntervalSeconds, setSelfRepairIntervalSeconds] =
     useState('60');
@@ -167,6 +181,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setSfuEnableTcp(nextDeployment.sfuEnableTcp);
     setSfuRtcMinPort(String(nextDeployment.sfuRtcMinPort));
     setSfuRtcMaxPort(String(nextDeployment.sfuRtcMaxPort));
+    setMediaRegionProfiles(nextDeployment.mediaRegionProfiles);
   }
 
   function applySelfRepairSettingsToForm(
@@ -521,12 +536,20 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     setError(null);
 
     try {
+      let normalizedMediaRegionProfiles = '';
+      try {
+        normalizedMediaRegionProfiles =
+          normalizeMediaRegionProfilesJson(mediaRegionProfiles);
+      } catch {
+        throw new Error(t('admin.error_media_region_profiles_json'));
+      }
       const nextDeployment = await request(
         '/v1/admin/deployment/settings',
         {
           body: JSON.stringify({
             adminHostPort: Number(adminHostPort),
             allowedHosts,
+            mediaRegionProfiles: normalizedMediaRegionProfiles,
             sfuAnnouncedIp,
             sfuEnableTcp,
             sfuRtcMaxPort: Number(sfuRtcMaxPort),
@@ -1600,6 +1623,16 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
               />
             </label>
           </div>
+          <label className="admin-field admin-field--full admin-json-field">
+            <span>{t('admin.media_region_profiles')}</span>
+            <textarea
+              value={mediaRegionProfiles}
+              onChange={(event) => setMediaRegionProfiles(event.target.value)}
+              placeholder={t('admin.media_region_profiles_placeholder')}
+              spellCheck={false}
+            />
+          </label>
+          <p className="admin-copy">{t('admin.media_region_profiles_hint')}</p>
           <div className="admin-inline-actions">
             <button
               type="submit"

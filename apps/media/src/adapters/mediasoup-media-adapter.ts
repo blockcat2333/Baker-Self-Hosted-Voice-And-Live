@@ -1,6 +1,12 @@
 import { createWorker, type types } from 'mediasoup';
 
-import type { AppEnv } from '@baker/shared';
+import {
+  getDefaultMediaRegionProfile,
+  parseMediaRegionProfiles,
+  resolveMediaRegionProfileById,
+  type AppEnv,
+  type MediaRegionProfile,
+} from '@baker/shared';
 import type {
   MediaCapabilities,
   MediaSessionDescriptor,
@@ -86,8 +92,13 @@ export class MediasoupMediaAdapter implements MediaAdapter {
   private readonly routers = new Map<string, types.Router>();
   private readonly sessions = new Map<string, SfuSessionRecord>();
   private readonly producers = new Map<string, SfuProducerRecord>();
+  private readonly defaultMediaProfile: MediaRegionProfile;
+  private readonly mediaRegionProfiles: MediaRegionProfile[];
 
-  constructor(private readonly env: AppEnv) {}
+  constructor(private readonly env: AppEnv) {
+    this.defaultMediaProfile = getDefaultMediaRegionProfile(env);
+    this.mediaRegionProfiles = parseMediaRegionProfiles(env);
+  }
 
   async createSession(input: MediaSessionDescriptor): Promise<MediaSessionRecord> {
     if (!this.sessions.has(input.sessionId)) {
@@ -136,14 +147,15 @@ export class MediasoupMediaAdapter implements MediaAdapter {
   }
 
   async createSfuTransport(input: SfuSessionInput & { direction: 'recv' | 'send' }) {
-    this.assertSfuConfigured();
     const session = this.requireSession(input.sessionId);
+    const profile = this.resolveSessionProfile(session);
+    this.assertSfuConfigured(profile);
     const router = await this.getRouter(input.channelId);
     const transport = await router.createWebRtcTransport({
-      enableTcp: this.env.SFU_ENABLE_TCP,
+      enableTcp: profile.sfuEnableTcp,
       enableUdp: true,
       initialAvailableOutgoingBitrate: 1_000_000,
-      listenInfos: this.createListenInfos(),
+      listenInfos: this.createListenInfos(profile),
       preferUdp: true,
     });
 
@@ -329,18 +341,18 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     return {};
   }
 
-  private assertSfuConfigured() {
-    if (!this.isSfuConfigured()) {
+  private assertSfuConfigured(profile: MediaRegionProfile) {
+    if (!profile.sfuAnnouncedIp.trim()) {
       throw new Error('SFU_ANNOUNCED_IP is required before SFU transports can be created.');
     }
   }
 
-  private createListenInfos(): types.TransportListenInfo[] {
+  private createListenInfos(profile: MediaRegionProfile): types.TransportListenInfo[] {
     const portRange = {
-      max: this.env.SFU_RTC_MAX_PORT,
-      min: this.env.SFU_RTC_MIN_PORT,
+      max: profile.sfuRtcMaxPort,
+      min: profile.sfuRtcMinPort,
     };
-    const announcedAddress = this.env.SFU_ANNOUNCED_IP;
+    const announcedAddress = profile.sfuAnnouncedIp;
     const listenInfos: types.TransportListenInfo[] = [
       {
         announcedAddress,
@@ -350,7 +362,7 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       },
     ];
 
-    if (this.env.SFU_ENABLE_TCP) {
+    if (profile.sfuEnableTcp) {
       listenInfos.push({
         announcedAddress,
         ip: '0.0.0.0',
@@ -379,10 +391,11 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       return this.worker;
     }
     if (!this.workerPromise) {
+      const portRange = this.getWorkerPortRange();
       this.workerPromise = createWorker({
         logLevel: 'warn',
-        rtcMaxPort: this.env.SFU_RTC_MAX_PORT,
-        rtcMinPort: this.env.SFU_RTC_MIN_PORT,
+        rtcMaxPort: portRange.max,
+        rtcMinPort: portRange.min,
       }).then((worker) => {
         this.worker = worker;
         worker.on('died', () => {
@@ -399,7 +412,30 @@ export class MediasoupMediaAdapter implements MediaAdapter {
   }
 
   private isSfuConfigured() {
-    return this.env.SFU_ANNOUNCED_IP.trim().length > 0;
+    return [this.defaultMediaProfile, ...this.mediaRegionProfiles]
+      .some((profile) => profile.sfuAnnouncedIp.trim().length > 0);
+  }
+
+  private resolveSessionProfile(session: SfuSessionRecord): MediaRegionProfile {
+    if (!session.descriptor.mediaRegionId) {
+      return this.defaultMediaProfile;
+    }
+    const profile = resolveMediaRegionProfileById(
+      this.mediaRegionProfiles,
+      session.descriptor.mediaRegionId,
+    );
+    if (!profile) {
+      throw new Error(`Unknown media region profile: ${session.descriptor.mediaRegionId}`);
+    }
+    return profile;
+  }
+
+  private getWorkerPortRange() {
+    const profiles = [this.defaultMediaProfile, ...this.mediaRegionProfiles];
+    return {
+      max: Math.max(...profiles.map((profile) => profile.sfuRtcMaxPort)),
+      min: Math.min(...profiles.map((profile) => profile.sfuRtcMinPort)),
+    };
   }
 
   private listProducers(input: Pick<MediaSessionDescriptor, 'channelId' | 'mode' | 'streamId' | 'userId'>): SfuProducer[] {

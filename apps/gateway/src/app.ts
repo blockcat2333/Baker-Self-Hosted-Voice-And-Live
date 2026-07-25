@@ -6,7 +6,13 @@ import Fastify, { type FastifyInstance, type RawServerDefault } from 'fastify';
 import type { RawData } from 'ws';
 
 import { createDatabaseAccess } from '@baker/db';
-import { createLogger, parseAppEnv, type Logger } from '@baker/shared';
+import {
+  createLogger,
+  normalizeMediaRegionHost,
+  parseAppEnv,
+  parseMediaRegionProfiles,
+  type Logger,
+} from '@baker/shared';
 
 import { GatewayRuntime } from './app-runtime';
 import { createRedisClient, tryConnectRedis } from './lib/redis';
@@ -23,8 +29,29 @@ type GatewayApp = FastifyInstance<
   Logger
 >;
 
+function headerValues(value: string | string[] | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap((item) => item.split(',')).map((item) => item.trim()).filter(Boolean);
+}
+
+function extractMediaRequestHosts(headers: IncomingMessage['headers']): string[] {
+  const hosts = [
+    ...headerValues(headers['x-forwarded-host']),
+    ...headerValues(headers.host),
+    ...headerValues(headers.origin),
+  ]
+    .map(normalizeMediaRegionHost)
+    .filter(Boolean);
+
+  return [...new Set(hosts)];
+}
+
 export async function buildGatewayApp(): Promise<GatewayApp> {
   const env = parseAppEnv();
+  const mediaRegionProfiles = parseMediaRegionProfiles(env);
 
   const tokenVerifier = createTokenVerifier(env);
 
@@ -45,6 +72,7 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
     fanoutEnabled,
     mediaBaseUrl: env.MEDIA_INTERNAL_URL,
     mediaInternalSecret: env.MEDIA_INTERNAL_SECRET,
+    mediaRegionProfiles,
     pubClient: fanoutEnabled ? pubClient : null,
     subClient: fanoutEnabled ? subClient : null,
     tokenVerifier,
@@ -66,8 +94,12 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
   void app.register(async function registerWs(fastify) {
     await fastify.register(websocket);
 
-    fastify.get('/ws', { websocket: true }, (socket, _request) => {
-      const connection = runtime.connections.attach(socket);
+    fastify.get('/ws', { websocket: true }, (socket, request) => {
+      const requestHosts = extractMediaRequestHosts(request.headers);
+      const connection = runtime.connections.attach(socket, {
+        mediaRegionId: runtime.resolveMediaRegionIdForRequestHosts(requestHosts),
+        requestHosts,
+      });
 
       // Heartbeat + per-connection gateway link-quality sampling.
       // Every 5s we send a ping, convert missed pongs into packet-loss samples,

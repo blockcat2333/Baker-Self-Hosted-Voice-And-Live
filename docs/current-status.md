@@ -48,6 +48,17 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-25 Baker 1.0.11 Stable Release And Desktop 1.0.11a
+
+- bumped the stable server release line to public label `1.0.11`
+- reset the desktop/client release label to `1.0.11a`, with Electron package metadata stored as `1.0.11-a`
+- added true dual-region media routing through `MEDIA_REGION_PROFILES`
+- Gateway now selects media profiles from WebSocket request hosts and carries `mediaRegionId` into voice, music share, and livestream sessions
+- Media now returns region-specific TURN/SFU candidates and creates SFU transports with the selected region's announced address and RTC port range
+- admin deployment settings can edit media region profile JSON and validate bad configurations before saving
+- all-in-one update helper now preserves media region profiles and publishes profile-specific SFU RTC port ranges
+- updated English, Chinese, beginner deployment, and media-boundary docs for dual-region media, frp same-port forwarding, and Public IP Automation boundaries
+
 ### 2026-07-04 Baker 1.0.10 Stable Release And Desktop 1.0.10a
 
 - promoted the 1.0.10 server line from beta to stable public label `1.0.10`

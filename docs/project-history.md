@@ -1,5 +1,34 @@
 # Project History
 
+## 2026-07-25
+
+### Baker 1.0.11 dual-region media release and desktop 1.0.11a
+
+What changed:
+
+- bumped the public server label to stable `1.0.11`
+- reset the desktop/client label to `1.0.11a`, with Electron metadata stored as semver `1.0.11-a`
+- added host-selected media profiles through `MEDIA_REGION_PROFILES`
+- connected Gateway request-host selection to Media session creation for voice, music share, livestream publish, and livestream watch flows
+- taught Media to return region-specific STUN/TURN data and create mediasoup transports with the selected profile's SFU announced address and RTC port range
+- added admin deployment UI for editing media region profile JSON
+- made all-in-one container rebuilds publish profile-specific SFU RTC port ranges
+- documented mainland/overseas split routing, frp same-port forwarding, and Public IP Automation boundaries
+
+Why:
+
+- deployments with both mainland and overseas users need the web entry and media candidates to stay aligned per region
+- frp and relay deployments fail subtly when SFU candidate ports are translated to different public port numbers
+- operators need to manage multi-region media from the admin panel instead of editing runtime files by hand
+
+Validation:
+
+- release consistency check
+- Admin/API/Gateway/Media/Protocol/Shared typechecks
+- targeted Admin/API/Gateway/Media/Shared/update-helper tests
+- lint on changed TypeScript files
+- update-helper syntax and diff whitespace checks
+
 ## 2026-07-04
 
 ### Baker 1.0.10 stable release and desktop 1.0.10a

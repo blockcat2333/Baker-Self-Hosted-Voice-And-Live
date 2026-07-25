@@ -16,6 +16,7 @@ scripts/screenshots
 .claude/worktrees
 .claude/settings.local.json
 .npm-cache
+.pnpm-store
 .playwright
 dev-test.bat
 dev-test.local.env

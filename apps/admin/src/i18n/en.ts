@@ -77,6 +77,11 @@ export const en = {
     sfu_enable_tcp: 'Enable SFU TCP',
     sfu_rtc_min_port: 'SFU RTC Min Port',
     sfu_rtc_max_port: 'SFU RTC Max Port',
+    media_region_profiles: 'Media Region Profiles JSON',
+    media_region_profiles_placeholder:
+      '[{"id":"mainland","hosts":["violet.example.com"],"sfuAnnouncedIp":"203.0.113.10","sfuRtcMinPort":50000,"sfuRtcMaxPort":50100},{"id":"hongkong","hosts":["hk.example.com"],"sfuAnnouncedIp":"198.51.100.20","sfuRtcMinPort":23335,"sfuRtcMaxPort":23400}]',
+    media_region_profiles_hint:
+      'Optional. Gateway matches the WebSocket host to a profile, then Media returns that region’s TURN/SFU candidates. Leave blank for single-region deployments.',
     save_deployment_settings: 'Save Deployment Settings',
     apply_deployment_settings: 'Apply And Restart Container',
     confirm_start_update:
@@ -152,6 +157,8 @@ export const en = {
     error_select_version: 'Select a target version first.',
     error_start_update: 'Failed to start update.',
     error_save_deployment: 'Failed to save deployment settings.',
+    error_media_region_profiles_json:
+      'Media region profiles must be a valid JSON array.',
     error_apply_deployment: 'Failed to apply deployment settings.',
     error_runtime_health: 'Failed to refresh runtime status.',
     error_runtime_repair: 'Failed to repair runtime services.',

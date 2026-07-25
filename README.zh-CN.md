@@ -25,7 +25,7 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 当前状态
 
-- 当前发布线：服务端 `1.0.10`；桌面客户端 `1.0.10a`
+- 当前发布线：服务端 `1.0.11`；桌面客户端 `1.0.11a`
 - 当前已经完成并验证到 Milestone 5 的稳定性与部署加固阶段
 - 单仓库包含 Web、桌面壳层、管理后台、API、Gateway 和 Media 边界服务
 - 已实现认证、聊天、在线状态、语音、直播信令、弹窗观看和服务端设置
@@ -34,10 +34,10 @@ Baker 是一个面向私有部署场景、体验方向接近 Discord 的实时�
 
 ## 版本规则
 
-- 稳定服务端发布使用纯数字版本号，例如 `1.0.10`；服务端 beta 发布可以使用 `1.0.11beta.1` 这样的紧凑标签。对应 Docker 镜像为 `blockcat233/baker:<版本号>`。
+- 稳定服务端发布使用纯数字版本号，例如 `1.0.11`；服务端 beta 发布可以使用 `1.0.11beta.1` 这样的紧凑标签。对应 Docker 镜像为 `blockcat233/baker:<版本号>`。
 - 客户端发布标签使用服务端版本号加一个字母，从 `a` 开始，例如 `1.0.9a`、`1.0.9b`。
 - 只更新客户端时递增末尾字母；服务端大版本更新时递增数字版本，并把客户端字母重置为 `a`。
-- 仓库包元数据仍保持 semver 兼容。稳定服务端标签例如 `1.0.10` 会直接保存在 `package.json` 里；beta 标签例如 `1.0.11beta.1` 会保存为 `1.0.11-beta.1`。
+- 仓库包元数据仍保持 semver 兼容。稳定服务端标签例如 `1.0.11` 会直接保存在 `package.json` 里；beta 标签例如 `1.0.11beta.1` 会保存为 `1.0.11-beta.1`。
 - 打发布标签前，请先运行 `pnpm release:check`，并按 [Release Checklist](docs/release-checklist.md) 核对。
 
 ## 如果你是新手，请先看这里
@@ -63,7 +63,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 
 docker logs baker
 ```
@@ -75,7 +75,7 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
-如果你想始终跟随最新滚动版本，也可以把 `1.0.10` 换成 `latest`。
+如果你想始终跟随最新滚动版本，也可以把 `1.0.11` 换成 `latest`。
 
 公开部署教程默认使用这个 all-in-one 镜像。它在同一个容器里包含 PostgreSQL、Redis、API、Gateway、Media、Caddy、可选 coturn、运行时 watchdog 和 `supervisorctl`。管理后台里的服务修复、自我修复、公网 IP 自动化重启，以及部署设置应用，都依赖这个 Supervisor 环境。如果你手动拆分运行多个服务，Baker 仍然可以提供流量，但你需要自己提供进程守护，并在运行时配置变化后自行重启 Media/TURN。
 
@@ -111,7 +111,7 @@ Baker 默认会尝试多个公网 IP 检测源，其中包含一些在中国大�
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
 
-- 镜像：`blockcat233/baker:1.0.10`
+- 镜像：`blockcat233/baker:1.0.11`
 - 容器名：`baker` 或 `baker-test`
 - 端口：
   - 宿主机 `3000` -> 容器 `80/tcp`
@@ -172,7 +172,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 如果没有显式设置 `TURN_URLS`，Baker 会根据 `TURN_EXTERNAL_IP` 和 `TURN_PORT` 自动生成；如果你希望客户端拿到固定域名形式的 TURN 地址，也可以自己显式设置 `TURN_URLS`。
@@ -205,10 +205,54 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.0.10
+  blockcat233/baker:1.0.11
 ```
 
 然后进入管理后台，在“服务器设置 -> 媒体模式”里从 `p2p` 切换到 `sfu`。切换会立即重建当前语音和直播媒体会话，但不会断开文字聊天 WebSocket。如果 SFU 公网 IP 或端口范围没有配置好，管理 API 会明确拒绝切换，而不是静默退回 P2P。
+
+## 高级：双区域媒体 Profiles
+
+如果同一个 Baker 服务要同时给大陆和海外用户使用，可以通过多个公网入口暴露同一个 Media 服务。配置 `MEDIA_REGION_PROFILES` 后，Gateway 会根据 WebSocket 请求里的 `Host`、`X-Forwarded-Host` 或 `Origin` 选择 profile，然后 Media 会按该 profile 返回对应区域的 ICE/TURN/SFU 地址。语音、音乐分享、直播推流和直播观看都会使用这个区域选择。
+
+示例：
+
+```bash
+MEDIA_REGION_PROFILES='[
+  {
+    "id": "mainland",
+    "hosts": ["violet.evergarden.space"],
+    "sfuAnnouncedIp": "113.80.68.23",
+    "sfuRtcMinPort": 50000,
+    "sfuRtcMaxPort": 50100,
+    "turnUrls": [
+      "turn:violet.evergarden.space:3478?transport=udp",
+      "turn:violet.evergarden.space:3478?transport=tcp"
+    ]
+  },
+  {
+    "id": "hongkong",
+    "hosts": ["hkserver.evergarden.space"],
+    "sfuAnnouncedIp": "168.70.50.141",
+    "sfuRtcMinPort": 23335,
+    "sfuRtcMaxPort": 23400,
+    "turnUrls": [
+      "turn:hkserver.evergarden.space:23304?transport=udp",
+      "turn:hkserver.evergarden.space:23304?transport=tcp"
+    ]
+  }
+]'
+```
+
+未写在 profile 里的字段会继承全局配置：`STUN_URLS`、`TURN_URLS`、`TURN_USERNAME`、`TURN_PASSWORD`、`SFU_ANNOUNCED_IP`、`SFU_RTC_MIN_PORT`、`SFU_RTC_MAX_PORT` 和 `SFU_ENABLE_TCP`。
+
+使用 frp、端口转发或其他中继时，SFU 的远端端口必须和 Baker profile 里声明的端口一致。例如 profile 写的是 `23335-23400`，浏览器就会连接 `hkserver:23335-23400`；frp 应该做 `23335 -> 192.168.x.x:23335` 这种同端口转发。`23335 -> 50000` 这类不等端口映射会导致浏览器拿到错误 candidate，SFU 媒体无法建立。
+
+运维注意事项：
+
+- 大陆用户访问大陆入口，例如 `https://violet.evergarden.space/`。
+- 海外用户访问海外入口，例如 `https://hkserver.evergarden.space:23303/`；如果香港服务器能提供标准 `443/tcp`，则可以直接使用 `https://hkserver.evergarden.space/`。
+- 首次启动后，`MEDIA_REGION_PROFILES` 会写入 `runtime.env`，也可以在管理后台“部署设置 -> 媒体区域 Profiles JSON”里编辑。
+- 公网 IP 自动化只维护全局 TURN/SFU 地址；多区域 profile 是明确的静态路由，香港 relay IP 或端口变化时需要手动更新 profile。
 
 ## 部署说明
 
@@ -217,7 +261,7 @@ docker run -d \
 - 浏览器里的语音、麦克风、摄像头和屏幕共享需要 HTTPS 才能正常工作
 - 对于公网、移动网络、VPN 或跨地区使用场景，建议额外启用 TURN
 - 一旦在公网部署里启用 TURN，就必须暴露中继端口，并提供 `TURN_EXTERNAL_IP` 或显式 `TURN_URLS`
-- SFU 模式需要设置 `SFU_ANNOUNCED_IP`，并让浏览器可以访问 `50000-50100` 的 TCP/UDP 端口范围
+- SFU 模式需要设置全局 `SFU_ANNOUNCED_IP`，或至少配置一个带 `sfuAnnouncedIp` 的 `MEDIA_REGION_PROFILES` 项，并让浏览器可以访问对应 TCP/UDP RTC 端口范围
 - 如果服务器公网 IP 可能变化，请在管理后台启用公网 IP 自动化，让媒体地址自动刷新
 - 如果公网 IP 检测接口在你的服务端网络里访问失败，请用 `BAKER_PUBLIC_IP_ENDPOINTS` 指定该地区能访问的查 IP 接口。
 - 仓库里的 `docker-compose.yml` 现在只保留给本地开发基础设施使用（`postgres`、`redis`、可选 `turn`），不再作为第二套公开部署产品

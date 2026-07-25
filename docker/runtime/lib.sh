@@ -28,6 +28,7 @@ load_runtime_env() {
 }
 
 clear_runtime_managed_media_env() {
+  unset MEDIA_REGION_PROFILES
   unset TURN_URLS
   unset TURN_EXTERNAL_IP
   unset SFU_ANNOUNCED_IP

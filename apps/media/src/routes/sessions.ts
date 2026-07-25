@@ -1,7 +1,14 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { MediaSessionDescriptorSchema, MediaSessionResponseSchema } from '@baker/protocol';
-import { createLogger, getIceConfig, parseAppEnv } from '@baker/shared';
+import {
+  createLogger,
+  getDefaultMediaRegionProfile,
+  parseAppEnv,
+  parseMediaRegionProfiles,
+  resolveMediaRegionProfileById,
+  type MediaRegionProfile,
+} from '@baker/shared';
 
 import type { MediaAdapter } from '../adapters/media-adapter';
 import { isInternalMediaRequestAuthorized, rejectUnauthorizedInternalMediaRequest } from '../lib/internal-auth';
@@ -13,44 +20,59 @@ interface SessionRouteRegistrar {
 export function registerSessionsRoute(app: SessionRouteRegistrar, adapter: MediaAdapter) {
   const log = createLogger('media:sessions');
   const env = parseAppEnv();
-  const iceConfig = getIceConfig(env);
+  const defaultProfile = getDefaultMediaRegionProfile(env);
+  const mediaRegionProfiles = parseMediaRegionProfiles(env);
   log.info(
     {
-      stunUrls: iceConfig.stunUrls,
-      turnConfigured: iceConfig.turnUrls.length > 0,
-      turnUrls: iceConfig.turnUrls.length > 0 ? iceConfig.turnUrls : undefined,
-      turnUsernameConfigured: Boolean(iceConfig.turnUsername),
-      turnPasswordConfigured: Boolean(iceConfig.turnPassword),
+      defaultStunUrls: defaultProfile.stunUrls,
+      mediaRegionProfiles: mediaRegionProfiles.map((profile) => ({
+        hosts: profile.hosts,
+        id: profile.id,
+        sfuAnnouncedIpConfigured: profile.sfuAnnouncedIp.length > 0,
+        turnConfigured: profile.turnUrls.length > 0,
+      })),
+      turnConfigured: defaultProfile.turnUrls.length > 0,
+      turnUrls: defaultProfile.turnUrls.length > 0 ? defaultProfile.turnUrls : undefined,
+      turnUsernameConfigured: Boolean(defaultProfile.turnUsername),
+      turnPasswordConfigured: Boolean(defaultProfile.turnPassword),
     },
     'ICE server config loaded',
   );
+
+  function resolveProfile(mediaRegionId: string | undefined): MediaRegionProfile | null {
+    if (!mediaRegionId) {
+      return defaultProfile;
+    }
+    return resolveMediaRegionProfileById(mediaRegionProfiles, mediaRegionId);
+  }
 
   /**
    * Build RTCIceServer[] from env config.
    * STUN and TURN are derived from shared env; TURN is omitted when unconfigured.
    */
-  function buildIceServers() {
+  function buildIceServers(profile: MediaRegionProfile) {
     const servers: { credential?: string; urls: string | string[]; username?: string }[] = [];
 
-    if (iceConfig.stunUrls.length > 0) {
-      servers.push({ urls: iceConfig.stunUrls });
+    if (profile.stunUrls.length > 0) {
+      servers.push({ urls: profile.stunUrls });
     }
 
-    if (iceConfig.turnUrls.length > 0) {
-      if (!iceConfig.turnUsername || !iceConfig.turnPassword) {
+    if (profile.turnUrls.length > 0) {
+      if (!profile.turnUsername || !profile.turnPassword) {
         log.warn(
           {
-            turnUrls: iceConfig.turnUrls,
-            turnUsernameConfigured: Boolean(iceConfig.turnUsername),
-            turnPasswordConfigured: Boolean(iceConfig.turnPassword),
+            mediaRegionId: profile.id,
+            turnUrls: profile.turnUrls,
+            turnUsernameConfigured: Boolean(profile.turnUsername),
+            turnPasswordConfigured: Boolean(profile.turnPassword),
           },
           'TURN_URLS is set but TURN_USERNAME/TURN_PASSWORD is missing; TURN may fail',
         );
       }
       servers.push({
-        credential: iceConfig.turnPassword || undefined,
-        urls: iceConfig.turnUrls,
-        username: iceConfig.turnUsername || undefined,
+        credential: profile.turnPassword || undefined,
+        urls: profile.turnUrls,
+        username: profile.turnUsername || undefined,
       });
     }
 
@@ -71,6 +93,13 @@ export function registerSessionsRoute(app: SessionRouteRegistrar, adapter: Media
     }
 
     const descriptor = bodyParsed.data;
+    const profile = resolveProfile(descriptor.mediaRegionId);
+    if (!profile) {
+      return reply.status(400).send({
+        code: 'VALIDATION_ERROR',
+        message: 'Unknown media region profile.',
+      });
+    }
     await adapter.createSession(descriptor);
 
     let sfu: Awaited<ReturnType<MediaAdapter['getSfuSessionInfo']>> | undefined;
@@ -89,7 +118,7 @@ export function registerSessionsRoute(app: SessionRouteRegistrar, adapter: Media
 
     return reply.send(
       MediaSessionResponseSchema.parse({
-        iceServers: buildIceServers(),
+        iceServers: buildIceServers(profile),
         sessionId: descriptor.sessionId,
         ...(sfu ? { sfu } : {}),
       }),

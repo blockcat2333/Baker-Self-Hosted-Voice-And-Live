@@ -539,6 +539,38 @@ describe('api app', () => {
     }
   });
 
+  it('rejects invalid media region deployment profiles', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-deployment-region-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    try {
+      const response = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'PATCH',
+        payload: {
+          mediaRegionProfiles: JSON.stringify([
+            {
+              id: 'hongkong',
+              sfuRtcMaxPort: 23335,
+              sfuRtcMinPort: 23400,
+            },
+          ]),
+        },
+        url: '/v1/admin/deployment/settings',
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().message).toContain('MEDIA_REGION_PROFILES');
+    } finally {
+      await app.close();
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
   it('serves and validates admin update proxy settings', async () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-update-proxy-'));
     vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);

@@ -29,7 +29,11 @@ import {
   PublicServerConfigSchema,
 } from '@baker/protocol';
 import type { DatabaseAccess } from '@baker/db';
-import { BAKER_VERSION, parseAppEnv } from '@baker/shared';
+import {
+  BAKER_VERSION,
+  parseAppEnv,
+  parseMediaRegionProfiles,
+} from '@baker/shared';
 
 import { ApiError } from '../lib/api-error';
 import {
@@ -254,6 +258,29 @@ function assertValidDeploymentSettings(settings: DeploymentRuntimeSettings) {
       400,
       'VALIDATION_ERROR',
       'SFU RTC minimum port must be less than or equal to the maximum port.',
+    );
+  }
+  try {
+    parseMediaRegionProfiles(
+      parseAppEnv({
+        MEDIA_REGION_PROFILES: settings.mediaRegionProfiles,
+        NODE_ENV: 'development',
+        SFU_ANNOUNCED_IP: settings.sfuAnnouncedIp,
+        SFU_ENABLE_TCP: String(settings.sfuEnableTcp),
+        SFU_RTC_MAX_PORT: String(settings.sfuRtcMaxPort),
+        SFU_RTC_MIN_PORT: String(settings.sfuRtcMinPort),
+        STUN_URLS: settings.stunUrls,
+        TURN_PASSWORD: settings.turnPasswordConfigured ? 'configured' : '',
+        TURN_URLS: settings.turnUrls,
+        TURN_USERNAME: settings.turnUsername,
+      }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      `MEDIA_REGION_PROFILES is invalid: ${message}`,
     );
   }
   if (settings.turnEnabled && !settings.turnUrls && !settings.turnExternalIp) {

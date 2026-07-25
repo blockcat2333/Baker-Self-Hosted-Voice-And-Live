@@ -85,6 +85,10 @@ function getVoiceConnectionIds(runtime: GatewayRuntime, channelId: string): stri
     .map((participant) => participant.connectionId);
 }
 
+function mediaRegionIdForConnection(connection: GatewayConnection): string | undefined {
+  return connection.mediaRegionId ?? undefined;
+}
+
 function resolveTargetPublication(
   runtime: GatewayRuntime,
   channelId: string,
@@ -447,6 +451,7 @@ async function handleVoiceJoin(
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
+      mediaRegionId: mediaRegionIdForConnection(connection),
       mode: 'voice',
       sessionId: randomUUID(),
       userId,
@@ -758,6 +763,7 @@ async function handleMusicStart(
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
+      mediaRegionId: mediaRegionIdForConnection(connection),
       mode: 'music_publish',
       sessionId: randomUUID(),
       streamId: musicId,
@@ -932,6 +938,7 @@ async function handleMusicListen(
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
+      mediaRegionId: mediaRegionIdForConnection(connection),
       mode: 'music_listen',
       sessionId: randomUUID(),
       streamId: musicId,
@@ -1064,6 +1071,7 @@ async function handleStreamStart(
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
+      mediaRegionId: mediaRegionIdForConnection(connection),
       mode: 'stream_publish',
       sessionId: randomUUID(),
       streamId,
@@ -1300,6 +1308,7 @@ async function handleStreamWatch(
   try {
     mediaSession = await runtime.createMediaSession({
       channelId,
+      mediaRegionId: mediaRegionIdForConnection(connection),
       mode: 'stream_watch',
       sessionId: randomUUID(),
       streamId: publication.streamId,

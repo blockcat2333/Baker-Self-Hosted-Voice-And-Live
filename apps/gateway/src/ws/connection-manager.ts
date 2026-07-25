@@ -9,6 +9,10 @@ export interface GatewayConnection {
   /** guild IDs the authenticated user could access when this connection authenticated */
   guildIds: Set<string>;
   id: string;
+  /** Media region selected from the WebSocket request host, or null for legacy default media config. */
+  mediaRegionId: string | null;
+  /** Normalized request hosts observed during the WebSocket handshake. */
+  requestHosts: string[];
   /** null until system.authenticate succeeds */
   userId: string | null;
   /** null until system.authenticate succeeds */
@@ -54,7 +58,7 @@ export class ConnectionManager {
    */
   private readonly userToConnectionId = new Map<string, string>();
 
-  attach(socket: SocketLike): GatewayConnection {
+  attach(socket: SocketLike, options: { mediaRegionId?: string | null; requestHosts?: string[] } = {}): GatewayConnection {
     const state = {
       id: `conn-${Date.now()}-${this.connections.size + 1}`,
       seq: 0,
@@ -64,6 +68,8 @@ export class ConnectionManager {
     const connection: GatewayConnection = {
       guildIds: new Set(),
       id: state.id,
+      mediaRegionId: options.mediaRegionId ?? null,
+      requestHosts: options.requestHosts ?? [],
       userId: null,
       sessionId: null,
       username: null,

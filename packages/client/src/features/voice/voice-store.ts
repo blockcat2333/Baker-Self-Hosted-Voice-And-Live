@@ -1226,6 +1226,11 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         await setupSfuVoiceSession(ackData, sendCommandAwaitAck);
       } catch (err) {
         teardown();
+        try {
+          await sendCommandAwaitAck('voice.leave', { channelId });
+        } catch {
+          // Best-effort: disconnect cleanup remains the final fallback.
+        }
         set({
           status: 'error',
           error: err instanceof Error ? err.message : 'Failed to join SFU voice channel.',

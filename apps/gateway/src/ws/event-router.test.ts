@@ -742,6 +742,66 @@ describe('routeGatewayMessage', () => {
     if (second.op === 'error') expect(second.code).toBe('VOICE_ALREADY_JOINED');
   });
 
+  it('moves a user out of a stale voice room before joining another channel', async () => {
+    const channelIdA = '00000000-0000-0000-0000-000000000093';
+    const channelIdB = '00000000-0000-0000-0000-000000000094';
+    const guildId = '00000000-0000-0000-0000-000000000095';
+    const userId = '00000000-0000-0000-0000-000000000096';
+    const sharedConnections = new ConnectionManager();
+    const voiceRoom = new VoiceRoomManager(sharedConnections);
+    const moveRuntime = makeRuntime({
+      connections: sharedConnections,
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            [channelIdA, channelIdB].includes(id)
+              ? {
+                  id,
+                  guildId,
+                  name: id === channelIdA ? 'Voice A' : 'Voice B',
+                  type: 'voice',
+                  position: 0,
+                  topic: null,
+                  createdAt: new Date(),
+                }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && uId === userId
+              ? { guildId, userId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+      presence: new PresenceManager(sharedConnections, null),
+      voiceRoom,
+    });
+    const conn = sharedConnections.attach({ close() {}, send() {} });
+    conn.userId = userId;
+
+    const join = (channelId: string, reqId: string) =>
+      routeGatewayMessage(
+        conn,
+        JSON.stringify({
+          command: 'voice.join',
+          data: { channelId },
+          op: 'command',
+          reqId,
+          ts: ts(),
+          v: 1,
+        }),
+        moveRuntime,
+      );
+
+    expect((await join(channelIdA, 'req-vj-move-a')).op).toBe('ack');
+    expect((await join(channelIdB, 'req-vj-move-b')).op).toBe('ack');
+    expect(voiceRoom.getParticipants(channelIdA)).toEqual([]);
+    expect(voiceRoom.getParticipants(channelIdB)).toEqual([
+      expect.objectContaining({ userId }),
+    ]);
+    expect(conn.voiceChannelId).toBe(channelIdB);
+  });
+
   it('sends the current stream snapshot to a participant who joins voice after a stream is already live', async () => {
     const channelId = '00000000-0000-0000-0000-000000000094';
     const guildId = '00000000-0000-0000-0000-000000000095';

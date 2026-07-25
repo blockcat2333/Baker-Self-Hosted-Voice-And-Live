@@ -48,6 +48,16 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-26 Baker 1.1.1 SFU Capacity And Voice-State Recovery
+
+- advanced the stable server release line to `1.1.1` and reset the desktop/client label to `1.1.1a`
+- changed mediasoup SFU transport allocation from one socket per transport to one shared `WebRtcServer` per media region
+- removed the effective six-transport ceiling from deployments using the compact `23335-23340` RTC range
+- made SFU join failures best-effort `voice.leave` the gateway room before exposing the client error state
+- made Gateway enforce one voice channel per user and clean stale voice, stream, music, and SFU state before a channel move
+- hardened the container health check so a fatal PostgreSQL, Redis, Media, API, Gateway, Caddy, or runtime-watchdog Supervisor process makes Docker unhealthy and allows autoheal to restart the all-in-one container
+- added regression coverage for shared regional SFU listeners, failed-join rollback, and stale cross-channel membership cleanup
+
 ### 2026-07-25 Baker 1.1.0 Discord-Inspired UI Release And Desktop 1.1.0a
 
 - advanced the stable server release line to `1.1.0` and reset the desktop/client label to `1.1.0a`

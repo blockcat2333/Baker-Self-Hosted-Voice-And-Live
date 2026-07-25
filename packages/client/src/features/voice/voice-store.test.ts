@@ -425,6 +425,38 @@ describe('voice channel switch', () => {
   const channelIdB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
   const peerId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 
+  it('leaves the gateway voice room when SFU setup fails after join', async () => {
+    const sendRawCommand = vi.fn();
+    const sendCommandAwaitAck = vi.fn(async (command: string) => {
+      if (command === 'voice.join') {
+        return {
+          channelId,
+          iceServers: [],
+          mediaMode: 'sfu',
+          participants: [{ isMuted: false, sessionId, userId }],
+          sessionId,
+          sfu: {
+            producers: [],
+            routerRtpCapabilities: {},
+          },
+        };
+      }
+      return {};
+    });
+    sfuLoad.mockRejectedValueOnce(new Error('Failed to create SFU transport.'));
+
+    await useVoiceStore
+      .getState()
+      .joinVoiceChannel(channelId, sendCommandAwaitAck, sendRawCommand);
+
+    expect(useVoiceStore.getState().status).toBe('error');
+    expect(useVoiceStore.getState().channelId).toBeNull();
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('voice.leave', {
+      channelId,
+    });
+    expect(sfuClose).toHaveBeenCalledOnce();
+  });
+
   it('sends end signals and voice.leave for old channel before joining new channel', async () => {
     const sendRawCommand = vi.fn();
     // Calls in order: voice.join(A) → voice.leave(A) [best-effort] → voice.join(B)

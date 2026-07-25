@@ -26,6 +26,7 @@ Media resolves that id before returning ICE servers or creating SFU transports:
 
 - STUN/TURN URLs come from the selected profile, falling back to global values when a profile omits them.
 - SFU `announcedAddress`, TCP enablement, and RTC port range come from the selected profile.
+- All SFU transports for one profile share a single mediasoup `WebRtcServer` and fixed UDP/TCP port. Different profiles reserve different ports.
 - Unknown profile ids are rejected instead of silently falling back to the default route.
 
 This makes the web entry and media entry align: users who open the Hong Kong hostname receive Hong Kong TURN/SFU candidates, while users who open the mainland hostname receive mainland candidates.
@@ -33,6 +34,8 @@ This makes the web entry and media entry align: users who open the Hong Kong hos
 ## Port Invariants
 
 SFU candidates include explicit ports. Any reverse proxy, NAT, or frp mapping must make those exact ports reachable from the browser.
+
+The configured RTC range is a regional listener pool, not a per-user capacity limit. Baker reserves one port for each media region that creates an SFU transport. The union of all configured ranges must therefore contain at least as many distinct ports as the maximum number of regions that can be active at the same time. User concurrency does not consume additional listening ports.
 
 Valid:
 

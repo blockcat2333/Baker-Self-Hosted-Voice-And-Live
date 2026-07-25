@@ -92,6 +92,8 @@ export class MediasoupMediaAdapter implements MediaAdapter {
   private readonly routers = new Map<string, types.Router>();
   private readonly sessions = new Map<string, SfuSessionRecord>();
   private readonly producers = new Map<string, SfuProducerRecord>();
+  private readonly webRtcServerPorts = new Set<number>();
+  private readonly webRtcServers = new Map<string, Promise<types.WebRtcServer>>();
   private readonly defaultMediaProfile: MediaRegionProfile;
   private readonly mediaRegionProfiles: MediaRegionProfile[];
 
@@ -151,12 +153,11 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     const profile = this.resolveSessionProfile(session);
     this.assertSfuConfigured(profile);
     const router = await this.getRouter(input.channelId);
+    const webRtcServer = await this.getWebRtcServer(profile);
     const transport = await router.createWebRtcTransport({
-      enableTcp: profile.sfuEnableTcp,
-      enableUdp: true,
       initialAvailableOutgoingBitrate: 1_000_000,
-      listenInfos: this.createListenInfos(profile),
       preferUdp: true,
+      webRtcServer,
     });
 
     session.transports.set(transport.id, {
@@ -347,17 +348,16 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     }
   }
 
-  private createListenInfos(profile: MediaRegionProfile): types.TransportListenInfo[] {
-    const portRange = {
-      max: profile.sfuRtcMaxPort,
-      min: profile.sfuRtcMinPort,
-    };
+  private createListenInfos(
+    profile: MediaRegionProfile,
+    port: number,
+  ): types.TransportListenInfo[] {
     const announcedAddress = profile.sfuAnnouncedIp;
     const listenInfos: types.TransportListenInfo[] = [
       {
         announcedAddress,
         ip: '0.0.0.0',
-        portRange,
+        port,
         protocol: 'udp',
       },
     ];
@@ -366,12 +366,63 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       listenInfos.push({
         announcedAddress,
         ip: '0.0.0.0',
-        portRange,
+        port,
         protocol: 'tcp',
       });
     }
 
     return listenInfos;
+  }
+
+  private async createWebRtcServer(
+    profile: MediaRegionProfile,
+  ): Promise<types.WebRtcServer> {
+    const worker = await this.getWorker();
+    const port = this.reserveWebRtcServerPort(profile);
+
+    try {
+      return await worker.createWebRtcServer({
+        appData: { mediaRegionId: profile.id },
+        listenInfos: this.createListenInfos(profile, port),
+      });
+    } catch (err) {
+      this.webRtcServerPorts.delete(port);
+      throw err;
+    }
+  }
+
+  private getWebRtcServer(
+    profile: MediaRegionProfile,
+  ): Promise<types.WebRtcServer> {
+    const existing = this.webRtcServers.get(profile.id);
+    if (existing) {
+      return existing;
+    }
+
+    const pending = this.createWebRtcServer(profile).catch((err) => {
+      this.webRtcServers.delete(profile.id);
+      throw err;
+    });
+    this.webRtcServers.set(profile.id, pending);
+    return pending;
+  }
+
+  private reserveWebRtcServerPort(profile: MediaRegionProfile): number {
+    for (
+      let port = profile.sfuRtcMinPort;
+      port <= profile.sfuRtcMaxPort;
+      port += 1
+    ) {
+      if (!this.webRtcServerPorts.has(port)) {
+        this.webRtcServerPorts.add(port);
+        return port;
+      }
+    }
+
+    throw new Error(
+      `No shared SFU listen port is available for media region ${profile.id}. ` +
+        'Configure at least one SFU RTC port per media region.',
+    );
   }
 
   private async getRouter(channelId: string): Promise<types.Router> {
@@ -404,6 +455,8 @@ export class MediasoupMediaAdapter implements MediaAdapter {
           this.routers.clear();
           this.sessions.clear();
           this.producers.clear();
+          this.webRtcServerPorts.clear();
+          this.webRtcServers.clear();
         });
         return worker;
       });

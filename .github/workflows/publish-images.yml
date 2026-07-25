@@ -5,9 +5,19 @@ on:
     branches: ['main']
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      release_ref:
+        description: Git ref to build
+        required: false
+        default: main
+      release_version:
+        description: Optional numeric release tag, for example 1.1.0
+        required: false
+        default: ''
 
 permissions:
   contents: read
+  packages: write
 
 jobs:
   publish:
@@ -19,6 +29,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_ref || github.ref }}
 
       - name: Classify release tag
         id: release_tag
@@ -56,15 +68,26 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
+      - name: Log in to GitHub Container Registry
+        if: steps.release_tag.outputs.is_server_tag == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Docker metadata
         if: steps.release_tag.outputs.is_server_tag == 'true'
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.DOCKERHUB_USERNAME }}/baker
+          images: |
+            ${{ env.DOCKERHUB_USERNAME }}/baker
+            ghcr.io/${{ github.repository_owner }}/baker
           tags: |
             type=raw,value=latest,enable=${{ github.ref_name == github.event.repository.default_branch || github.ref_type == 'tag' }}
             type=match,pattern=v(.*),group=1
+            type=raw,value=${{ inputs.release_version }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.release_version != '' }}
             type=sha
 
       - name: Build and push

@@ -48,6 +48,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-25 Baker 1.0.12 Stable Release And Desktop 1.0.12a
+
+- bumped the stable server release line to public label `1.0.12`
+- reset the desktop/client release label to `1.0.12a`, with Electron package metadata stored as `1.0.12-a`
+- fixed the all-in-one update helper replacement order for Synology-style published media port ranges
+- the helper now stops the current container and waits for Docker to report it stopped before creating the replacement container with the same TURN/SFU port bindings
+- added a regression test for the stop-before-create update ordering
+- kept the 1.0.11 dual-region media feature set intact
+
 ### 2026-07-25 Baker 1.0.11 Stable Release And Desktop 1.0.11a
 
 - bumped the stable server release line to public label `1.0.11`

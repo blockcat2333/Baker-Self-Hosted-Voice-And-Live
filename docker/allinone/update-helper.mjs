@@ -403,6 +403,21 @@ async function waitForHealthy(containerName) {
   );
 }
 
+async function waitForStopped(containerName) {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const inspect = await docker(
+      'GET',
+      `/containers/${encodeURIComponent(containerName)}/json`,
+    );
+    if (inspect.State?.Running === false) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error(`Timed out waiting for ${containerName} to stop.`);
+}
+
 async function containerExists(name) {
   try {
     await docker('GET', `/containers/${encodeURIComponent(name)}/json`);
@@ -492,43 +507,43 @@ async function main() {
   }
 
   const suffix = jobId.slice(0, 12);
-  const nextName = `${oldName}-next-${suffix}`;
   const previousName = `${oldName}-previous-${suffix}`;
   const failedName = `${oldName}-failed-${suffix}`;
 
   await writeStatus('running', 'inspect', `Preparing to update ${oldName}.`);
   await pullTargetImage();
 
-  await writeStatus(
-    'running',
-    'create',
-    `Creating replacement container ${nextName}.`,
-  );
-  const created = await docker(
-    'POST',
-    `/containers/create?name=${encodeURIComponent(nextName)}`,
-    createContainerConfig(current),
-  );
-  if (!created.Id) {
-    throw new Error('Docker did not return a replacement container id.');
-  }
-
   try {
     await writeStatus('running', 'stop-current', `Stopping ${oldName}.`);
     await dockerText(
       'POST',
       `/containers/${encodeURIComponent(oldName)}/stop?t=30`,
-    ).catch(() => undefined);
+    );
+    await waitForStopped(oldName);
 
-    await writeStatus('running', 'swap', 'Swapping container names.');
+    await writeStatus(
+      'running',
+      'swap',
+      'Renaming the previous container.',
+    );
     await dockerText(
       'POST',
       `/containers/${encodeURIComponent(oldName)}/rename?name=${encodeURIComponent(previousName)}`,
     );
-    await dockerText(
-      'POST',
-      `/containers/${encodeURIComponent(nextName)}/rename?name=${encodeURIComponent(oldName)}`,
+
+    await writeStatus(
+      'running',
+      'create',
+      `Creating replacement container ${oldName}.`,
     );
+    const created = await docker(
+      'POST',
+      `/containers/create?name=${encodeURIComponent(oldName)}`,
+      createContainerConfig(current),
+    );
+    if (!created.Id) {
+      throw new Error('Docker did not return a replacement container id.');
+    }
 
     await writeStatus('running', 'start', `Starting ${oldName}.`);
     await dockerText(

@@ -2,6 +2,29 @@
 
 ## 2026-07-25
 
+### Baker 1.0.12 update-helper port release fix and desktop 1.0.12a
+
+What changed:
+
+- bumped the public server label to stable `1.0.12`
+- reset the desktop/client label to `1.0.12a`, with Electron metadata stored as semver `1.0.12-a`
+- changed the all-in-one update helper to stop and confirm the current container is stopped before creating a replacement with the same published media ports
+- added a regression test for the replacement ordering
+
+Why:
+
+- Synology Container Manager deployments can publish many TURN/SFU ports through `docker-proxy`
+- creating or starting a replacement container against the same port set before the old proxy bindings have fully released can fail with `bind: address already in use`
+- update rollback must keep the previous container recoverable while avoiding unnecessary DSM or router changes
+
+Validation:
+
+- update-helper syntax check
+- update-helper regression tests
+- release consistency check
+- full workspace test suite
+- Docker all-in-one production build
+
 ### Baker 1.0.11 dual-region media release and desktop 1.0.11a
 
 What changed:

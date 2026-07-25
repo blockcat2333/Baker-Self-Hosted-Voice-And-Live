@@ -29,4 +29,24 @@ describe('docker all-in-one update helper', () => {
     expect(source).toContain('function sfuPortRanges(settings)');
     expect(source).toContain('settings.mediaRegionProfiles');
   });
+
+  it('stops the current container before creating the replacement', () => {
+    const source = readFileSync(
+      resolve('docker/allinone/update-helper.mjs'),
+      'utf8',
+    );
+
+    const stopIndex = source.indexOf(
+      "await writeStatus('running', 'stop-current'",
+    );
+    const waitIndex = source.indexOf('await waitForStopped(oldName);');
+    const createIndex = source.indexOf(
+      "`Creating replacement container ${oldName}.`",
+    );
+
+    expect(source).toContain('async function waitForStopped(containerName)');
+    expect(stopIndex).toBeGreaterThan(-1);
+    expect(waitIndex).toBeGreaterThan(stopIndex);
+    expect(createIndex).toBeGreaterThan(waitIndex);
+  });
 });

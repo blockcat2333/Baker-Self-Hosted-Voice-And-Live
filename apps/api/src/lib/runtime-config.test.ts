@@ -78,9 +78,51 @@ describe('runtime deployment config', () => {
           'webHostPort',
         ]),
       );
+      expect(pending?.previousSettings?.webHostPort).toBe(3000);
+      expect(pending?.previousSettings?.turnPasswordConfigured).toBe(true);
 
       const reread = await readDeploymentRuntimeSettings();
       expect(reread.turnUsername).toBe('relay');
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it('keeps the first pending previous deployment settings across edits', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-runtime-pending-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+
+    try {
+      await writeFile(
+        join(tempDir, 'runtime.env'),
+        [
+          "MEDIA_REGION_PROFILES='[{\"id\":\"old\",\"hosts\":[\"old.example\"],\"sfuRtcMinPort\":23305,\"sfuRtcMaxPort\":23400}]'",
+          "SFU_ANNOUNCED_IP='113.80.68.23'",
+          "SFU_RTC_MIN_PORT='50000'",
+          "SFU_RTC_MAX_PORT='50100'",
+          "WEB_PORT='3000'",
+          '',
+        ].join('\n'),
+      );
+
+      await updateDeploymentRuntimeSettings({
+        mediaRegionProfiles:
+          '[{"id":"new","hosts":["new.example"],"sfuRtcMinPort":23335,"sfuRtcMaxPort":23340}]',
+      });
+      await updateDeploymentRuntimeSettings({
+        allowedHosts: 'new.example',
+      });
+
+      const pending = await readDeploymentPendingMarker();
+      expect(pending?.changedKeys).toEqual(
+        expect.arrayContaining(['allowedHosts', 'mediaRegionProfiles']),
+      );
+      expect(pending?.previousSettings?.mediaRegionProfiles).toContain(
+        'old.example',
+      );
+      expect(pending?.previousSettings?.mediaRegionProfiles).toContain(
+        '23305',
+      );
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }

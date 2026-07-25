@@ -63,6 +63,7 @@ import {
   updateRuntimePublicIpSettings,
   updateRuntimeUpdateProxySettings,
   updateDeploymentRuntimeSettings,
+  type DeploymentPendingMarker,
   type DeploymentRuntimeSettings,
 } from '../lib/runtime-config';
 import { checkAndApplyRuntimePublicIp } from '../lib/runtime-public-ip';
@@ -345,6 +346,17 @@ function currentContainerHostPortSettings(
   };
 }
 
+function previousContainerHostPortSettings(
+  pendingMarker: DeploymentPendingMarker | null,
+  runtimeSettings: DeploymentRuntimeSettings,
+  inspect: DockerInspectResponse | null,
+) {
+  return currentContainerHostPortSettings(
+    pendingMarker?.previousSettings ?? runtimeSettings,
+    inspect,
+  );
+}
+
 async function getAdminDeploymentSettings() {
   const docker = createDockerEngineClient();
   const [dockerEnabled, dockerStatus, runtimeSettings, pendingMarker] =
@@ -559,7 +571,8 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
     try {
       const started = await docker.startUpdateHelper({
         desiredSettings: settings,
-        previousSettings: currentContainerHostPortSettings(
+        previousSettings: previousContainerHostPortSettings(
+          pendingMarker,
           runtimeSettings,
           inspect,
         ),
@@ -636,7 +649,8 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
       inspect,
       new Set(pendingMarker?.changedKeys ?? []),
     );
-    const previousSettings = currentContainerHostPortSettings(
+    const previousSettings = previousContainerHostPortSettings(
+      pendingMarker,
       runtimeSettings,
       inspect,
     );

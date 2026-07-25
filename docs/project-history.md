@@ -2,6 +2,31 @@
 
 ## 2026-07-25
 
+### Baker 1.0.14 stale media-port cleanup fix and desktop 1.0.14a
+
+What changed:
+
+- bumped the public server label to stable `1.0.14`
+- reset the desktop/client label to `1.0.14a`, with Electron metadata stored as semver `1.0.14-a`
+- stored pre-edit deployment settings in the pending deployment marker
+- taught one-click update, deployment apply, and runtime self-repair to pass those previous settings to the all-in-one update helper
+- added regression coverage for preserving the first pending previous settings across multiple deployment edits
+
+Why:
+
+- changing `MEDIA_REGION_PROFILES` from a wide SFU RTC range to a smaller frp range must remove stale Docker port bindings from the old profile
+- without the original settings, the update helper can only see the new profile range and may preserve old published ports as user-managed extras
+- NAS deployments should not keep unnecessary media ports open after narrowing a regional profile
+
+Validation:
+
+- runtime-config regression tests
+- API app regression tests
+- update-helper regression tests
+- release consistency check
+- full workspace test suite
+- Docker all-in-one production build
+
 ### Baker 1.0.13 HostIp-preserving update helper and desktop 1.0.13a
 
 What changed:

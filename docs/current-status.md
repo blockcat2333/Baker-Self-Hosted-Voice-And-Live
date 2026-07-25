@@ -48,6 +48,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-25 Baker 1.0.14 Stable Release And Desktop 1.0.14a
+
+- bumped the stable server release line to public label `1.0.14`
+- reset the desktop/client release label to `1.0.14a`, with Electron package metadata stored as `1.0.14-a`
+- fixed deployment apply/update flows to remember the pre-edit deployment settings in the pending marker
+- this lets the all-in-one update helper delete stale SFU RTC Docker port bindings when `MEDIA_REGION_PROFILES` is narrowed or moved
+- applied the same previous-settings handoff to runtime self-repair
+- added regression coverage for keeping the first pending previous deployment settings across multiple admin edits
+
 ### 2026-07-25 Baker 1.0.13 Stable Release And Desktop 1.0.13a
 
 - bumped the stable server release line to public label `1.0.13`

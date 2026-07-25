@@ -46,6 +46,7 @@ export interface DeploymentRuntimeUpdate {
 export interface DeploymentPendingMarker {
   changedKeys: string[];
   pendingApply: boolean;
+  previousSettings?: DeploymentRuntimeSettings;
   updatedAt: string;
 }
 
@@ -273,6 +274,50 @@ export function toDeploymentRuntimeSettings(
   };
 }
 
+function readPendingPreviousSettings(
+  value: unknown,
+): DeploymentRuntimeSettings | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const candidate = value as Partial<DeploymentRuntimeSettings>;
+  const stringKeys: (keyof DeploymentRuntimeSettings)[] = [
+    'allowedHosts',
+    'mediaRegionProfiles',
+    'sfuAnnouncedIp',
+    'stunUrls',
+    'turnExternalIp',
+    'turnRealm',
+    'turnUrls',
+    'turnUsername',
+  ];
+  const numberKeys: (keyof DeploymentRuntimeSettings)[] = [
+    'adminHostPort',
+    'sfuRtcMaxPort',
+    'sfuRtcMinPort',
+    'turnMaxPort',
+    'turnMinPort',
+    'turnPort',
+    'webHostPort',
+  ];
+  const booleanKeys: (keyof DeploymentRuntimeSettings)[] = [
+    'sfuEnableTcp',
+    'turnEnabled',
+    'turnPasswordConfigured',
+  ];
+
+  if (
+    stringKeys.every((key) => typeof candidate[key] === 'string') &&
+    numberKeys.every((key) => typeof candidate[key] === 'number') &&
+    booleanKeys.every((key) => typeof candidate[key] === 'boolean')
+  ) {
+    return candidate as DeploymentRuntimeSettings;
+  }
+
+  return undefined;
+}
+
 export async function readDeploymentRuntimeSettings() {
   return toDeploymentRuntimeSettings(await readRuntimeEnvFromDisk());
 }
@@ -293,6 +338,7 @@ export async function updateDeploymentRuntimeSettings(
 ) {
   const path = getRuntimeEnvPath();
   const env = await readRuntimeEnvFromDisk(path);
+  const previousSettings = toDeploymentRuntimeSettings(env);
 
   setRuntimeValue(env, 'ADMIN_HTTP_PORT', input.adminHostPort);
   setRuntimeValue(env, 'ALLOWED_HOSTS', input.allowedHosts);
@@ -315,7 +361,11 @@ export async function updateDeploymentRuntimeSettings(
   setRuntimeValue(env, 'WEB_PORT', input.webHostPort);
 
   await writeRuntimeEnvToDisk(env, path);
-  await writeDeploymentPendingMarker(Object.keys(input));
+  await writeDeploymentPendingMarker(
+    Object.keys(input),
+    getDeploymentPendingPath(),
+    previousSettings,
+  );
 
   return toDeploymentRuntimeSettings(env);
 }
@@ -334,6 +384,7 @@ export async function readDeploymentPendingMarker(
           )
         : [],
       pendingApply: parsed.pendingApply === true,
+      previousSettings: readPendingPreviousSettings(parsed.previousSettings),
       updatedAt:
         typeof parsed.updatedAt === 'string'
           ? parsed.updatedAt
@@ -355,11 +406,14 @@ export async function readDeploymentPendingMarker(
 export async function writeDeploymentPendingMarker(
   changedKeys: string[] = [],
   path = getDeploymentPendingPath(),
+  previousSettings?: DeploymentRuntimeSettings,
 ) {
   const existing = await readDeploymentPendingMarker(path);
   const mergedKeys = Array.from(
     new Set([...(existing?.changedKeys ?? []), ...changedKeys]),
   ).sort();
+  const markerPreviousSettings =
+    existing?.previousSettings ?? previousSettings;
   await mkdir(dirname(path), { recursive: true });
   await writeFile(
     path,
@@ -367,6 +421,9 @@ export async function writeDeploymentPendingMarker(
       {
         changedKeys: mergedKeys,
         pendingApply: true,
+        ...(markerPreviousSettings
+          ? { previousSettings: markerPreviousSettings }
+          : {}),
         updatedAt: new Date().toISOString(),
       },
       null,

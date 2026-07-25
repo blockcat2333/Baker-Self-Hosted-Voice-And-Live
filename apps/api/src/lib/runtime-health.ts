@@ -38,6 +38,7 @@ import {
   readDeploymentRuntimeSettings,
   readRuntimeSelfRepairSettings,
   updateRuntimeSelfRepairSettings,
+  type DeploymentPendingMarker,
   type DeploymentRuntimeSettings,
   type RuntimeSelfRepairSettingsUpdate,
 } from './runtime-config';
@@ -569,6 +570,17 @@ function currentContainerHostPortSettings(
   };
 }
 
+function previousContainerHostPortSettings(
+  pendingMarker: DeploymentPendingMarker | null,
+  runtimeSettings: DeploymentRuntimeSettings,
+  inspect: DockerInspectResponse | null,
+) {
+  return currentContainerHostPortSettings(
+    pendingMarker?.previousSettings ?? runtimeSettings,
+    inspect,
+  );
+}
+
 async function startContainerRepair() {
   const docker = createDockerEngineClient();
   if (!(await docker.isAvailable())) {
@@ -587,7 +599,8 @@ async function startContainerRepair() {
     inspect,
     new Set(pendingMarker?.changedKeys ?? []),
   );
-  const previousSettings = currentContainerHostPortSettings(
+  const previousSettings = previousContainerHostPortSettings(
+    pendingMarker,
     runtimeSettings,
     inspect,
   );

@@ -15,6 +15,7 @@ download
 scripts/screenshots
 apps/*/node_modules
 apps/*/.turbo
+apps/desktop/release
 packages/*/node_modules
 packages/*/.turbo
 dist

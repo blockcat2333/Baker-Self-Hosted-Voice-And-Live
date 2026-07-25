@@ -241,7 +241,7 @@ Migration state:
 - `apps/media/src/app.test.ts`
   - coverage for internal-route authorization
 - `packages/client/src/app/app.css`
-  - chat, voice, stream, and auth/control-panel-adjacent styling
+  - shared Discord-inspired application shell, chat/voice/stream layouts, context menus, tooltips, touch behavior, auth/settings styling, and desktop boot/update surfaces
 
 ## Self-Hosted Deployment Files
 
@@ -346,7 +346,7 @@ Community and release metadata:
 - web auth tokens now persist in `sessionStorage` instead of `localStorage`
 - web login hides registration when public registration is disabled, and the main client header shows the configured server name
 - late voice joiners now receive current stream room snapshots, and voice leave reconciles same-channel stream runtime on the server even if client cleanup did not happen first
-- desktop reuses the shared client shell; its settings/auth/server-switch flows were validated in the real Electron app, and desktop screen livestream publishing is validated through a built Electron publisher to web popup viewer E2E path
+- desktop reuses the shared client shell; its settings/auth/server-switch flows were validated in the real Electron app, and its screen/window plus selective application-audio pickers now use the same dark/purple hierarchy with explicit preview/selection states
 - channel `voiceQuality` is now persisted/admin-managed, but it is not yet applied to actual live voice media behavior
 
 Temporary compatibility layer:

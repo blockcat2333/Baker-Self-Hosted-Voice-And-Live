@@ -13,6 +13,11 @@ export const en = {
   },
   admin: {
     title: 'Server Control Panel',
+    panel_label: 'Control Panel',
+    navigation: 'Control panel navigation',
+    configuration: 'Configuration',
+    operations: 'Operations',
+    workspace: 'Workspace',
     login_copy: 'Enter the management password to open the server dashboard.',
     management_password: 'Management Password',
     checking: 'Checking…',

@@ -99,6 +99,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     null,
   );
   const [isRuntimeLoading, setIsRuntimeLoading] = useState(false);
+  const [activeAdminSection, setActiveAdminSection] = useState('server');
 
   const [serverName, setServerName] = useState('Baker');
   const [allowPublicRegistration, setAllowPublicRegistration] = useState(true);
@@ -864,7 +865,13 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     return (
       <div className="admin-shell">
         <div className="admin-login-card">
-          <p className="admin-eyebrow">Baker</p>
+          <div className="admin-login-brand">
+            <span aria-hidden="true">B</span>
+            <div>
+              <strong>Baker</strong>
+              <small>{t('admin.panel_label')}</small>
+            </div>
+          </div>
           <h1>{t('admin.title')}</h1>
           <p className="admin-copy">{t('admin.login_copy')}</p>
           <form className="admin-form" onSubmit={handleLogin}>
@@ -894,831 +901,923 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
 
   return (
     <div className="admin-shell admin-shell--dashboard">
-      <header className="admin-header">
-        <div>
-          <p className="admin-eyebrow">Baker</p>
-          <h1>{t('admin.title')}</h1>
-          <p className="admin-copy">{t('admin.dashboard_copy')}</p>
-        </div>
-        <div className="admin-header-actions">
-          <LanguageSwitcher className="admin-language-switcher" />
-          <button
-            type="button"
-            className="admin-secondary-btn"
-            onClick={() => {
-              setIsAuthenticated(false);
-              setPassword('');
-            }}
-          >
-            {t('common.sign_out')}
-          </button>
-        </div>
-      </header>
-
-      {error ? (
-        <p className="admin-error admin-error--inline">{error}</p>
-      ) : null}
-
-      <div className="admin-grid">
-        <section className="admin-card">
-          <h2>{t('admin.server_settings')}</h2>
-          <form className="admin-form" onSubmit={handleSaveSettings}>
-            <label className="admin-field">
-              <span>{t('admin.server_name')}</span>
-              <input
-                value={serverName}
-                onChange={(event) => setServerName(event.target.value)}
-                required
-              />
-            </label>
-            <div className="admin-checkbox-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={allowPublicRegistration}
-                  onChange={(event) =>
-                    setAllowPublicRegistration(event.target.checked)
-                  }
-                />{' '}
-                {t('admin.allow_public_registration')}
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={webEnabled}
-                  onChange={(event) => setWebEnabled(event.target.checked)}
-                />{' '}
-                {t('admin.enable_web_client')}
-              </label>
-            </div>
-            <div className="admin-inline-grid">
-              <label className="admin-field">
-                <span>{t('admin.web_port')}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={webPort}
-                  onChange={(event) => setWebPort(event.target.value)}
-                  required
-                />
-              </label>
-              <label className="admin-field">
-                <span>{t('admin.app_port')}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={appPort}
-                  onChange={(event) => setAppPort(event.target.value)}
-                  required
-                />
-              </label>
-            </div>
-            <label className="admin-field">
-              <span>{t('admin.media_mode')}</span>
-              <select
-                value={mediaMode}
-                onChange={(event) =>
-                  setMediaMode(event.target.value as 'p2p' | 'sfu')
-                }
-              >
-                <option value="p2p">{t('admin.media_mode_p2p')}</option>
-                <option value="sfu">{t('admin.media_mode_sfu')}</option>
-              </select>
-            </label>
-            {mediaMode === 'sfu' ? (
-              <p className="admin-channel-hint">
-                {t('admin.media_mode_sfu_hint')}
-              </p>
-            ) : null}
-            <label className="admin-field">
-              <span>{t('admin.new_management_password')}</span>
-              <input
-                type="password"
-                minLength={1}
-                placeholder={t('admin.new_management_password_placeholder')}
-                value={newAdminPassword}
-                onChange={(event) => setNewAdminPassword(event.target.value)}
-              />
-            </label>
-            <button
-              type="submit"
-              className="admin-primary-btn"
-              disabled={isLoading}
-            >
-              {t('admin.save_settings')}
-            </button>
-          </form>
-          {settings ? (
-            <div className="admin-meta">
-              <span>
-                {t('admin.current_web_port', {
-                  port: String(settings.webPort),
-                })}
-              </span>
-              <span>
-                {t('admin.current_app_port', {
-                  port: String(settings.appPort),
-                })}
-              </span>
-              <span>
-                {t('admin.current_media_mode', {
-                  mode: settings.mediaMode.toUpperCase(),
-                })}
-              </span>
-            </div>
-          ) : null}
-        </section>
-
-        <section className="admin-card">
-          <h2>{t('admin.server_updates')}</h2>
-          <div className="admin-meta">
-            <span>
-              {t('admin.current_version', {
-                version: updateVersions?.currentVersion ?? 'unknown',
-              })}
-            </span>
-            <span>
-              {t('admin.current_image', {
-                image:
-                  deployment?.currentImage ??
-                  updateVersions?.currentImage ??
-                  'unknown',
-              })}
-            </span>
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar-brand">
+          <span aria-hidden="true">B</span>
+          <div>
+            <strong>Baker</strong>
+            <small>{t('admin.panel_label')}</small>
           </div>
-          {deployment?.dockerEnabled ? null : (
-            <p className="admin-channel-hint">
-              {t('admin.docker_socket_unavailable', {
-                status:
-                  deployment?.dockerStatus ??
-                  updateVersions?.dockerStatus ??
-                  '',
-              })}
-            </p>
-          )}
-          <div className="admin-inline-actions">
-            <button
-              type="button"
-              className="admin-secondary-btn"
-              onClick={() => void handleCheckVersions()}
-              disabled={isLoading}
-            >
-              {t('admin.check_versions')}
-            </button>
-            <button
-              type="button"
-              className="admin-secondary-btn"
-              onClick={() => void refreshUpdateStatus()}
-              disabled={isLoading}
-            >
-              {t('admin.refresh_status')}
-            </button>
-          </div>
-          <form className="admin-form" onSubmit={handleSaveUpdateProxy}>
-            <p className="admin-copy">{t('admin.update_proxy_copy')}</p>
-            <div className="admin-checkbox-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={updateProxyEnabled}
-                  onChange={(event) =>
-                    setUpdateProxyEnabled(event.currentTarget.checked)
-                  }
-                />
-                {t('admin.update_proxy_enabled')}
-              </label>
-            </div>
-            <label className="admin-field">
-              <span>{t('admin.update_proxy_url')}</span>
-              <input
-                value={updateProxyUrl}
-                onChange={(event) => setUpdateProxyUrl(event.target.value)}
-                placeholder="http://127.0.0.1:7890"
-                disabled={!updateProxyEnabled}
-              />
-            </label>
-            <div className="admin-inline-actions">
-              <button
-                type="submit"
-                className="admin-secondary-btn"
-                disabled={isLoading}
-              >
-                {t('admin.save_update_proxy')}
-              </button>
-            </div>
-            {updateProxy ? (
-              <p className="admin-copy">
-                {t('admin.update_proxy_saved_at', {
-                  time: updateProxy.updatedAt,
-                })}
-              </p>
-            ) : null}
-          </form>
-          <label className="admin-field">
-            <span>{t('admin.target_version')}</span>
-            <select
-              value={selectedUpdateTag}
-              onChange={(event) => setSelectedUpdateTag(event.target.value)}
-              disabled={!updateVersions}
-            >
-              <option value="">{t('admin.target_version_placeholder')}</option>
-              {(updateVersions?.versions ?? []).map((version) => (
-                <option key={version.tag} value={version.tag}>
-                  {version.tag}
-                  {version.isLatest ? ` (${t('admin.latest_version')})` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-          {selectedUpdateTag ? (
-            <p className="admin-copy">
-              {
-                updateVersions?.versions.find(
-                  (version) => version.tag === selectedUpdateTag,
-                )?.image
-              }
-            </p>
-          ) : null}
-          {updateStatus ? (
-            <div className="admin-status">
-              <span>
-                {t('admin.update_status', { status: updateStatus.status })}
-              </span>
-              <span>
-                {updateStatus.phase}: {updateStatus.message}
-              </span>
-              {updateStatus.error ? (
-                <span className="admin-error">{updateStatus.error}</span>
-              ) : null}
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="admin-primary-btn"
-            onClick={() => void handleStartUpdate()}
-            disabled={
-              isLoading ||
-              !selectedUpdateTag ||
-              deployment?.dockerEnabled === false
-            }
+        </div>
+        <nav className="admin-sidebar-nav" aria-label={t('admin.navigation')}>
+          <p>{t('admin.configuration')}</p>
+          <a
+            className={activeAdminSection === 'server' ? 'active' : ''}
+            href="#admin-server"
+            onClick={() => setActiveAdminSection('server')}
           >
-            {t('admin.start_update')}
-          </button>
-        </section>
-
-        <section className="admin-card admin-runtime-card">
-          <div className="admin-section-header">
-            <div>
-              <h2>{t('admin.runtime_status')}</h2>
-              <p className="admin-copy">{t('admin.runtime_status_copy')}</p>
-            </div>
-            <span
-              className={`admin-status-badge admin-status-badge--${runtimeHealth?.overallStatus ?? 'unknown'}`}
-            >
+            <span aria-hidden="true">⚙</span>
+            {t('admin.server_settings')}
+          </a>
+          <a
+            className={activeAdminSection === 'deployment' ? 'active' : ''}
+            href="#admin-deployment"
+            onClick={() => setActiveAdminSection('deployment')}
+          >
+            <span aria-hidden="true">▣</span>
+            {t('admin.deployment_settings')}
+          </a>
+          <p>{t('admin.operations')}</p>
+          <a
+            className={activeAdminSection === 'runtime' ? 'active' : ''}
+            href="#admin-runtime"
+            onClick={() => setActiveAdminSection('runtime')}
+          >
+            <span aria-hidden="true">◉</span>
+            {t('admin.runtime_status')}
+          </a>
+          <a
+            className={activeAdminSection === 'updates' ? 'active' : ''}
+            href="#admin-updates"
+            onClick={() => setActiveAdminSection('updates')}
+          >
+            <span aria-hidden="true">↻</span>
+            {t('admin.server_updates')}
+          </a>
+          <p>{t('admin.workspace')}</p>
+          <a
+            className={activeAdminSection === 'users' ? 'active' : ''}
+            href="#admin-users"
+            onClick={() => setActiveAdminSection('users')}
+          >
+            <span aria-hidden="true">＋</span>
+            {t('admin.create_user')}
+          </a>
+          <a
+            className={activeAdminSection === 'channels' ? 'active' : ''}
+            href="#admin-channels"
+            onClick={() => setActiveAdminSection('channels')}
+          >
+            <span aria-hidden="true">#</span>
+            {t('admin.workspace_channels')}
+          </a>
+        </nav>
+        <div className="admin-sidebar-status">
+          <span
+            className={`admin-sidebar-status-dot admin-sidebar-status-dot--${runtimeHealth?.overallStatus ?? 'unknown'}`}
+          />
+          <div>
+            <strong>{t('admin.runtime_status')}</strong>
+            <small>
               {t(
                 `admin.runtime_overall_${runtimeHealth?.overallStatus ?? 'unknown'}`,
               )}
-            </span>
+            </small>
           </div>
-          {runtimeHealth?.supervisorAvailable ? null : (
-            <p className="admin-channel-hint">
-              {t('admin.supervisor_unavailable')}
-            </p>
-          )}
-          <div className="admin-runtime-services">
-            {(runtimeHealth?.services ?? []).map((service) => (
-              <article key={service.name} className="admin-runtime-service">
-                <div>
-                  <strong>{service.label}</strong>
-                  <span>{service.message}</span>
-                </div>
-                <span
-                  className={`admin-status-badge admin-status-badge--${service.status}`}
-                >
-                  {t(`admin.runtime_status_${service.status}`)}
-                </span>
-              </article>
-            ))}
+        </div>
+      </aside>
+
+      <main className="admin-workspace">
+        <header className="admin-header">
+          <div>
+            <p className="admin-eyebrow">Baker</p>
+            <h1>{t('admin.title')}</h1>
+            <p className="admin-copy">{t('admin.dashboard_copy')}</p>
           </div>
-          <div className="admin-inline-actions">
+          <div className="admin-header-actions">
+            <LanguageSwitcher className="admin-language-switcher" />
             <button
               type="button"
               className="admin-secondary-btn"
-              onClick={() => void refreshRuntimeHealth()}
-              disabled={isRuntimeLoading}
+              onClick={() => {
+                setIsAuthenticated(false);
+                setPassword('');
+              }}
             >
-              {t('admin.refresh_runtime_status')}
+              {t('common.sign_out')}
             </button>
+          </div>
+        </header>
+
+        {error ? (
+          <p className="admin-error admin-error--inline">{error}</p>
+        ) : null}
+
+        <div className="admin-grid">
+          <section id="admin-server" className="admin-card">
+            <h2>{t('admin.server_settings')}</h2>
+            <form className="admin-form" onSubmit={handleSaveSettings}>
+              <label className="admin-field">
+                <span>{t('admin.server_name')}</span>
+                <input
+                  value={serverName}
+                  onChange={(event) => setServerName(event.target.value)}
+                  required
+                />
+              </label>
+              <div className="admin-checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={allowPublicRegistration}
+                    onChange={(event) =>
+                      setAllowPublicRegistration(event.target.checked)
+                    }
+                  />{' '}
+                  {t('admin.allow_public_registration')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={webEnabled}
+                    onChange={(event) => setWebEnabled(event.target.checked)}
+                  />{' '}
+                  {t('admin.enable_web_client')}
+                </label>
+              </div>
+              <div className="admin-inline-grid">
+                <label className="admin-field">
+                  <span>{t('admin.web_port')}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={webPort}
+                    onChange={(event) => setWebPort(event.target.value)}
+                    required
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>{t('admin.app_port')}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={appPort}
+                    onChange={(event) => setAppPort(event.target.value)}
+                    required
+                  />
+                </label>
+              </div>
+              <label className="admin-field">
+                <span>{t('admin.media_mode')}</span>
+                <select
+                  value={mediaMode}
+                  onChange={(event) =>
+                    setMediaMode(event.target.value as 'p2p' | 'sfu')
+                  }
+                >
+                  <option value="p2p">{t('admin.media_mode_p2p')}</option>
+                  <option value="sfu">{t('admin.media_mode_sfu')}</option>
+                </select>
+              </label>
+              {mediaMode === 'sfu' ? (
+                <p className="admin-channel-hint">
+                  {t('admin.media_mode_sfu_hint')}
+                </p>
+              ) : null}
+              <label className="admin-field">
+                <span>{t('admin.new_management_password')}</span>
+                <input
+                  type="password"
+                  minLength={1}
+                  placeholder={t('admin.new_management_password_placeholder')}
+                  value={newAdminPassword}
+                  onChange={(event) => setNewAdminPassword(event.target.value)}
+                />
+              </label>
+              <button
+                type="submit"
+                className="admin-primary-btn"
+                disabled={isLoading}
+              >
+                {t('admin.save_settings')}
+              </button>
+            </form>
+            {settings ? (
+              <div className="admin-meta">
+                <span>
+                  {t('admin.current_web_port', {
+                    port: String(settings.webPort),
+                  })}
+                </span>
+                <span>
+                  {t('admin.current_app_port', {
+                    port: String(settings.appPort),
+                  })}
+                </span>
+                <span>
+                  {t('admin.current_media_mode', {
+                    mode: settings.mediaMode.toUpperCase(),
+                  })}
+                </span>
+              </div>
+            ) : null}
+          </section>
+
+          <section id="admin-updates" className="admin-card">
+            <h2>{t('admin.server_updates')}</h2>
+            <div className="admin-meta">
+              <span>
+                {t('admin.current_version', {
+                  version: updateVersions?.currentVersion ?? 'unknown',
+                })}
+              </span>
+              <span>
+                {t('admin.current_image', {
+                  image:
+                    deployment?.currentImage ??
+                    updateVersions?.currentImage ??
+                    'unknown',
+                })}
+              </span>
+            </div>
+            {deployment?.dockerEnabled ? null : (
+              <p className="admin-channel-hint">
+                {t('admin.docker_socket_unavailable', {
+                  status:
+                    deployment?.dockerStatus ??
+                    updateVersions?.dockerStatus ??
+                    '',
+                })}
+              </p>
+            )}
+            <div className="admin-inline-actions">
+              <button
+                type="button"
+                className="admin-secondary-btn"
+                onClick={() => void handleCheckVersions()}
+                disabled={isLoading}
+              >
+                {t('admin.check_versions')}
+              </button>
+              <button
+                type="button"
+                className="admin-secondary-btn"
+                onClick={() => void refreshUpdateStatus()}
+                disabled={isLoading}
+              >
+                {t('admin.refresh_status')}
+              </button>
+            </div>
+            <form className="admin-form" onSubmit={handleSaveUpdateProxy}>
+              <p className="admin-copy">{t('admin.update_proxy_copy')}</p>
+              <div className="admin-checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={updateProxyEnabled}
+                    onChange={(event) =>
+                      setUpdateProxyEnabled(event.currentTarget.checked)
+                    }
+                  />
+                  {t('admin.update_proxy_enabled')}
+                </label>
+              </div>
+              <label className="admin-field">
+                <span>{t('admin.update_proxy_url')}</span>
+                <input
+                  value={updateProxyUrl}
+                  onChange={(event) => setUpdateProxyUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:7890"
+                  disabled={!updateProxyEnabled}
+                />
+              </label>
+              <div className="admin-inline-actions">
+                <button
+                  type="submit"
+                  className="admin-secondary-btn"
+                  disabled={isLoading}
+                >
+                  {t('admin.save_update_proxy')}
+                </button>
+              </div>
+              {updateProxy ? (
+                <p className="admin-copy">
+                  {t('admin.update_proxy_saved_at', {
+                    time: updateProxy.updatedAt,
+                  })}
+                </p>
+              ) : null}
+            </form>
+            <label className="admin-field">
+              <span>{t('admin.target_version')}</span>
+              <select
+                value={selectedUpdateTag}
+                onChange={(event) => setSelectedUpdateTag(event.target.value)}
+                disabled={!updateVersions}
+              >
+                <option value="">
+                  {t('admin.target_version_placeholder')}
+                </option>
+                {(updateVersions?.versions ?? []).map((version) => (
+                  <option key={version.tag} value={version.tag}>
+                    {version.tag}
+                    {version.isLatest ? ` (${t('admin.latest_version')})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedUpdateTag ? (
+              <p className="admin-copy">
+                {
+                  updateVersions?.versions.find(
+                    (version) => version.tag === selectedUpdateTag,
+                  )?.image
+                }
+              </p>
+            ) : null}
+            {updateStatus ? (
+              <div className="admin-status">
+                <span>
+                  {t('admin.update_status', { status: updateStatus.status })}
+                </span>
+                <span>
+                  {updateStatus.phase}: {updateStatus.message}
+                </span>
+                {updateStatus.error ? (
+                  <span className="admin-error">{updateStatus.error}</span>
+                ) : null}
+              </div>
+            ) : null}
             <button
               type="button"
               className="admin-primary-btn"
-              onClick={() => void handleRepairRuntime()}
+              onClick={() => void handleStartUpdate()}
               disabled={
-                isRuntimeLoading || runtimeHealth?.repairInProgress === true
+                isLoading ||
+                !selectedUpdateTag ||
+                deployment?.dockerEnabled === false
               }
             >
-              {runtimeHealth?.repairInProgress || isRuntimeLoading
-                ? t('admin.runtime_repair_running')
-                : t('admin.runtime_repair_action')}
+              {t('admin.start_update')}
             </button>
-          </div>
-          <form className="admin-form" onSubmit={handleSaveSelfRepair}>
-            <div className="admin-checkbox-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={selfRepairEnabled}
-                  onChange={(event) =>
-                    setSelfRepairEnabled(event.target.checked)
-                  }
-                />{' '}
-                {t('admin.self_repair_enabled')}
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={selfRepairAllowContainerRepair}
-                  onChange={(event) =>
-                    setSelfRepairAllowContainerRepair(event.target.checked)
-                  }
-                />{' '}
-                {t('admin.self_repair_allow_container')}
-              </label>
-            </div>
-            <label className="admin-field">
-              <span>{t('admin.self_repair_interval')}</span>
-              <input
-                type="number"
-                min={30}
-                max={86400}
-                value={selfRepairIntervalSeconds}
-                onChange={(event) =>
-                  setSelfRepairIntervalSeconds(event.target.value)
-                }
-              />
-            </label>
-            <button
-              type="submit"
-              className="admin-secondary-btn"
-              disabled={isRuntimeLoading}
-            >
-              {t('admin.save_self_repair')}
-            </button>
-          </form>
-          {selfRepair ? (
-            <p className="admin-copy">
-              {t('admin.self_repair_saved_at', { time: selfRepair.updatedAt })}
-            </p>
-          ) : null}
-          <form className="admin-form" onSubmit={handleSavePublicIp}>
+          </section>
+
+          <section id="admin-runtime" className="admin-card admin-runtime-card">
             <div className="admin-section-header">
               <div>
-                <h3>{t('admin.public_ip_automation')}</h3>
-                <p className="admin-copy">
-                  {t('admin.public_ip_automation_copy')}
-                </p>
+                <h2>{t('admin.runtime_status')}</h2>
+                <p className="admin-copy">{t('admin.runtime_status_copy')}</p>
               </div>
+              <span
+                className={`admin-status-badge admin-status-badge--${runtimeHealth?.overallStatus ?? 'unknown'}`}
+              >
+                {t(
+                  `admin.runtime_overall_${runtimeHealth?.overallStatus ?? 'unknown'}`,
+                )}
+              </span>
             </div>
-            <div className="admin-checkbox-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={publicIpEnabled}
-                  onChange={(event) => setPublicIpEnabled(event.target.checked)}
-                />{' '}
-                {t('admin.public_ip_enabled')}
-              </label>
+            {runtimeHealth?.supervisorAvailable ? null : (
+              <p className="admin-channel-hint">
+                {t('admin.supervisor_unavailable')}
+              </p>
+            )}
+            <div className="admin-runtime-services">
+              {(runtimeHealth?.services ?? []).map((service) => (
+                <article key={service.name} className="admin-runtime-service">
+                  <div>
+                    <strong>{service.label}</strong>
+                    <span>{service.message}</span>
+                  </div>
+                  <span
+                    className={`admin-status-badge admin-status-badge--${service.status}`}
+                  >
+                    {t(`admin.runtime_status_${service.status}`)}
+                  </span>
+                </article>
+              ))}
             </div>
-            <label className="admin-field">
-              <span>{t('admin.public_ip_interval')}</span>
-              <input
-                type="number"
-                min={60}
-                max={86400}
-                value={publicIpIntervalSeconds}
-                onChange={(event) =>
-                  setPublicIpIntervalSeconds(event.target.value)
-                }
-              />
-            </label>
             <div className="admin-inline-actions">
               <button
-                type="submit"
+                type="button"
                 className="admin-secondary-btn"
+                onClick={() => void refreshRuntimeHealth()}
                 disabled={isRuntimeLoading}
               >
-                {t('admin.save_public_ip')}
+                {t('admin.refresh_runtime_status')}
               </button>
               <button
                 type="button"
                 className="admin-primary-btn"
-                onClick={() => void handleCheckPublicIp()}
+                onClick={() => void handleRepairRuntime()}
+                disabled={
+                  isRuntimeLoading || runtimeHealth?.repairInProgress === true
+                }
+              >
+                {runtimeHealth?.repairInProgress || isRuntimeLoading
+                  ? t('admin.runtime_repair_running')
+                  : t('admin.runtime_repair_action')}
+              </button>
+            </div>
+            <form className="admin-form" onSubmit={handleSaveSelfRepair}>
+              <div className="admin-checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selfRepairEnabled}
+                    onChange={(event) =>
+                      setSelfRepairEnabled(event.target.checked)
+                    }
+                  />{' '}
+                  {t('admin.self_repair_enabled')}
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={selfRepairAllowContainerRepair}
+                    onChange={(event) =>
+                      setSelfRepairAllowContainerRepair(event.target.checked)
+                    }
+                  />{' '}
+                  {t('admin.self_repair_allow_container')}
+                </label>
+              </div>
+              <label className="admin-field">
+                <span>{t('admin.self_repair_interval')}</span>
+                <input
+                  type="number"
+                  min={30}
+                  max={86400}
+                  value={selfRepairIntervalSeconds}
+                  onChange={(event) =>
+                    setSelfRepairIntervalSeconds(event.target.value)
+                  }
+                />
+              </label>
+              <button
+                type="submit"
+                className="admin-secondary-btn"
                 disabled={isRuntimeLoading}
               >
-                {t('admin.check_public_ip_now')}
+                {t('admin.save_self_repair')}
+              </button>
+            </form>
+            {selfRepair ? (
+              <p className="admin-copy">
+                {t('admin.self_repair_saved_at', {
+                  time: selfRepair.updatedAt,
+                })}
+              </p>
+            ) : null}
+            <form className="admin-form" onSubmit={handleSavePublicIp}>
+              <div className="admin-section-header">
+                <div>
+                  <h3>{t('admin.public_ip_automation')}</h3>
+                  <p className="admin-copy">
+                    {t('admin.public_ip_automation_copy')}
+                  </p>
+                </div>
+              </div>
+              <div className="admin-checkbox-row">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={publicIpEnabled}
+                    onChange={(event) =>
+                      setPublicIpEnabled(event.target.checked)
+                    }
+                  />{' '}
+                  {t('admin.public_ip_enabled')}
+                </label>
+              </div>
+              <label className="admin-field">
+                <span>{t('admin.public_ip_interval')}</span>
+                <input
+                  type="number"
+                  min={60}
+                  max={86400}
+                  value={publicIpIntervalSeconds}
+                  onChange={(event) =>
+                    setPublicIpIntervalSeconds(event.target.value)
+                  }
+                />
+              </label>
+              <div className="admin-inline-actions">
+                <button
+                  type="submit"
+                  className="admin-secondary-btn"
+                  disabled={isRuntimeLoading}
+                >
+                  {t('admin.save_public_ip')}
+                </button>
+                <button
+                  type="button"
+                  className="admin-primary-btn"
+                  onClick={() => void handleCheckPublicIp()}
+                  disabled={isRuntimeLoading}
+                >
+                  {t('admin.check_public_ip_now')}
+                </button>
+              </div>
+            </form>
+            {publicIp ? (
+              <div className="admin-status">
+                <span>
+                  {t('admin.public_ip_detected', {
+                    ip: publicIp.lastDetectedIp ?? t('admin.public_ip_none'),
+                  })}
+                </span>
+                <span>
+                  {t('admin.public_ip_applied', {
+                    ip: publicIp.lastAppliedIp ?? t('admin.public_ip_none'),
+                  })}
+                </span>
+                <span>
+                  {t('admin.public_ip_checked_at', {
+                    time: publicIp.lastCheckedAt ?? t('admin.public_ip_never'),
+                  })}
+                </span>
+                {publicIp.lastError ? (
+                  <span className="admin-error">{publicIp.lastError}</span>
+                ) : null}
+              </div>
+            ) : null}
+            {runtimeRepairResult ? (
+              <div className="admin-status">
+                <span>
+                  {t('admin.runtime_repair_status', {
+                    status: runtimeRepairResult.status,
+                  })}
+                </span>
+                <span>{runtimeRepairResult.message}</span>
+                {runtimeRepairResult.containerRepairStarted ? (
+                  <span>{t('admin.runtime_container_repair_started')}</span>
+                ) : null}
+              </div>
+            ) : null}
+          </section>
+
+          <section id="admin-users" className="admin-card">
+            <h2>{t('admin.create_user')}</h2>
+            <form className="admin-form" onSubmit={handleCreateUser}>
+              <label className="admin-field">
+                <span>{t('common.email')}</span>
+                <input
+                  type="email"
+                  value={newUserEmail}
+                  onChange={(event) => setNewUserEmail(event.target.value)}
+                  required
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('common.username')}</span>
+                <input
+                  value={newUserUsername}
+                  onChange={(event) => setNewUserUsername(event.target.value)}
+                  minLength={2}
+                  maxLength={32}
+                  required
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('common.password')}</span>
+                <input
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(event) => setNewUserPassword(event.target.value)}
+                  minLength={8}
+                  required
+                />
+              </label>
+              <button
+                type="submit"
+                className="admin-primary-btn"
+                disabled={isLoading}
+              >
+                {t('admin.create_user_action')}
+              </button>
+            </form>
+          </section>
+
+          <section className="admin-card">
+            <h2>{t('admin.create_channel')}</h2>
+            <form className="admin-form" onSubmit={handleCreateChannel}>
+              <label className="admin-field">
+                <span>{t('admin.channel_name')}</span>
+                <input
+                  value={newChannelName}
+                  onChange={(event) => setNewChannelName(event.target.value)}
+                  required
+                />
+              </label>
+              <div className="admin-inline-grid">
+                <label className="admin-field">
+                  <span>{t('admin.channel_type')}</span>
+                  <select
+                    value={newChannelType}
+                    onChange={(event) =>
+                      setNewChannelType(event.target.value as 'text' | 'voice')
+                    }
+                  >
+                    <option value="text">{t('admin.channel_type_text')}</option>
+                    <option value="voice">
+                      {t('admin.channel_type_voice')}
+                    </option>
+                  </select>
+                </label>
+                <label className="admin-field">
+                  <span>{t('admin.voice_quality')}</span>
+                  <select
+                    value={newChannelVoiceQuality}
+                    onChange={(event) =>
+                      setNewChannelVoiceQuality(
+                        event.target.value as 'high' | 'standard',
+                      )
+                    }
+                    disabled={newChannelType !== 'voice'}
+                  >
+                    <option value="standard">
+                      {t('admin.voice_quality_standard')}
+                    </option>
+                    <option value="high">
+                      {t('admin.voice_quality_high')}
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <button
+                type="submit"
+                className="admin-primary-btn"
+                disabled={isLoading}
+              >
+                {t('admin.create_channel_action')}
+              </button>
+            </form>
+          </section>
+        </div>
+
+        <section id="admin-deployment" className="admin-card admin-card--full">
+          <div className="admin-section-header">
+            <div>
+              <h2>{t('admin.deployment_settings')}</h2>
+              <p className="admin-copy">
+                {t('admin.deployment_settings_copy')}
+              </p>
+            </div>
+            {deployment?.pendingApply ? (
+              <span className="admin-pending-badge">
+                {t('admin.pending_apply')}
+              </span>
+            ) : null}
+          </div>
+          <form className="admin-form" onSubmit={handleSaveDeploymentSettings}>
+            <div className="admin-inline-grid admin-inline-grid--wide">
+              <label className="admin-field">
+                <span>{t('admin.web_host_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={webHostPort}
+                  onChange={(event) => setWebHostPort(event.target.value)}
+                  required
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.admin_host_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={adminHostPort}
+                  onChange={(event) => setAdminHostPort(event.target.value)}
+                  required
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.allowed_hosts')}</span>
+                <input
+                  value={allowedHosts}
+                  onChange={(event) => setAllowedHosts(event.target.value)}
+                  placeholder={t('admin.allowed_hosts_placeholder')}
+                />
+              </label>
+            </div>
+            <label className="admin-field">
+              <span>{t('admin.stun_urls')}</span>
+              <input
+                value={stunUrls}
+                onChange={(event) => setStunUrls(event.target.value)}
+              />
+            </label>
+            <div className="admin-checkbox-row">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={turnEnabled}
+                  onChange={(event) => setTurnEnabled(event.target.checked)}
+                />{' '}
+                {t('admin.turn_enabled')}
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={sfuEnableTcp}
+                  onChange={(event) => setSfuEnableTcp(event.target.checked)}
+                />{' '}
+                {t('admin.sfu_enable_tcp')}
+              </label>
+            </div>
+            <div className="admin-inline-grid admin-inline-grid--wide">
+              <label className="admin-field">
+                <span>{t('admin.turn_urls')}</span>
+                <input
+                  value={turnUrls}
+                  onChange={(event) => setTurnUrls(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_external_ip')}</span>
+                <input
+                  value={turnExternalIp}
+                  onChange={(event) => setTurnExternalIp(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_realm')}</span>
+                <input
+                  value={turnRealm}
+                  onChange={(event) => setTurnRealm(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_username')}</span>
+                <input
+                  value={turnUsername}
+                  onChange={(event) => setTurnUsername(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_password')}</span>
+                <input
+                  type="password"
+                  value={turnPassword}
+                  onChange={(event) => setTurnPassword(event.target.value)}
+                  placeholder={
+                    deployment?.turnPasswordConfigured
+                      ? t('admin.secret_configured_placeholder')
+                      : ''
+                  }
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={turnPort}
+                  onChange={(event) => setTurnPort(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_min_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={turnMinPort}
+                  onChange={(event) => setTurnMinPort(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.turn_max_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={turnMaxPort}
+                  onChange={(event) => setTurnMaxPort(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.sfu_announced_ip')}</span>
+                <input
+                  value={sfuAnnouncedIp}
+                  onChange={(event) => setSfuAnnouncedIp(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.sfu_rtc_min_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={sfuRtcMinPort}
+                  onChange={(event) => setSfuRtcMinPort(event.target.value)}
+                />
+              </label>
+              <label className="admin-field">
+                <span>{t('admin.sfu_rtc_max_port')}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={sfuRtcMaxPort}
+                  onChange={(event) => setSfuRtcMaxPort(event.target.value)}
+                />
+              </label>
+            </div>
+            <label className="admin-field admin-field--full admin-json-field">
+              <span>{t('admin.media_region_profiles')}</span>
+              <textarea
+                value={mediaRegionProfiles}
+                onChange={(event) => setMediaRegionProfiles(event.target.value)}
+                placeholder={t('admin.media_region_profiles_placeholder')}
+                spellCheck={false}
+              />
+            </label>
+            <p className="admin-copy">
+              {t('admin.media_region_profiles_hint')}
+            </p>
+            <div className="admin-inline-actions">
+              <button
+                type="submit"
+                className="admin-primary-btn"
+                disabled={isLoading}
+              >
+                {t('admin.save_deployment_settings')}
+              </button>
+              <button
+                type="button"
+                className="admin-secondary-btn"
+                onClick={() => void handleApplyDeployment()}
+                disabled={isLoading || deployment?.dockerEnabled === false}
+              >
+                {t('admin.apply_deployment_settings')}
               </button>
             </div>
           </form>
-          {publicIp ? (
-            <div className="admin-status">
-              <span>
-                {t('admin.public_ip_detected', {
-                  ip: publicIp.lastDetectedIp ?? t('admin.public_ip_none'),
-                })}
-              </span>
-              <span>
-                {t('admin.public_ip_applied', {
-                  ip: publicIp.lastAppliedIp ?? t('admin.public_ip_none'),
-                })}
-              </span>
-              <span>
-                {t('admin.public_ip_checked_at', {
-                  time: publicIp.lastCheckedAt ?? t('admin.public_ip_never'),
-                })}
-              </span>
-              {publicIp.lastError ? (
-                <span className="admin-error">{publicIp.lastError}</span>
-              ) : null}
-            </div>
-          ) : null}
-          {runtimeRepairResult ? (
-            <div className="admin-status">
-              <span>
-                {t('admin.runtime_repair_status', {
-                  status: runtimeRepairResult.status,
-                })}
-              </span>
-              <span>{runtimeRepairResult.message}</span>
-              {runtimeRepairResult.containerRepairStarted ? (
-                <span>{t('admin.runtime_container_repair_started')}</span>
-              ) : null}
-            </div>
-          ) : null}
         </section>
 
-        <section className="admin-card">
-          <h2>{t('admin.create_user')}</h2>
-          <form className="admin-form" onSubmit={handleCreateUser}>
-            <label className="admin-field">
-              <span>{t('common.email')}</span>
-              <input
-                type="email"
-                value={newUserEmail}
-                onChange={(event) => setNewUserEmail(event.target.value)}
-                required
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('common.username')}</span>
-              <input
-                value={newUserUsername}
-                onChange={(event) => setNewUserUsername(event.target.value)}
-                minLength={2}
-                maxLength={32}
-                required
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('common.password')}</span>
-              <input
-                type="password"
-                value={newUserPassword}
-                onChange={(event) => setNewUserPassword(event.target.value)}
-                minLength={8}
-                required
-              />
-            </label>
-            <button
-              type="submit"
-              className="admin-primary-btn"
-              disabled={isLoading}
-            >
-              {t('admin.create_user_action')}
-            </button>
-          </form>
-        </section>
-
-        <section className="admin-card">
-          <h2>{t('admin.create_channel')}</h2>
-          <form className="admin-form" onSubmit={handleCreateChannel}>
-            <label className="admin-field">
-              <span>{t('admin.channel_name')}</span>
-              <input
-                value={newChannelName}
-                onChange={(event) => setNewChannelName(event.target.value)}
-                required
-              />
-            </label>
-            <div className="admin-inline-grid">
-              <label className="admin-field">
-                <span>{t('admin.channel_type')}</span>
-                <select
-                  value={newChannelType}
-                  onChange={(event) =>
-                    setNewChannelType(event.target.value as 'text' | 'voice')
-                  }
-                >
-                  <option value="text">{t('admin.channel_type_text')}</option>
-                  <option value="voice">{t('admin.channel_type_voice')}</option>
-                </select>
-              </label>
-              <label className="admin-field">
-                <span>{t('admin.voice_quality')}</span>
-                <select
-                  value={newChannelVoiceQuality}
-                  onChange={(event) =>
-                    setNewChannelVoiceQuality(
-                      event.target.value as 'high' | 'standard',
-                    )
-                  }
-                  disabled={newChannelType !== 'voice'}
-                >
-                  <option value="standard">
-                    {t('admin.voice_quality_standard')}
-                  </option>
-                  <option value="high">{t('admin.voice_quality_high')}</option>
-                </select>
-              </label>
-            </div>
-            <button
-              type="submit"
-              className="admin-primary-btn"
-              disabled={isLoading}
-            >
-              {t('admin.create_channel_action')}
-            </button>
-          </form>
-        </section>
-      </div>
-
-      <section className="admin-card admin-card--full">
-        <div className="admin-section-header">
-          <div>
-            <h2>{t('admin.deployment_settings')}</h2>
-            <p className="admin-copy">{t('admin.deployment_settings_copy')}</p>
-          </div>
-          {deployment?.pendingApply ? (
-            <span className="admin-pending-badge">
-              {t('admin.pending_apply')}
-            </span>
-          ) : null}
-        </div>
-        <form className="admin-form" onSubmit={handleSaveDeploymentSettings}>
-          <div className="admin-inline-grid admin-inline-grid--wide">
-            <label className="admin-field">
-              <span>{t('admin.web_host_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={webHostPort}
-                onChange={(event) => setWebHostPort(event.target.value)}
-                required
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.admin_host_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={adminHostPort}
-                onChange={(event) => setAdminHostPort(event.target.value)}
-                required
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.allowed_hosts')}</span>
-              <input
-                value={allowedHosts}
-                onChange={(event) => setAllowedHosts(event.target.value)}
-                placeholder={t('admin.allowed_hosts_placeholder')}
-              />
-            </label>
-          </div>
-          <label className="admin-field">
-            <span>{t('admin.stun_urls')}</span>
-            <input
-              value={stunUrls}
-              onChange={(event) => setStunUrls(event.target.value)}
-            />
-          </label>
-          <div className="admin-checkbox-row">
-            <label>
-              <input
-                type="checkbox"
-                checked={turnEnabled}
-                onChange={(event) => setTurnEnabled(event.target.checked)}
-              />{' '}
-              {t('admin.turn_enabled')}
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={sfuEnableTcp}
-                onChange={(event) => setSfuEnableTcp(event.target.checked)}
-              />{' '}
-              {t('admin.sfu_enable_tcp')}
-            </label>
-          </div>
-          <div className="admin-inline-grid admin-inline-grid--wide">
-            <label className="admin-field">
-              <span>{t('admin.turn_urls')}</span>
-              <input
-                value={turnUrls}
-                onChange={(event) => setTurnUrls(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_external_ip')}</span>
-              <input
-                value={turnExternalIp}
-                onChange={(event) => setTurnExternalIp(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_realm')}</span>
-              <input
-                value={turnRealm}
-                onChange={(event) => setTurnRealm(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_username')}</span>
-              <input
-                value={turnUsername}
-                onChange={(event) => setTurnUsername(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_password')}</span>
-              <input
-                type="password"
-                value={turnPassword}
-                onChange={(event) => setTurnPassword(event.target.value)}
-                placeholder={
-                  deployment?.turnPasswordConfigured
-                    ? t('admin.secret_configured_placeholder')
-                    : ''
-                }
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={turnPort}
-                onChange={(event) => setTurnPort(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_min_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={turnMinPort}
-                onChange={(event) => setTurnMinPort(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.turn_max_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={turnMaxPort}
-                onChange={(event) => setTurnMaxPort(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.sfu_announced_ip')}</span>
-              <input
-                value={sfuAnnouncedIp}
-                onChange={(event) => setSfuAnnouncedIp(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.sfu_rtc_min_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={sfuRtcMinPort}
-                onChange={(event) => setSfuRtcMinPort(event.target.value)}
-              />
-            </label>
-            <label className="admin-field">
-              <span>{t('admin.sfu_rtc_max_port')}</span>
-              <input
-                type="number"
-                min={1}
-                max={65535}
-                value={sfuRtcMaxPort}
-                onChange={(event) => setSfuRtcMaxPort(event.target.value)}
-              />
-            </label>
-          </div>
-          <label className="admin-field admin-field--full admin-json-field">
-            <span>{t('admin.media_region_profiles')}</span>
-            <textarea
-              value={mediaRegionProfiles}
-              onChange={(event) => setMediaRegionProfiles(event.target.value)}
-              placeholder={t('admin.media_region_profiles_placeholder')}
-              spellCheck={false}
-            />
-          </label>
-          <p className="admin-copy">{t('admin.media_region_profiles_hint')}</p>
-          <div className="admin-inline-actions">
-            <button
-              type="submit"
-              className="admin-primary-btn"
-              disabled={isLoading}
-            >
-              {t('admin.save_deployment_settings')}
-            </button>
-            <button
-              type="button"
-              className="admin-secondary-btn"
-              onClick={() => void handleApplyDeployment()}
-              disabled={isLoading || deployment?.dockerEnabled === false}
-            >
-              {t('admin.apply_deployment_settings')}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="admin-card admin-card--full">
-        <h2>{t('admin.workspace_channels')}</h2>
-        {!workspace?.guildId ? (
-          <p className="admin-copy">{t('admin.workspace_channels_hint')}</p>
-        ) : (
-          <div className="admin-channel-list">
-            {workspace.channels.map((channel) => (
-              <article key={channel.id} className="admin-channel-row">
-                <div className="admin-channel-fields">
-                  <label className="admin-field">
-                    <span>{t('admin.field_name')}</span>
-                    <input
-                      id={`channel-name-${channel.id}`}
-                      defaultValue={channel.name}
-                    />
-                  </label>
-                  <label className="admin-field">
-                    <span>{t('admin.field_type')}</span>
-                    <input value={channel.type} readOnly />
-                  </label>
-                  <label className="admin-field">
-                    <span>{t('admin.voice_quality')}</span>
-                    <select
-                      id={`channel-quality-${channel.id}`}
-                      defaultValue={channel.voiceQuality}
-                      disabled={channel.type !== 'voice'}
+        <section id="admin-channels" className="admin-card admin-card--full">
+          <h2>{t('admin.workspace_channels')}</h2>
+          {!workspace?.guildId ? (
+            <p className="admin-copy">{t('admin.workspace_channels_hint')}</p>
+          ) : (
+            <div className="admin-channel-list">
+              {workspace.channels.map((channel) => (
+                <article key={channel.id} className="admin-channel-row">
+                  <div className="admin-channel-fields">
+                    <label className="admin-field">
+                      <span>{t('admin.field_name')}</span>
+                      <input
+                        id={`channel-name-${channel.id}`}
+                        defaultValue={channel.name}
+                      />
+                    </label>
+                    <label className="admin-field">
+                      <span>{t('admin.field_type')}</span>
+                      <input value={channel.type} readOnly />
+                    </label>
+                    <label className="admin-field">
+                      <span>{t('admin.voice_quality')}</span>
+                      <select
+                        id={`channel-quality-${channel.id}`}
+                        defaultValue={channel.voiceQuality}
+                        disabled={channel.type !== 'voice'}
+                      >
+                        <option value="standard">
+                          {t('admin.voice_quality_standard')}
+                        </option>
+                        <option value="high">
+                          {t('admin.voice_quality_high')}
+                        </option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="admin-channel-actions">
+                    <button
+                      type="button"
+                      className="admin-secondary-btn"
+                      onClick={() => void handleSaveChannel(channel)}
+                      disabled={isLoading}
                     >
-                      <option value="standard">
-                        {t('admin.voice_quality_standard')}
-                      </option>
-                      <option value="high">
-                        {t('admin.voice_quality_high')}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-                <div className="admin-channel-actions">
-                  <button
-                    type="button"
-                    className="admin-secondary-btn"
-                    onClick={() => void handleSaveChannel(channel)}
-                    disabled={isLoading}
-                  >
-                    {t('admin.save_channel')}
-                  </button>
-                  <button
-                    type="button"
-                    className="admin-danger-btn"
-                    onClick={() => void handleDeleteChannel(channel)}
-                    disabled={
-                      isLoading || getDeleteBlockReason(channel) !== null
-                    }
-                  >
-                    {t('admin.delete_channel_action')}
-                  </button>
-                </div>
-                {getDeleteBlockReason(channel) ? (
-                  <p className="admin-channel-hint">
-                    {getDeleteBlockReason(channel)}
-                  </p>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                      {t('admin.save_channel')}
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-danger-btn"
+                      onClick={() => void handleDeleteChannel(channel)}
+                      disabled={
+                        isLoading || getDeleteBlockReason(channel) !== null
+                      }
+                    >
+                      {t('admin.delete_channel_action')}
+                    </button>
+                  </div>
+                  {getDeleteBlockReason(channel) ? (
+                    <p className="admin-channel-hint">
+                      {getDeleteBlockReason(channel)}
+                    </p>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
     </div>
   );
 }

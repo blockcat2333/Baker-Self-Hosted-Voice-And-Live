@@ -319,21 +319,24 @@ function buildScreenPickerDocument() {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Baker Screen Share</title>
+  <title>Baker · 选择共享内容</title>
   <style>
     :root {
       color-scheme: dark;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --bg: #0b1220;
-      --panel: #111827;
-      --panel-2: #0f172a;
-      --border: rgba(148, 163, 184, 0.2);
-      --border-strong: rgba(125, 211, 252, 0.72);
-      --text: #f8fafc;
-      --muted: #94a3b8;
-      --accent: #38bdf8;
-      --accent-soft: rgba(56, 189, 248, 0.16);
-      --danger: #fca5a5;
+      --bg: #111214;
+      --panel: #1e1f22;
+      --panel-2: #2b2d31;
+      --panel-deep: #0f1012;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-strong: #5865f2;
+      --text: #f2f3f5;
+      --muted: #b5bac1;
+      --muted-2: #80848e;
+      --accent: #5865f2;
+      --accent-hover: #4752c4;
+      --accent-soft: rgba(88, 101, 242, 0.18);
+      --danger: #fa777c;
     }
 
     * {
@@ -353,6 +356,12 @@ function buildScreenPickerDocument() {
       font: inherit;
     }
 
+    button:focus-visible,
+    input:focus-visible {
+      outline: 2px solid #949cf7;
+      outline-offset: 2px;
+    }
+
     .shell {
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -362,11 +371,34 @@ function buildScreenPickerDocument() {
 
     header {
       border-bottom: 1px solid var(--border);
-      padding: 22px 24px 18px;
+      padding: 20px 24px 18px;
+    }
+
+    .brand {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      font-size: 12px;
+      font-weight: 700;
+      gap: 9px;
+      letter-spacing: 0.02em;
+      margin-bottom: 16px;
+    }
+
+    .brand-mark {
+      align-items: center;
+      background: var(--accent);
+      border-radius: 9px;
+      color: #fff;
+      display: inline-flex;
+      font-size: 14px;
+      height: 28px;
+      justify-content: center;
+      width: 28px;
     }
 
     h1 {
-      font-size: 22px;
+      font-size: 24px;
       line-height: 1.15;
       margin: 0;
     }
@@ -387,9 +419,9 @@ function buildScreenPickerDocument() {
     }
 
     .tabs {
-      background: rgba(15, 23, 42, 0.8);
+      background: var(--panel-deep);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 9px;
       display: inline-grid;
       grid-template-columns: repeat(2, minmax(110px, 1fr));
       padding: 3px;
@@ -407,14 +439,14 @@ function buildScreenPickerDocument() {
     }
 
     .tab[aria-selected="true"] {
-      background: rgba(148, 163, 184, 0.16);
-      color: var(--text);
+      background: var(--panel-2);
+      color: #fff;
     }
 
     .search {
-      background: rgba(2, 6, 23, 0.34);
+      background: var(--panel-deep);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 9px;
       color: var(--text);
       min-height: 40px;
       min-width: 0;
@@ -423,7 +455,11 @@ function buildScreenPickerDocument() {
     }
 
     .search::placeholder {
-      color: #64748b;
+      color: var(--muted-2);
+    }
+
+    .search:focus {
+      border-color: rgba(88, 101, 242, 0.8);
     }
 
     .content {
@@ -442,34 +478,54 @@ function buildScreenPickerDocument() {
     .source-card {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 12px;
       color: inherit;
       cursor: pointer;
       display: grid;
       gap: 10px;
       min-width: 0;
       padding: 10px;
+      position: relative;
       text-align: left;
-      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+      transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease, transform 120ms ease;
     }
 
     .source-card:hover {
-      background: #162033;
-      border-color: rgba(148, 163, 184, 0.42);
+      background: #232428;
+      border-color: rgba(255, 255, 255, 0.18);
       transform: translateY(-1px);
     }
 
     .source-card[aria-pressed="true"] {
       background: var(--accent-soft);
       border-color: var(--border-strong);
+      box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.3);
+    }
+
+    .source-card[aria-pressed="true"]::after {
+      align-items: center;
+      background: var(--accent);
+      border: 3px solid var(--bg);
+      border-radius: 50%;
+      color: #fff;
+      content: "✓";
+      display: flex;
+      font-size: 12px;
+      font-weight: 800;
+      height: 25px;
+      justify-content: center;
+      position: absolute;
+      right: 6px;
+      top: 6px;
+      width: 25px;
     }
 
     .preview {
       align-items: center;
       aspect-ratio: 16 / 9;
-      background: #020617;
-      border: 1px solid rgba(148, 163, 184, 0.12);
-      border-radius: 6px;
+      background: var(--panel-deep);
+      border: 1px solid var(--border);
+      border-radius: 8px;
       display: flex;
       justify-content: center;
       overflow: hidden;
@@ -482,7 +538,7 @@ function buildScreenPickerDocument() {
     }
 
     .preview-empty {
-      color: #64748b;
+      color: var(--muted-2);
       font-size: 12px;
     }
 
@@ -490,19 +546,19 @@ function buildScreenPickerDocument() {
       align-items: center;
       display: grid;
       gap: 9px;
-      grid-template-columns: 24px minmax(0, 1fr);
+      grid-template-columns: 28px minmax(0, 1fr);
       min-height: 30px;
     }
 
     .app-icon {
       align-items: center;
-      background: rgba(148, 163, 184, 0.14);
-      border-radius: 6px;
+      background: var(--panel-2);
+      border-radius: 7px;
       display: flex;
-      height: 24px;
+      height: 28px;
       justify-content: center;
       overflow: hidden;
-      width: 24px;
+      width: 28px;
     }
 
     .app-icon img {
@@ -525,6 +581,12 @@ function buildScreenPickerDocument() {
       white-space: nowrap;
     }
 
+    .source-type {
+      color: var(--muted-2);
+      font-size: 11px;
+      margin-top: 2px;
+    }
+
     .empty {
       align-items: center;
       border: 1px dashed var(--border);
@@ -537,7 +599,7 @@ function buildScreenPickerDocument() {
 
     footer {
       align-items: center;
-      background: rgba(15, 23, 42, 0.96);
+      background: var(--panel);
       border-top: 1px solid var(--border);
       display: grid;
       gap: 16px;
@@ -547,16 +609,32 @@ function buildScreenPickerDocument() {
 
     .audio-row {
       align-items: center;
+      background: var(--panel-deep);
+      border: 1px solid var(--border);
+      border-radius: 10px;
       display: grid;
       gap: 12px;
-      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-columns: 34px minmax(0, 1fr) auto;
       min-width: 0;
+      padding: 10px 12px;
+    }
+
+    .audio-icon {
+      align-items: center;
+      background: var(--accent-soft);
+      border-radius: 8px;
+      color: #b9beff;
+      display: flex;
+      font-size: 16px;
+      height: 34px;
+      justify-content: center;
+      width: 34px;
     }
 
     .switch {
       align-items: center;
-      background: rgba(148, 163, 184, 0.18);
-      border: 1px solid rgba(148, 163, 184, 0.28);
+      background: #4e5058;
+      border: 0;
       border-radius: 999px;
       cursor: pointer;
       display: inline-flex;
@@ -566,8 +644,7 @@ function buildScreenPickerDocument() {
     }
 
     .switch[aria-checked="true"] {
-      background: rgba(56, 189, 248, 0.28);
-      border-color: rgba(56, 189, 248, 0.62);
+      background: var(--accent);
     }
 
     .switch[aria-disabled="true"] {
@@ -576,7 +653,7 @@ function buildScreenPickerDocument() {
     }
 
     .switch-handle {
-      background: #e2e8f0;
+      background: #fff;
       border-radius: 999px;
       height: 22px;
       transform: translateX(0);
@@ -613,7 +690,7 @@ function buildScreenPickerDocument() {
     }
 
     .btn {
-      border-radius: 8px;
+      border-radius: 4px;
       cursor: pointer;
       font-weight: 700;
       min-height: 38px;
@@ -621,7 +698,7 @@ function buildScreenPickerDocument() {
     }
 
     .btn-secondary {
-      background: rgba(148, 163, 184, 0.1);
+      background: transparent;
       border: 1px solid var(--border);
       color: var(--text);
     }
@@ -629,7 +706,15 @@ function buildScreenPickerDocument() {
     .btn-primary {
       background: var(--accent);
       border: 1px solid transparent;
-      color: #082f49;
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--panel-2);
     }
 
     .btn:disabled {
@@ -660,8 +745,9 @@ function buildScreenPickerDocument() {
 <body>
   <main class="shell">
     <header>
+      <div class="brand"><span class="brand-mark">B</span><span>Baker Desktop</span></div>
       <h1>选择共享内容</h1>
-      <p class="subtitle">选择一个窗口或整个屏幕进行直播。</p>
+      <p class="subtitle">选择一个窗口或整个屏幕；确认前不会开始传输画面。</p>
     </header>
     <section class="toolbar">
       <div class="tabs" role="tablist" aria-label="共享类型">
@@ -673,13 +759,14 @@ function buildScreenPickerDocument() {
     <section id="content" class="content" aria-live="polite"></section>
     <footer>
       <div class="audio-row">
-        <button id="audio-switch" class="switch" type="button" role="switch" aria-checked="false">
-          <span class="switch-handle"></span>
-        </button>
+        <span class="audio-icon" aria-hidden="true">♫</span>
         <div>
           <p class="audio-title">共享声音</p>
           <p id="audio-copy" class="audio-copy">直播声音会排除 Baker 自身音频。</p>
         </div>
+        <button id="audio-switch" class="switch" type="button" role="switch" aria-label="共享声音" aria-checked="false">
+          <span class="switch-handle"></span>
+        </button>
       </div>
       <div class="actions">
         <button id="cancel" class="btn btn-secondary" type="button">取消</button>
@@ -789,11 +876,16 @@ function buildScreenPickerDocument() {
           fallback.textContent = source.type === 'screen' ? 'S' : 'W';
           icon.appendChild(fallback);
         }
+        const label = document.createElement('div');
         const name = document.createElement('div');
         name.className = 'source-name';
         name.title = source.name;
         name.textContent = source.name;
-        info.append(icon, name);
+        const type = document.createElement('div');
+        type.className = 'source-type';
+        type.textContent = source.type === 'screen' ? '整个屏幕' : '应用窗口';
+        label.append(name, type);
+        info.append(icon, label);
         button.append(preview, info);
         grid.appendChild(button);
       }
@@ -845,20 +937,23 @@ async function showScreenSourcePicker(
   return new Promise((resolve) => {
     const pickerWindow = new BrowserWindow({
       autoHideMenuBar: true,
-      height: 720,
+      backgroundColor: '#111214',
+      height: 760,
       icon: getDesktopIconPath(),
+      minHeight: 600,
+      minWidth: 760,
       modal: !!owner,
       parent: owner ?? undefined,
       resizable: true,
       show: false,
-      title: 'Baker Screen Share',
+      title: 'Baker · 选择共享内容',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         preload: path.join(currentDirectory, 'preload.cjs'),
         sandbox: false,
       },
-      width: 980,
+      width: 1040,
     });
 
     activeScreenPicker = {
@@ -943,60 +1038,124 @@ function buildMusicPickerDocument() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Baker Music Share</title>
+  <title>Baker · 共享应用音频</title>
   <style>
     :root {
       color-scheme: dark;
       font-family: Inter, "Segoe UI", system-ui, sans-serif;
-      background: #0f172a;
-      color: #e5e7eb;
+      --bg: #111214;
+      --panel: #1e1f22;
+      --panel-2: #2b2d31;
+      --deep: #0f1012;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #f2f3f5;
+      --muted: #b5bac1;
+      --muted-2: #80848e;
+      --accent: #5865f2;
+      --accent-hover: #4752c4;
+      --accent-soft: rgba(88, 101, 242, 0.18);
+      background: var(--bg);
+      color: var(--text);
     }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: #0f172a; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); }
+    button:focus-visible,
+    input:focus-visible { outline: 2px solid #949cf7; outline-offset: 2px; }
     .shell {
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr) auto;
-      gap: 14px;
       height: 100vh;
-      padding: 18px;
     }
-    h1 { font-size: 18px; margin: 0; }
-    .subtitle { color: #94a3b8; font-size: 12px; margin: 4px 0 0; }
-    .search {
-      width: 100%;
-      border: 1px solid rgba(148, 163, 184, 0.28);
-      border-radius: 6px;
-      background: rgba(15, 23, 42, 0.9);
-      color: #e5e7eb;
-      font: inherit;
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 20px 22px 18px;
+    }
+    .brand {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      font-size: 12px;
+      font-weight: 700;
+      gap: 9px;
+      margin-bottom: 16px;
+    }
+    .brand-mark {
+      align-items: center;
+      background: var(--accent);
+      border-radius: 9px;
+      color: #fff;
+      display: inline-flex;
+      font-size: 14px;
+      height: 28px;
+      justify-content: center;
+      width: 28px;
+    }
+    h1 { font-size: 22px; margin: 0; }
+    .subtitle { color: var(--muted); font-size: 13px; margin: 7px 0 0; }
+    .notice {
+      align-items: flex-start;
+      background: var(--accent-soft);
+      border: 1px solid rgba(88, 101, 242, 0.35);
+      border-radius: 9px;
+      color: #c9cdfb;
+      display: flex;
+      font-size: 12px;
+      gap: 9px;
+      line-height: 1.5;
+      margin-top: 14px;
       padding: 10px 12px;
     }
+    .search {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--deep);
+      color: var(--text);
+      font: inherit;
+      margin: 14px 22px;
+      padding: 11px 12px;
+      width: calc(100% - 44px);
+    }
+    .search::placeholder { color: var(--muted-2); }
+    .search:focus { border-color: rgba(88, 101, 242, 0.8); }
     .content {
       min-height: 0;
       overflow: auto;
-      border: 1px solid rgba(148, 163, 184, 0.18);
-      border-radius: 8px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin: 0 22px 14px;
     }
     .list { display: grid; gap: 1px; }
     .row {
       align-items: center;
-      background: rgba(30, 41, 59, 0.72);
+      background: var(--panel);
       border: 0;
       color: inherit;
       cursor: pointer;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 124px;
+      grid-template-columns: 34px minmax(0, 1fr) minmax(90px, 140px) 22px;
       gap: 12px;
-      min-height: 52px;
-      padding: 10px 12px;
+      min-height: 62px;
+      padding: 10px 14px;
       text-align: left;
       width: 100%;
     }
-    .row:hover { background: rgba(51, 65, 85, 0.8); }
+    .row:hover { background: #232428; }
     .row[aria-pressed="true"] {
-      background: rgba(34, 197, 94, 0.16);
-      outline: 1px solid rgba(34, 197, 94, 0.45);
+      background: var(--accent-soft);
+      outline: 1px solid rgba(88, 101, 242, 0.65);
       outline-offset: -1px;
+    }
+    .source-icon {
+      align-items: center;
+      background: var(--panel-2);
+      border-radius: 9px;
+      color: #c9cdfb;
+      display: flex;
+      font-size: 16px;
+      height: 34px;
+      justify-content: center;
+      width: 34px;
     }
     .name {
       overflow: hidden;
@@ -1005,31 +1164,67 @@ function buildMusicPickerDocument() {
       font-size: 13px;
       font-weight: 600;
     }
+    .source-copy {
+      color: var(--muted-2);
+      font-size: 11px;
+      margin-top: 3px;
+    }
     .meter {
       height: 8px;
       overflow: hidden;
       border-radius: 999px;
-      background: rgba(148, 163, 184, 0.22);
+      background: #3f4147;
     }
     .meter-fill {
       height: 100%;
       width: 0%;
-      background: #22c55e;
+      background: linear-gradient(90deg, #5865f2, #9b84ee);
       transition: width 120ms linear;
     }
+    .check {
+      align-items: center;
+      border: 1px solid #4e5058;
+      border-radius: 50%;
+      color: transparent;
+      display: flex;
+      font-size: 11px;
+      height: 20px;
+      justify-content: center;
+      width: 20px;
+    }
+    .row[aria-pressed="true"] .check {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
     .empty {
-      color: #94a3b8;
+      color: var(--muted);
       font-size: 13px;
       padding: 18px;
     }
     footer {
       align-items: center;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: 14px 22px;
+    }
+    .selection-summary {
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .actions {
       display: flex;
       gap: 10px;
-      justify-content: flex-end;
     }
     .btn {
-      border-radius: 6px;
+      border-radius: 4px;
       cursor: pointer;
       font: inherit;
       font-size: 13px;
@@ -1037,29 +1232,42 @@ function buildMusicPickerDocument() {
       padding: 9px 14px;
     }
     .btn-secondary {
-      background: rgba(15, 23, 42, 0.86);
-      border: 1px solid rgba(148, 163, 184, 0.28);
-      color: #cbd5e1;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
     }
     .btn-primary {
-      background: #16a34a;
-      border: 1px solid #22c55e;
-      color: #052e16;
+      background: var(--accent);
+      border: 1px solid transparent;
+      color: #fff;
     }
+    .btn-secondary:hover:not(:disabled) { background: var(--panel-2); }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
     .btn:disabled { cursor: not-allowed; opacity: 0.5; }
+    @media (max-width: 620px) {
+      .row { grid-template-columns: 34px minmax(0, 1fr) 22px; }
+      .meter { display: none; }
+      footer { grid-template-columns: minmax(0, 1fr); }
+      .actions .btn { flex: 1; }
+    }
   </style>
 </head>
 <body>
   <main class="shell">
     <header>
-      <h1>Select music window</h1>
-      <p class="subtitle">Only the selected window process tree audio is shared. Window names stay local.</p>
+      <div class="brand"><span class="brand-mark">B</span><span>Baker Desktop</span></div>
+      <h1>共享应用音频</h1>
+      <p class="subtitle">选择一个正在播放声音的应用。</p>
+      <div class="notice"><span aria-hidden="true">♫</span><span>只共享所选应用及其子进程的声音，不会混入其他系统声音；窗口名称仅在本机处理。</span></div>
     </header>
-    <input id="search" class="search" type="search" placeholder="Search windows" />
+    <input id="search" class="search" type="search" placeholder="搜索应用或窗口" />
     <section id="content" class="content" aria-live="polite"></section>
     <footer>
-      <button id="cancel" class="btn btn-secondary" type="button">Cancel</button>
-      <button id="share" class="btn btn-primary" type="button" disabled>Share</button>
+      <div id="selection-summary" class="selection-summary">请选择要共享声音的应用</div>
+      <div class="actions">
+        <button id="cancel" class="btn btn-secondary" type="button">取消</button>
+        <button id="share" class="btn btn-primary" type="button" disabled>共享此应用</button>
+      </div>
     </footer>
   </main>
   <script>
@@ -1068,6 +1276,7 @@ function buildMusicPickerDocument() {
     const search = document.getElementById('search');
     const share = document.getElementById('share');
     const cancel = document.getElementById('cancel');
+    const selectionSummary = document.getElementById('selection-summary');
     let sources = [];
     let selectedId = null;
     let levels = {};
@@ -1083,8 +1292,12 @@ function buildMusicPickerDocument() {
         selectedId = visible[0]?.id ?? null;
       }
       share.disabled = !selectedId;
+      const selectedSource = visible.find((source) => source.id === selectedId);
+      selectionSummary.textContent = selectedSource
+        ? '将共享：' + selectedSource.title
+        : '请选择要共享声音的应用';
       if (visible.length === 0) {
-        content.innerHTML = '<div class="empty">No shareable windows.</div>';
+        content.innerHTML = '<div class="empty">没有找到可共享音频的应用窗口。</div>';
         return;
       }
 
@@ -1100,10 +1313,19 @@ function buildMusicPickerDocument() {
           render();
         });
 
+        const icon = document.createElement('div');
+        icon.className = 'source-icon';
+        icon.textContent = '♫';
+
+        const label = document.createElement('div');
         const name = document.createElement('div');
         name.className = 'name';
         name.title = source.title;
         name.textContent = source.title;
+        const copy = document.createElement('div');
+        copy.className = 'source-copy';
+        copy.textContent = '应用音频';
+        label.append(name, copy);
 
         const meter = document.createElement('div');
         meter.className = 'meter';
@@ -1111,7 +1333,11 @@ function buildMusicPickerDocument() {
         fill.className = 'meter-fill';
         fill.style.width = Math.round((levels[String(source.processId)] || 0) * 100) + '%';
         meter.appendChild(fill);
-        row.append(name, meter);
+        const check = document.createElement('span');
+        check.className = 'check';
+        check.textContent = '✓';
+        check.setAttribute('aria-hidden', 'true');
+        row.append(icon, label, meter, check);
         list.appendChild(row);
       }
       content.replaceChildren(list);
@@ -1144,7 +1370,7 @@ function buildMusicPickerDocument() {
       void refreshLevels();
       setInterval(refreshLevels, 500);
     }).catch(() => {
-      content.innerHTML = '<div class="empty">Could not load windows.</div>';
+      content.innerHTML = '<div class="empty">无法加载可共享音频的应用窗口。</div>';
     });
   </script>
 </body>
@@ -1163,20 +1389,23 @@ async function showMusicSourcePicker(
   return new Promise((resolve) => {
     const pickerWindow = new BrowserWindow({
       autoHideMenuBar: true,
-      height: 620,
+      backgroundColor: '#111214',
+      height: 650,
       icon: getDesktopIconPath(),
+      minHeight: 500,
+      minWidth: 560,
       modal: !!owner,
       parent: owner ?? undefined,
       resizable: true,
       show: false,
-      title: 'Baker Music Share',
+      title: 'Baker · 共享应用音频',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         preload: path.join(currentDirectory, 'preload.cjs'),
         sandbox: false,
       },
-      width: 720,
+      width: 760,
     });
 
     activeMusicPicker = { resolve, sources, window: pickerWindow };

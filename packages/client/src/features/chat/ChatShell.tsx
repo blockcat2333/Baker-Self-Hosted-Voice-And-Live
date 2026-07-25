@@ -15,11 +15,14 @@ import { syncGatewayChannelSubscription } from './channel-sync';
 import { useChatStore } from './chat-store';
 import { GuildList } from './GuildList';
 import { ChannelList } from './ChannelList';
+import { ContextMenu, type ContextMenuEntry } from './ContextMenu';
+import { MemberList } from './MemberList';
 import { MessagePanel } from './MessagePanel';
 import { MobileTabBar, type MobileTab } from './MobileTabBar';
 import { PresenceBar } from './PresenceBar';
 import { SidebarMusicError } from './SidebarMusicError';
 import { SettingsDialog } from './SettingsDialog';
+import { Tooltip } from './Tooltip';
 
 export interface ChatShellProps {
   api: ApiClient;
@@ -53,6 +56,7 @@ function SettingsIcon() {
 export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, versionWarning }: ChatShellProps) {
   const { t } = useTranslation();
   const activeGuildId = useChatStore((s) => s.activeGuildId);
+  const guilds = useChatStore((s) => s.guilds);
   const channelsByGuild = useChatStore((s) => s.channelsByGuild);
   const loadGuilds = useChatStore((s) => s.loadGuilds);
   const loadChannels = useChatStore((s) => s.loadChannels);
@@ -75,6 +79,13 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isStreamShareDialogOpen, setIsStreamShareDialogOpen] = useState(false);
+  const [isMemberListOpen, setIsMemberListOpen] = useState(true);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [serverMenu, setServerMenu] = useState<{ x: number; y: number } | null>(null);
+  const [serverNotificationMode, setServerNotificationMode] = useState<'all' | 'mentions' | 'none'>(
+    'mentions',
+  );
   const [showDataDetails, setShowDataDetails] = useState(() => loadBooleanPreference('showDataDetails', true));
   const [mainChannelSelection, setMainChannelSelection] = useState<MainChannelSelection>({
     channelId: null,
@@ -148,10 +159,77 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
   const hasAnyStream = !!ownedStream || Object.keys(watchedStreamsById).length > 0;
   const voiceHasContent = isVoiceActive || hasAnyStream;
   const activeGuildChannels = activeGuildId ? (channelsByGuild[activeGuildId] ?? []) : [];
+  const activeGuild = guilds.find((guild) => guild.id === activeGuildId);
+  const activeTextChannel = activeGuildChannels.find(
+    (channel) => channel.id === activeChannelId && channel.type !== 'voice',
+  );
   const selectedVoiceChannel =
     mainChannelSelection.kind === 'voice'
       ? activeGuildChannels.find((channel) => channel.id === mainChannelSelection.channelId && channel.type === 'voice')
       : null;
+  const selectedChannel = selectedVoiceChannel ?? activeTextChannel;
+  const searchResults = searchQuery.trim()
+    ? (activeChannelId ? (messagesByChannel[activeChannelId] ?? []) : [])
+        .filter((message) => {
+          const query = searchQuery.trim().toLocaleLowerCase();
+          return (
+            message.content.toLocaleLowerCase().includes(query) ||
+            message.authorUsername.toLocaleLowerCase().includes(query)
+          );
+        })
+        .slice(-8)
+        .reverse()
+    : [];
+
+  const serverMenuItems: ContextMenuEntry[] = [
+    { disabled: true, id: 'mark-read', label: t('context.mark_read') },
+    { id: 'server-divider-1', type: 'separator' },
+    {
+      hint:
+        serverNotificationMode === 'all'
+          ? t('context.notifications_all')
+          : serverNotificationMode === 'none'
+            ? t('context.notifications_none')
+            : t('context.notifications_mentions'),
+      id: 'notification-settings',
+      label: t('context.notification_settings'),
+      subItems: [
+        {
+          checked: serverNotificationMode === 'all',
+          id: 'notify-all',
+          label: t('context.notifications_all'),
+          onSelect: () => setServerNotificationMode('all'),
+        },
+        {
+          checked: serverNotificationMode === 'mentions',
+          id: 'notify-mentions',
+          label: t('context.notifications_mentions'),
+          onSelect: () => setServerNotificationMode('mentions'),
+        },
+        {
+          checked: serverNotificationMode === 'none',
+          id: 'notify-none',
+          label: t('context.notifications_none'),
+          onSelect: () => setServerNotificationMode('none'),
+        },
+      ],
+    },
+    { id: 'server-divider-2', type: 'separator' },
+    {
+      id: 'copy-server-name',
+      label: t('context.copy_name'),
+      onSelect: () => void navigator.clipboard.writeText(serverName),
+    },
+    ...(activeGuildId
+      ? [
+          {
+            id: 'copy-server-id',
+            label: t('context.copy_id'),
+            onSelect: () => void navigator.clipboard.writeText(activeGuildId),
+          } satisfies ContextMenuEntry,
+        ]
+      : []),
+  ];
 
   return (
     <div className="chat-shell" data-mobile-tab={mobileTab}>
@@ -159,7 +237,29 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
 
       <div className="sidebar" data-on-mobile="channels voice more">
         <div className="sidebar-section sidebar-section--channels" data-on-mobile="channels">
-          <div className="sidebar-header">{isLoadingGuilds && <span className="sidebar-title">{t('common.loading')}</span>}</div>
+          <div className="sidebar-header">
+            <button
+              type="button"
+              className="sidebar-server-button"
+              aria-haspopup="menu"
+              aria-expanded={Boolean(serverMenu)}
+              onClick={(event) => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                setServerMenu({ x: rect.left + 8, y: rect.bottom + 4 });
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setServerMenu({ x: event.clientX, y: event.clientY });
+              }}
+            >
+              <span className="sidebar-server-name">
+                {isLoadingGuilds ? t('common.loading') : (activeGuild?.name ?? serverName)}
+              </span>
+              <span className="sidebar-server-chevron" aria-hidden="true">
+                {serverMenu ? '×' : '⌄'}
+              </span>
+            </button>
+          </div>
           <div className="sidebar-channels">
             {isLoadingChannels ? (
               <div className="channel-loading">{t('chat.loading_channels')}</div>
@@ -185,15 +285,16 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
           <div className="sidebar-footer">
             <AccountPanel api={api} />
             <div className="sidebar-footer-actions">
-              <button
-                type="button"
-                className="btn-ghost sidebar-footer-settings"
-                onClick={() => setIsSettingsOpen(true)}
-                aria-label={t('settings.open')}
-                title={t('settings.open')}
-              >
-                <SettingsIcon />
-              </button>
+              <Tooltip label={t('settings.open')}>
+                <button
+                  type="button"
+                  className="btn-ghost sidebar-footer-settings"
+                  onClick={() => setIsSettingsOpen(true)}
+                  aria-label={t('settings.open')}
+                >
+                  <SettingsIcon />
+                </button>
+              </Tooltip>
               <VoiceSidebarVolumeControls />
             </div>
           </div>
@@ -202,10 +303,85 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
 
       <main className="chat-main" data-on-mobile="chat voice">
         <header className="chat-main-header" data-on-mobile="chat">
-          <div>
-            <p className="chat-main-eyebrow">{t('common.server')}</p>
-            <h1 className="chat-main-title">{serverName}</h1>
+          <div className="chat-main-channel-title">
+            <span className="chat-main-channel-icon" aria-hidden="true">
+              {selectedVoiceChannel ? (
+                <svg viewBox="0 0 24 24">
+                  <path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 1.1a3 3 0 0 1 0 3.8M19 7.5a6 6 0 0 1 0 9" />
+                </svg>
+              ) : (
+                '#'
+              )}
+            </span>
+            <h1 className="chat-main-title">{selectedChannel?.name ?? serverName}</h1>
           </div>
+          <div className="chat-main-toolbar">
+            <Tooltip label={t('chat.toggle_members')} placement="bottom">
+              <button
+                type="button"
+                className={`chat-toolbar-button${isMemberListOpen ? ' active' : ''}`}
+                aria-label={t('chat.toggle_members')}
+                aria-pressed={isMemberListOpen}
+                onClick={() => setIsMemberListOpen((current) => !current)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8.5 12a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7-1a3 3 0 1 0 0-6M2.5 19c.5-3.1 2.5-5 6-5s5.5 1.9 6 5m1-6c3 0 5 1.8 5.5 4.5" />
+                </svg>
+              </button>
+            </Tooltip>
+            <button
+              type="button"
+              className="chat-header-search"
+              aria-expanded={isSearchOpen}
+              aria-haspopup="dialog"
+              onClick={() => setIsSearchOpen((current) => !current)}
+            >
+              <span>{t('chat.search')}</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6" />
+                <path d="m15 15 5 5" />
+              </svg>
+            </button>
+          </div>
+          {isSearchOpen ? (
+            <div className="chat-search-popover" role="dialog" aria-label={t('chat.search_messages')}>
+              <div className="chat-search-popover-header">
+                <input
+                  autoFocus
+                  type="search"
+                  value={searchQuery}
+                  placeholder={t('chat.search_messages')}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setIsSearchOpen(false);
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label={t('settings.close')}
+                  onClick={() => setIsSearchOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              {searchQuery.trim() ? (
+                searchResults.length > 0 ? (
+                  <ul className="chat-search-results">
+                    {searchResults.map((message) => (
+                      <li key={message.id}>
+                        <strong>{message.authorUsername}</strong>
+                        <span>{message.content}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="chat-search-empty">{t('chat.no_search_results')}</p>
+                )
+              ) : (
+                <p className="chat-search-empty">{t('chat.search_hint')}</p>
+              )}
+            </div>
+          ) : null}
         </header>
 
         {/* Gateway status banner */}
@@ -248,15 +424,35 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
               <MessagePanel api={api} />
             )}
           </div>
-          <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
-            <StreamPanel
-              isShareDialogOpen={isStreamShareDialogOpen}
-              onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
-              showDashboard={showDataDetails}
-            />
-          </div>
+          {isMemberListOpen ? (
+            <div className="chat-context-sidebar" data-on-mobile="voice">
+              <MemberList />
+              {hasAnyStream && showDataDetails ? (
+                <StreamPanel
+                  isShareDialogOpen={false}
+                  onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
+                  showDashboard
+                />
+              ) : null}
+            </div>
+          ) : hasAnyStream && showDataDetails ? (
+            <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
+              <StreamPanel
+                isShareDialogOpen={isStreamShareDialogOpen}
+                onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
+                showDashboard={showDataDetails}
+              />
+            </div>
+          ) : null}
         </div>
         <VoiceBottomControlBar onOpenStreamShareDialog={() => setIsStreamShareDialogOpen(true)} />
+        {hasAnyStream && showDataDetails ? null : (
+          <StreamPanel
+            isShareDialogOpen={isStreamShareDialogOpen}
+            onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
+            showDashboard={false}
+          />
+        )}
       </main>
 
       <MobileTabBar
@@ -276,6 +472,16 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
           onClose={() => setIsSettingsOpen(false)}
           onShowDataDetailsChange={handleShowDataDetailsChange}
           showDataDetails={showDataDetails}
+        />
+      ) : null}
+
+      {serverMenu ? (
+        <ContextMenu
+          ariaLabel={t('context.server_actions')}
+          items={serverMenuItems}
+          onClose={() => setServerMenu(null)}
+          x={serverMenu.x}
+          y={serverMenu.y}
         />
       ) : null}
     </div>

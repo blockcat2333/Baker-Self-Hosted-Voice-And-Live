@@ -63,6 +63,34 @@ function formatVolumeLabel(volume: number) {
   return `${Math.round(volume * 100)}%`;
 }
 
+function StreamStatsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 19V9M12 19V5M19 19v-7" />
+    </svg>
+  );
+}
+
+function StreamFullscreenIcon({ active }: { active: boolean }) {
+  return active ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+    </svg>
+  );
+}
+
+function StreamCloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 6 12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
 const STREAM_PLAYBACK_START_TIMEOUT_MS = 3000;
 const STREAM_STATS_POLL_INTERVAL_MS = 1000;
 
@@ -399,6 +427,7 @@ function StreamPopupWindow({
   const setPlaybackVolume = useStreamStore((s) => s.setPlaybackVolume);
   const stageRef = useRef<HTMLElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
   const title = `${userLabel(watchedStream.hostUserId)} • ${sourceLabel(watchedStream.sourceType)} stream`;
 
@@ -436,17 +465,21 @@ function StreamPopupWindow({
   }
 
   return (
-    <div className={'stream-popup-shell'}>
+    <div className={`stream-popup-shell${isStatsOpen ? ' stream-popup-shell--stats-open' : ''}`}>
       <header className={'stream-popup-header'}>
-        <div>
-          <p className={'stream-popup-kicker'}>{t('stream.popup_kicker')}</p>
-          <h1 className={'stream-popup-title'}>{localizedTitle}</h1>
-          <p className={'stream-popup-meta'}>
-            {t('stream.viewer_count', { count: watchedStream.viewers.length })} | {watchedStream.streamId.slice(0, 8)}
-          </p>
+        <div className={'stream-popup-identity'}>
+          <span className={'stream-popup-live-dot'} aria-hidden="true" />
+          <div>
+            <p className={'stream-popup-kicker'}>{t('stream.popup_kicker')}</p>
+            <h1 className={'stream-popup-title'}>{localizedTitle}</h1>
+            <p className={'stream-popup-meta'}>
+              {t('stream.viewer_count', { count: watchedStream.viewers.length })} ·{' '}
+              {watchedStream.streamId.slice(0, 8)}
+            </p>
+          </div>
         </div>
         <div className={'stream-popup-header-actions'}>
-          <span className={'stream-pill'}>
+          <span className={'stream-pill stream-popup-live-pill'}>
             {watchedStream.status === 'ended'
               ? t('stream.pill_ended')
               : watchedStream.status === 'starting' || watchedStream.status === 'reconnecting'
@@ -455,14 +488,32 @@ function StreamPopupWindow({
           </span>
           <button
             type={'button'}
-            className={'btn-ghost stream-action-btn'}
+            className={`stream-popup-icon-btn${isStatsOpen ? ' active' : ''}`}
+            onClick={() => setIsStatsOpen((current) => !current)}
+            aria-label={isStatsOpen ? t('stream.popup_hide_stats') : t('stream.popup_show_stats')}
+            aria-pressed={isStatsOpen}
+            title={isStatsOpen ? t('stream.popup_hide_stats') : t('stream.popup_show_stats')}
+          >
+            <StreamStatsIcon />
+          </button>
+          <button
+            type={'button'}
+            className={'stream-popup-icon-btn'}
             onClick={() => void handleToggleFullscreen()}
             disabled={!fullscreenSupported || watchedStream.status === 'ended'}
+            aria-label={isFullscreen ? t('stream.popup_exit_fullscreen') : t('stream.popup_enter_fullscreen')}
+            title={isFullscreen ? t('stream.popup_exit_fullscreen') : t('stream.popup_enter_fullscreen')}
           >
-            {isFullscreen ? t('stream.popup_exit_fullscreen') : t('stream.popup_enter_fullscreen')}
+            <StreamFullscreenIcon active={isFullscreen} />
           </button>
-          <button type={'button'} className={'btn-ghost stream-action-btn'} onClick={onClose}>
-            {t('stream.popup_close_viewer')}
+          <button
+            type={'button'}
+            className={'stream-popup-icon-btn stream-popup-icon-btn--close'}
+            onClick={onClose}
+            aria-label={t('stream.popup_close_viewer')}
+            title={t('stream.popup_close_viewer')}
+          >
+            <StreamCloseIcon />
           </button>
         </div>
       </header>
@@ -473,49 +524,49 @@ function StreamPopupWindow({
         </div>
       ) : null}
 
-      {watchedStream.status === 'ended' ? (
-        <section className={'stream-popup-ended'}>
-          <h2 className={'stream-popup-ended-title'}>{t('stream.popup_ended_title')}</h2>
-          <p className={'stream-popup-ended-copy'}>
-            {t('stream.popup_ended_copy')}
-          </p>
-        </section>
-      ) : (
-        <section ref={stageRef} className={'stream-popup-stage'}>
-          <StreamPopupVideo playbackVolume={watchedStream.playbackVolume} stream={watchedStream.remoteStream} />
-        </section>
-      )}
-
-      <section className={'stream-popup-controls'}>
-        <div className={'stream-volume-control'}>
-          <label className={'stream-volume-label'} htmlFor={`popup-stream-volume-${watchedStream.streamId}`}>
-            {t('stream.popup_stream_volume')} <span>{formatVolumeLabel(watchedStream.playbackVolume)}</span>
-          </label>
-          <input
-            id={`popup-stream-volume-${watchedStream.streamId}`}
-            className={'stream-volume-slider'}
-            type={'range'}
-            min={0}
-            max={100}
-            step={5}
-            value={Math.round(watchedStream.playbackVolume * 100)}
-            onChange={(event) => {
-              setPlaybackVolume(watchedStream.streamId, Number(event.target.value) / 100);
-            }}
-            aria-label={t('stream.popup_playback_volume_aria', { user: userLabel(watchedStream.hostUserId) })}
-          />
-          {isDisplayAudioSource(watchedStream.sourceType ?? 'camera') ? (
-            <p className={'stream-audio-hint'}>
-              {t('stream.popup_audio_hint_screen')}
-            </p>
-          ) : (
-            <p className={'stream-audio-hint'}>
-              {t('stream.popup_audio_hint_camera')}
-            </p>
-          )}
-        </div>
-        <StreamPopupStatsPanel streamId={watchedStream.streamId} status={watchedStream.status} />
-      </section>
+      <div className={'stream-popup-viewer'}>
+        {watchedStream.status === 'ended' ? (
+          <section className={'stream-popup-ended'}>
+            <h2 className={'stream-popup-ended-title'}>{t('stream.popup_ended_title')}</h2>
+            <p className={'stream-popup-ended-copy'}>{t('stream.popup_ended_copy')}</p>
+          </section>
+        ) : (
+          <section ref={stageRef} className={'stream-popup-stage'}>
+            <StreamPopupVideo playbackVolume={watchedStream.playbackVolume} stream={watchedStream.remoteStream} />
+            <div className={'stream-popup-volume-dock'}>
+              <div className={'stream-volume-control'}>
+                <label className={'stream-volume-label'} htmlFor={`popup-stream-volume-${watchedStream.streamId}`}>
+                  {t('stream.popup_stream_volume')}{' '}
+                  <span>{formatVolumeLabel(watchedStream.playbackVolume)}</span>
+                </label>
+                <input
+                  id={`popup-stream-volume-${watchedStream.streamId}`}
+                  className={'stream-volume-slider'}
+                  type={'range'}
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={Math.round(watchedStream.playbackVolume * 100)}
+                  onChange={(event) => {
+                    setPlaybackVolume(watchedStream.streamId, Number(event.target.value) / 100);
+                  }}
+                  aria-label={t('stream.popup_playback_volume_aria', {
+                    user: userLabel(watchedStream.hostUserId),
+                  })}
+                />
+                <p className={'stream-audio-hint'}>
+                  {isDisplayAudioSource(watchedStream.sourceType ?? 'camera')
+                    ? t('stream.popup_audio_hint_screen')
+                    : t('stream.popup_audio_hint_camera')}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+        {isStatsOpen && watchedStream.status !== 'ended' ? (
+          <StreamPopupStatsPanel streamId={watchedStream.streamId} status={watchedStream.status} />
+        ) : null}
+      </div>
     </div>
   );
 }

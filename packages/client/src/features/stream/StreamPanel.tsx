@@ -16,6 +16,11 @@ import {
 } from '../preferences/client-preferences';
 import { useVoiceStore } from '../voice/voice-store';
 import {
+  NetworkStatusButton,
+  type NetworkStatusLevel,
+  type NetworkStatusMetric,
+} from '../voice/NetworkStatusButton';
+import {
   type CameraOption,
   DEFAULT_STREAM_CODEC_PREFERENCE,
   DEFAULT_STREAM_QUALITY,
@@ -312,6 +317,63 @@ function LiveDetailPanel() {
       : t('stream.live_detail_none');
 
   const activeStats = statsState.stats;
+  const watchedPacketLossPct =
+    statsState.kind === 'watched' &&
+    statsState.stats?.packetsLost !== null &&
+    statsState.stats?.packetsLost !== undefined &&
+    statsState.stats?.packetsReceived !== null &&
+    statsState.stats?.packetsReceived !== undefined &&
+    statsState.stats.packetsLost + statsState.stats.packetsReceived > 0
+      ? (statsState.stats.packetsLost /
+          (statsState.stats.packetsLost + statsState.stats.packetsReceived)) *
+        100
+      : null;
+  let streamNetworkLevel: NetworkStatusLevel = 'warn';
+  if (activeStats) {
+    if (statsState.kind === 'owned') {
+      streamNetworkLevel =
+        statsState.stats?.encoderLimited || statsState.stats?.qualityLimitationReason === 'bandwidth'
+          ? 'danger'
+          : statsState.stats?.qualityLimitationReason === 'other'
+            ? 'warn'
+            : 'good';
+    } else if (statsState.kind === 'watched') {
+      streamNetworkLevel =
+        (watchedPacketLossPct ?? 0) >= 5 || (statsState.stats?.jitterMs ?? 0) >= 80
+          ? 'danger'
+          : (watchedPacketLossPct ?? 0) >= 1 || (statsState.stats?.jitterMs ?? 0) >= 35
+            ? 'warn'
+            : 'good';
+    }
+  }
+  const streamNetworkSummary =
+    streamNetworkLevel === 'danger'
+      ? t('stream.network_danger')
+      : streamNetworkLevel === 'warn'
+        ? t('stream.network_warn')
+        : t('stream.network_good');
+  const streamNetworkMetrics: NetworkStatusMetric[] = [
+    { label: t('stream.popup_stats_codec'), value: formatNullableValue(activeStats?.codec) },
+    { label: t('stream.popup_stats_resolution'), value: formatNullableValue(activeStats?.resolution) },
+    { label: t('stream.popup_stats_frame_rate'), value: formatNullableValue(activeStats?.frameRate, 'fps') },
+    { label: t('stream.popup_stats_bitrate'), value: formatNullableValue(activeStats?.bitrateKbps, 'kbps') },
+    {
+      label: t('stream.popup_stats_packet_loss'),
+      value:
+        statsState.kind === 'watched'
+          ? watchedPacketLossPct === null
+            ? '--'
+            : `${watchedPacketLossPct.toFixed(1)}%`
+          : '--',
+    },
+    {
+      label: t('stream.popup_stats_jitter'),
+      value:
+        statsState.kind === 'watched'
+          ? formatNullableValue(statsState.stats?.jitterMs, 'ms')
+          : '--',
+    },
+  ];
 
   if (!hasLiveData) {
     return null;
@@ -322,7 +384,16 @@ function LiveDetailPanel() {
       <div className={'stream-live-detail-bubble'}>
         <header className={'stream-live-detail-header'}>
           <h2 className={'stream-section-title'}>{t('stream.live_detail_title')}</h2>
-          <span className={'stream-pill'}>{liveStatus}</span>
+          <div className="stream-live-detail-actions">
+            <span className={'stream-pill'}>{liveStatus}</span>
+            <NetworkStatusButton
+              detailsLabel={t('stream.network_details')}
+              label={t('stream.network_status')}
+              level={streamNetworkLevel}
+              metrics={streamNetworkMetrics}
+              summary={streamNetworkSummary}
+            />
+          </div>
         </header>
 
         <dl className={'stream-live-detail-list'}>
@@ -409,6 +480,7 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
   const [streamCodecPreference, setStreamCodecPreference] = useState<StreamCodecPreference>(
     () => loadStringOptionPreference('streamCodecPreference', DEFAULT_STREAM_CODEC_PREFERENCE, STREAM_CODEC_OPTIONS),
   );
+  const [selectedShareSource, setSelectedShareSource] = useState<'camera' | 'screen'>('screen');
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const voiceStatus = useVoiceStore((s) => s.status);
   const ownedStream = useStreamStore((s) => s.ownedStream);
@@ -441,14 +513,13 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
     void startSharing(voiceChannelId, streamQuality, 'camera', sendCommandAwaitAck, sendRawCommand, streamCodecPreference);
   }
 
-  function handleShareScreenFromDialog() {
+  function handleGoLive() {
     onCloseShareDialog();
-    handleShareScreen();
-  }
-
-  function handleShareCameraFromDialog() {
-    onCloseShareDialog();
-    handleShareCamera();
+    if (selectedShareSource === 'camera') {
+      handleShareCamera();
+    } else {
+      handleShareScreen();
+    }
   }
 
   function handleStreamQualityChange(patch: Partial<StreamQualitySettings>) {
@@ -507,14 +578,14 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
         <div
           className={'stream-share-dialog-backdrop'}
           role={'presentation'}
-          onMouseDown={onCloseShareDialog}
+          onPointerDown={onCloseShareDialog}
         >
           <section
             className={'stream-share-dialog'}
             role={'dialog'}
             aria-modal={'true'}
             aria-labelledby={'stream-share-dialog-title'}
-            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             <header className={'stream-share-dialog-header'}>
               <div>
@@ -534,7 +605,59 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
             </header>
 
             <div className={'stream-share-dialog-body'}>
-              <div className={'stream-quality-controls'}>
+              <fieldset className="stream-source-picker">
+                <legend>{t('stream.share_source_title')}</legend>
+                <div className="stream-source-options">
+                  <button
+                    type="button"
+                    className={`stream-source-option${selectedShareSource === 'screen' ? ' active' : ''}`}
+                    role="radio"
+                    aria-checked={selectedShareSource === 'screen'}
+                    onClick={() => setSelectedShareSource('screen')}
+                  >
+                    <span className="stream-source-option-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <rect x="3" y="4" width="18" height="13" rx="2" />
+                        <path d="M9 21h6M12 17v4" />
+                      </svg>
+                    </span>
+                    <span>
+                      <strong>{t('stream.action_share_screen')}</strong>
+                      <small>{t('stream.source_screen_description')}</small>
+                    </span>
+                    <span className="stream-source-option-check" aria-hidden="true">✓</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`stream-source-option${selectedShareSource === 'camera' ? ' active' : ''}`}
+                    role="radio"
+                    aria-checked={selectedShareSource === 'camera'}
+                    onClick={() => setSelectedShareSource('camera')}
+                  >
+                    <span className="stream-source-option-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <rect x="3" y="6" width="13" height="12" rx="2" />
+                        <path d="m16 10 5-3v10l-5-3" />
+                      </svg>
+                    </span>
+                    <span>
+                      <strong>{t('stream.action_share_camera')}</strong>
+                      <small>{t('stream.source_camera_description')}</small>
+                    </span>
+                    <span className="stream-source-option-check" aria-hidden="true">✓</span>
+                  </button>
+                </div>
+              </fieldset>
+
+              <section className="stream-advanced-options">
+                <header>
+                  <div>
+                    <h3>{t('stream.share_advanced_title')}</h3>
+                    <p>{`${streamQuality.resolution} · ${streamQuality.frameRate} FPS · ${streamQuality.bitrateKbps} kbps · ${codecPreferenceLabel(t, streamCodecPreference)}`}</p>
+                  </div>
+                  <span className="stream-panel-icon">PRO</span>
+                </header>
+                <div className={'stream-quality-controls'}>
                 <label className={'stream-quality-field'}>
                   <span className={'stream-quality-label'}>{t('stream.quality_resolution')}</span>
                   <select
@@ -606,24 +729,25 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                   </select>
                 </label>
               </div>
-              {renderCameraSourceControl(isSwitchingCamera)}
+                {selectedShareSource === 'camera' ? renderCameraSourceControl(isSwitchingCamera) : null}
+              </section>
             </div>
 
             <footer className={'stream-share-dialog-actions'}>
               <button
                 type={'button'}
                 className={'btn-ghost stream-action-btn'}
-                onClick={handleShareScreenFromDialog}
+                onClick={onCloseShareDialog}
               >
-                {t('stream.action_share_screen')}
+                {t('stream.action_cancel')}
               </button>
               <button
                 type={'button'}
                 className={'btn-ghost stream-action-btn stream-action-btn--primary'}
-                onClick={handleShareCameraFromDialog}
-                disabled={isSwitchingCamera}
+                onClick={handleGoLive}
+                disabled={selectedShareSource === 'camera' && isSwitchingCamera}
               >
-                {t('stream.action_share_camera')}
+                {t('stream.action_go_live')}
               </button>
             </footer>
           </section>

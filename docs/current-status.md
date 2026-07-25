@@ -48,6 +48,24 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-25 Baker 1.1.0 Discord-Inspired UI Release And Desktop 1.1.0a
+
+- advanced the stable server release line to `1.1.0` and reset the desktop/client label to `1.1.0a`
+- redesigned the shared Web/Windows client around Discord-inspired information hierarchy and interaction patterns:
+  - compact grouped right-click menus and touch long-press equivalents
+  - consistent member actions from both channel rosters
+  - participant volume controls, device volume menus, tooltips, and clearer voice actions
+  - persistent member visibility while livestreams are active
+  - streamlined stream discovery, viewing, sender diagnostics, and network-status detail surfaces
+- retained Baker-specific behavior where it exceeds the reference:
+  - more livestream quality/codec/bitrate choices
+  - separate voice and livestream network-health indicators
+  - application-audio sharing that excludes unrelated system audio
+- restyled the server control panel and settings surfaces into the same neutral dark/purple visual system without adding nested navigation
+- rebuilt the Windows screen-source and application-audio pickers with source previews, explicit selected states, search, live application meters, privacy copy, responsive sizing, and keyboard focus states
+- updated vulnerable production dependency paths and confirmed `pnpm audit --prod` reports no known vulnerabilities
+- verified the desktop windows in a real Electron session; picker validation stopped at preview/cancel and did not transmit screen or audio
+
 ### 2026-07-25 Baker 1.0.14 Stable Release And Desktop 1.0.14a
 
 - bumped the stable server release line to public label `1.0.14`

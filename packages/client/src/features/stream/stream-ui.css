@@ -305,3 +305,334 @@
   margin: 0;
   padding: 10px;
 }
+
+/* Keep the compact dashboard inside its allotted sidebar instead of spilling past it. */
+.stream-panel.stream-dashboard-panel {
+  align-content: start;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.stream-dashboard-panel .stream-dashboard-section {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.stream-live-detail-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.stream-live-detail-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.stream-live-detail-row dd {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* The popup viewer is a video canvas first; diagnostics are an optional inspector. */
+.stream-popup-body {
+  background: #0b0c0f;
+  overflow: hidden;
+}
+
+.stream-popup-shell {
+  background: #0b0c0f;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100svh;
+  min-height: 100svh;
+  padding: 0;
+}
+
+.stream-popup-header {
+  align-items: center;
+  background: #111214;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+  min-height: 62px;
+  padding: 9px 12px;
+}
+
+.stream-popup-identity {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stream-popup-identity > div {
+  min-width: 0;
+}
+
+.stream-popup-live-dot {
+  background: #5865f2;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px rgba(88, 101, 242, 0.14);
+  flex: 0 0 auto;
+  height: 9px;
+  width: 9px;
+}
+
+.stream-popup-kicker {
+  color: #a5b4fc;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.stream-popup-title {
+  color: #f2f3f5;
+  font-size: 16px;
+  line-height: 1.25;
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-popup-meta {
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+.stream-popup-header-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  justify-items: initial;
+}
+
+.stream-popup-live-pill {
+  background: rgba(88, 101, 242, 0.16);
+  border-color: rgba(88, 101, 242, 0.52);
+  color: #c7d0ff;
+}
+
+.stream-popup-icon-btn {
+  align-items: center;
+  background: #2b2d31;
+  border: 0;
+  border-radius: 50%;
+  color: #b5bac1;
+  cursor: pointer;
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+  transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  width: 36px;
+}
+
+.stream-popup-icon-btn:hover:not(:disabled),
+.stream-popup-icon-btn.active {
+  background: #5865f2;
+  color: white;
+  transform: translateY(-1px);
+}
+
+.stream-popup-icon-btn--close:hover {
+  background: #da373c;
+}
+
+.stream-popup-icon-btn:disabled {
+  color: #5f6269;
+  cursor: not-allowed;
+}
+
+.stream-popup-icon-btn svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  width: 18px;
+}
+
+.stream-popup-warning {
+  border-radius: 0;
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.stream-popup-viewer {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  padding: 12px;
+}
+
+.stream-popup-shell--stats-open .stream-popup-viewer {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
+}
+
+.stream-popup-stage {
+  background: #050506;
+  border: 0;
+  border-radius: 10px;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+
+.stream-popup-video-frame {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  min-height: 0;
+  width: 100%;
+}
+
+.stream-popup-video {
+  aspect-ratio: auto;
+  background: #050506;
+  border: 0;
+  border-radius: 0;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  width: 100%;
+}
+
+.stream-popup-video-overlay {
+  border: 0;
+  border-radius: 0;
+}
+
+.stream-popup-volume-dock {
+  backdrop-filter: blur(14px);
+  background: rgba(17, 18, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  bottom: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 9px 12px;
+  position: absolute;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 24px));
+  z-index: 2;
+}
+
+.stream-popup-volume-dock .stream-volume-control {
+  gap: 6px;
+}
+
+.stream-popup-volume-dock .stream-audio-hint {
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.stream-popup-stats {
+  background: #111214;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.stream-popup-stats-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stream-popup-stats-item {
+  background: #1e1f22;
+  border: 0;
+  min-width: 0;
+}
+
+.stream-popup-ended {
+  align-content: center;
+  background: #111214;
+  min-height: 0;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .stream-popup-body {
+    overflow: auto;
+  }
+
+  .stream-popup-shell {
+    height: auto;
+  }
+
+  .stream-popup-header {
+    align-items: flex-start;
+    flex-direction: row;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+
+  .stream-popup-live-pill {
+    display: none;
+  }
+
+  .stream-popup-viewer,
+  .stream-popup-shell--stats-open .stream-popup-viewer {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100svh - 62px);
+  }
+
+  .stream-popup-stage {
+    flex: 1 0 min(62svh, 440px);
+  }
+
+  .stream-popup-stats {
+    flex: 0 0 auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 420px) {
+  .stream-popup-header {
+    padding-inline: 10px;
+  }
+
+  .stream-popup-meta,
+  .stream-popup-kicker {
+    display: none;
+  }
+
+  .stream-popup-title {
+    font-size: 14px;
+  }
+
+  .stream-popup-header-actions {
+    gap: 4px;
+  }
+
+  .stream-popup-icon-btn {
+    height: 34px;
+    width: 34px;
+  }
+
+  .stream-popup-viewer {
+    padding: 8px;
+  }
+
+  .stream-popup-volume-dock .stream-audio-hint {
+    display: none;
+  }
+}

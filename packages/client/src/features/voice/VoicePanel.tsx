@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { useAuthStore } from '../auth/auth-store';
+import { Tooltip } from '../chat/Tooltip';
 import { sendCommandAwaitAck, sendRawCommand, useGatewayStore } from '../gateway/gateway-store';
 import { useAudioDeviceStore } from '../media/audio-device-store';
 import { useMusicStore } from '../music/music-store';
 import { useStreamStore } from '../stream/stream-store';
 import { closeStreamPopup, ensureStreamPopupWindow } from '../stream/stream-popup-controller';
 import { DEFAULT_VOICE_PARTICIPANT_VOLUME, toVoiceParticipantVolumePercent, toVoiceVolumePercent } from './voice-audio';
+import { NetworkStatusButton, type NetworkStatusMetric } from './NetworkStatusButton';
 import { syncVoiceAudioOutputDevice, useVoiceStore } from './voice-store';
 
 interface VoiceControlsState {
@@ -257,6 +260,208 @@ export interface VoiceChannelViewProps {
   showConnectionHealth?: boolean;
 }
 
+function ScreenShareIcon({ className = 'voice-bottom-icon' }: SidebarIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="3" y="4" width="18" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9 21h6M12 18v3M9 11l3-3 3 3M12 8v6" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function HangupIcon({ className = 'voice-bottom-icon' }: SidebarIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M5.1 16.7c1.8-1.5 4.1-2.3 6.9-2.3s5.1.8 6.9 2.3l1.4-2.2c-2.2-2.2-5-3.3-8.3-3.3s-6.1 1.1-8.3 3.3l1.4 2.2Z" fill="currentColor" />
+      <path d="M7.2 14.9v3M16.8 14.9v3" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function SlashIcon() {
+  return (
+    <svg className="voice-bottom-icon-slash" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 4 20 20" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="2.4" />
+    </svg>
+  );
+}
+
+function ChevronUpIcon() {
+  return (
+    <svg className="voice-bottom-chevron-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m7 14 5-5 5 5" />
+    </svg>
+  );
+}
+
+export interface ParticipantMenuState {
+  displayName: string;
+  hasLiveStream: boolean;
+  isMe: boolean;
+  liveStreamId: string | null;
+  userId: string;
+  x: number;
+  y: number;
+}
+
+interface VoiceParticipantMenuProps {
+  hasCustomVolume: boolean;
+  menu: ParticipantMenuState;
+  networkMetrics: NetworkStatusMetric[];
+  onChangeVolume: (volume: number) => void;
+  onClose: () => void;
+  onResetVolume: () => void;
+  onWatchStream: (streamId: string) => void;
+  volumePercent: number;
+}
+
+export function VoiceParticipantMenu({
+  hasCustomVolume,
+  menu,
+  networkMetrics,
+  onChangeVolume,
+  onClose,
+  onResetVolume,
+  onWatchStream,
+  volumePercent,
+}: VoiceParticipantMenuProps) {
+  const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: menu.x, top: menu.y });
+
+  useLayoutEffect(() => {
+    const element = menuRef.current;
+    if (!element) return;
+
+    const rect = element.getBoundingClientRect();
+    setPosition({
+      left: Math.max(8, Math.min(menu.x, window.innerWidth - rect.width - 8)),
+      top: Math.max(8, Math.min(menu.y, window.innerHeight - rect.height - 8)),
+    });
+    element.focus();
+  }, [menu.x, menu.y]);
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node) || menuRef.current?.contains(target)) return;
+      onClose();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', onClose);
+    window.addEventListener('scroll', onClose, true);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <>
+      <div className="voice-participant-menu-scrim" aria-hidden="true" />
+      <section
+        ref={menuRef}
+        className="voice-participant-menu"
+        role="dialog"
+        aria-label={t('voice.participant_actions', { user: menu.displayName })}
+        style={{ left: position.left, top: position.top }}
+        tabIndex={-1}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        <header className="voice-participant-menu-header">
+          <span className="voice-participant-menu-avatar" aria-hidden="true">
+            {menu.displayName.slice(0, 1).toUpperCase()}
+          </span>
+          <div>
+            <strong>{menu.displayName}</strong>
+            <span>{t('voice.voice_member')}</span>
+          </div>
+        </header>
+
+        <div className="voice-participant-menu-section">
+          <div className="voice-channel-volume-header">
+            <span>{t('voice.participant_volume_title', { user: menu.displayName })}</span>
+            <strong>{volumePercent}%</strong>
+          </div>
+          {menu.isMe ? (
+            <p className="voice-channel-volume-note">{t('voice.participant_volume_self_note')}</p>
+          ) : (
+            <>
+              <input
+                type="range"
+                className="voice-volume-slider voice-participant-menu-slider"
+                min={0}
+                max={200}
+                value={volumePercent}
+                aria-label={t('voice.participant_volume_aria', { user: menu.displayName })}
+                onChange={(event) => onChangeVolume(Number(event.target.value) / 100)}
+              />
+              <div className="voice-participant-menu-scale" aria-hidden="true">
+                <span>0%</span>
+                <span>100%</span>
+                <span>200%</span>
+              </div>
+              <button
+                type="button"
+                className="context-menu-item voice-participant-menu-action"
+                onClick={onResetVolume}
+                disabled={!hasCustomVolume}
+              >
+                {t('voice.reset_volume')}
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="voice-participant-menu-section">
+          <p className="voice-participant-menu-section-title">{t('voice.member_network_title')}</p>
+          <dl className="voice-participant-menu-network">
+            {networkMetrics.map((metric) => (
+              <div key={metric.label}>
+                <dt>{metric.label}</dt>
+                <dd>{metric.value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        {menu.hasLiveStream && !menu.isMe && menu.liveStreamId ? (
+          <button
+            type="button"
+            className="voice-participant-menu-live-action"
+            onClick={() => {
+              onWatchStream(menu.liveStreamId!);
+              onClose();
+            }}
+          >
+            <span className="voice-participant-menu-live-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="m10 9 5 3-5 3V9Z" />
+              </svg>
+            </span>
+            <span>
+              <strong>{t('stream.action_watch_stream')}</strong>
+              <small>{t('stream.watch_stream_hint')}</small>
+            </span>
+            <span aria-hidden="true">›</span>
+          </button>
+        ) : null}
+      </section>
+    </>,
+    document.body,
+  );
+}
+
 export function VoiceChannelView({ channelId, channelName, showConnectionHealth = false }: VoiceChannelViewProps) {
   const { t } = useTranslation();
   const connectedChannelId = useVoiceStore((s) => s.channelId);
@@ -277,7 +482,13 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
   const roomStateByChannel = useStreamStore((s) => s.roomStateByChannel);
   const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
   const watchStream = useStreamStore((s) => s.watchStream);
-  const [expandedVolumeUserIds, setExpandedVolumeUserIds] = useState<Set<string>>(() => new Set());
+  const [participantMenu, setParticipantMenu] = useState<ParticipantMenuState | null>(null);
+  const participantPressRef = useRef<{
+    startX: number;
+    startY: number;
+    timer: number;
+  } | null>(null);
+  const participantLongPressTriggeredRef = useRef(false);
   const visibleParticipants = connectedChannelId === channelId ? participants : (voiceRosterByChannel[channelId] ?? []);
   const isViewingConnectedVoiceChannel = connectedChannelId === channelId;
   const networkSnapshot = isViewingConnectedVoiceChannel && myUserId ? voiceNetworkByChannel[channelId]?.[myUserId] : null;
@@ -290,7 +501,7 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
   const isStale = isViewingConnectedVoiceChannel && (networkSnapshot?.stale ?? localStatsStale);
   const connectionHealth = useMemo(() => {
     if (!isViewingConnectedVoiceChannel) {
-      return { label: t('voice.connection_health_not_connected'), level: 'warn' };
+      return { label: t('voice.connection_health_not_connected'), level: 'idle' };
     }
 
     if (connectionIssue || status === 'error') {
@@ -341,8 +552,30 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
     return next;
   }, [channelId, roomStateByChannel]);
   const watchedStreamIds = useMemo(() => new Set(Object.keys(watchedStreamsById)), [watchedStreamsById]);
+  const latencyValue = gatewayRttMs === null ? '--' : `${Math.max(0, Math.round(gatewayRttMs))}ms`;
+  const gatewayLossValue = gatewayLossPct === null ? '--' : `${Math.max(0, Math.round(gatewayLossPct))}%`;
+  const mediaLossValue = mediaLossPct === null ? '--' : `${Math.max(0, Math.round(mediaLossPct))}%`;
+  const voiceNetworkSummary = `${connectionHealth.label} · ${latencyValue} · ${t('voice.network_loss_short', {
+    loss: mediaLossValue,
+  })}`;
+  const voiceNetworkMetrics: NetworkStatusMetric[] = [
+    { label: t('stream.voice_health_connection'), value: connectionHealth.label },
+    { label: t('stream.voice_health_gateway_rtt'), value: latencyValue },
+    { label: t('stream.voice_health_gateway_loss'), value: gatewayLossValue },
+    { label: t('stream.voice_health_media_loss'), value: mediaLossValue },
+    {
+      label: t('stream.voice_health_freshness'),
+      value: isStale ? t('stream.voice_health_stale') : t('stream.voice_health_fresh'),
+    },
+    { label: t('stream.voice_health_members'), value: String(visibleParticipants.length) },
+  ];
 
   function handleWatchStream(streamId: string) {
+    if (watchedStreamIds.has(streamId)) {
+      ensureStreamPopupWindow(streamId);
+      return;
+    }
+
     if (!ensureStreamPopupWindow(streamId)) {
       useStreamStore.setState({ error: t('stream.error_popup_blocked') });
       return;
@@ -353,6 +586,25 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
     });
   }
 
+  function clearParticipantLongPress() {
+    if (participantPressRef.current) {
+      window.clearTimeout(participantPressRef.current.timer);
+      participantPressRef.current = null;
+    }
+  }
+
+  function openParticipantMenu(
+    participant: Omit<ParticipantMenuState, 'x' | 'y'>,
+    x: number,
+    y: number,
+  ) {
+    setParticipantMenu({ ...participant, x, y });
+  }
+
+  const selectedParticipantNetwork = participantMenu
+    ? voiceNetworkByChannel[channelId]?.[participantMenu.userId] ?? null
+    : null;
+
   return (
     <section className="voice-channel-view" aria-label={channelName}>
       <div className="voice-channel-view-header">
@@ -361,12 +613,30 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
           <h2 className="voice-channel-view-title">{channelName}</h2>
         </div>
         <div className="voice-channel-view-meta">
-          <span className="voice-channel-view-dot" aria-hidden="true" />
+          <span
+            className={`voice-channel-view-dot${isViewingConnectedVoiceChannel ? '' : ' voice-channel-view-dot--idle'}`}
+            aria-hidden="true"
+          />
           <span>{t('voice.member_count', { count: visibleParticipants.length })}</span>
           <span>{t('voice.public_channel')}</span>
+          <NetworkStatusButton
+            detailsLabel={t('voice.network_details')}
+            label={t('voice.network_status')}
+            level={
+              connectionHealth.level === 'stable'
+                ? 'good'
+                : connectionHealth.level === 'danger'
+                  ? 'danger'
+                  : connectionHealth.level === 'idle'
+                    ? 'idle'
+                    : 'warn'
+            }
+            metrics={voiceNetworkMetrics}
+            summary={voiceNetworkSummary}
+          />
           {showConnectionHealth ? (
             <span className={`voice-channel-connection-health voice-channel-connection-health--${connectionHealth.level}`}>
-              {t('voice.connection_health_label', { status: connectionHealth.label })}
+              {connectionHealth.label}
             </span>
           ) : null}
         </div>
@@ -378,13 +648,14 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
             const isMe = participant.userId === myUserId;
             const displayName = isMe ? t('common.you') : (presenceMap[participant.userId]?.username ?? participant.userId);
             const isSpeaking = speakingUserIds.has(participant.userId);
-            const participantVolume =
-              participantPlaybackVolume[participant.userId] ?? DEFAULT_VOICE_PARTICIPANT_VOLUME;
-            const participantVolumePercent = toVoiceParticipantVolumePercent(participantVolume);
-            const isVolumeOpen = expandedVolumeUserIds.has(participant.userId);
-            const volumeControlId = `voice-participant-volume-${participant.userId}`;
             const liveStream = liveStreamsByUserId[participant.userId] ?? null;
-            const canWatchLiveStream = !!liveStream && !isMe && !watchedStreamIds.has(liveStream.streamId);
+            const participantMenuData: Omit<ParticipantMenuState, 'x' | 'y'> = {
+              displayName,
+              hasLiveStream: !!liveStream,
+              isMe,
+              liveStreamId: liveStream?.streamId ?? null,
+              userId: participant.userId,
+            };
 
             return (
               <li
@@ -400,18 +671,47 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
                 <button
                   type="button"
                   className="voice-channel-view-member-button"
-                  aria-expanded={isVolumeOpen}
-                  aria-controls={isVolumeOpen ? volumeControlId : undefined}
-                  onClick={() => {
-                    setExpandedVolumeUserIds((current) => {
-                      const next = new Set(current);
-                      if (next.has(participant.userId)) {
-                        next.delete(participant.userId);
-                      } else {
-                        next.add(participant.userId);
-                      }
-                      return next;
-                    });
+                  aria-haspopup="dialog"
+                  aria-label={t('voice.participant_actions', { user: displayName })}
+                  onClick={(event) => {
+                    if (participantLongPressTriggeredRef.current) {
+                      participantLongPressTriggeredRef.current = false;
+                      return;
+                    }
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openParticipantMenu(participantMenuData, rect.left + 16, rect.bottom + 4);
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    clearParticipantLongPress();
+                    openParticipantMenu(participantMenuData, event.clientX, event.clientY);
+                  }}
+                  onPointerDown={(event) => {
+                    if (event.pointerType === 'mouse') return;
+                    clearParticipantLongPress();
+                    const startX = event.clientX;
+                    const startY = event.clientY;
+                    const timer = window.setTimeout(() => {
+                      participantLongPressTriggeredRef.current = true;
+                      openParticipantMenu(participantMenuData, startX, startY);
+                      participantPressRef.current = null;
+                    }, 520);
+                    participantPressRef.current = { startX, startY, timer };
+                  }}
+                  onPointerMove={(event) => {
+                    const press = participantPressRef.current;
+                    if (!press) return;
+                    if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) > 10) {
+                      clearParticipantLongPress();
+                    }
+                  }}
+                  onPointerUp={clearParticipantLongPress}
+                  onPointerCancel={clearParticipantLongPress}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+                    event.preventDefault();
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    openParticipantMenu(participantMenuData, rect.left + 16, rect.bottom + 4);
                   }}
                 >
                   <span className="voice-channel-view-avatar" aria-hidden="true">
@@ -422,50 +722,24 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
                   {isSpeaking && !participant.isMuted ? (
                     <span className="voice-channel-view-badge">{t('voice.badge_speaking')}</span>
                   ) : null}
-                  {liveStream ? <span className="voice-channel-view-live-badge">{t('chat.live_badge')}</span> : null}
                 </button>
-
-                {isVolumeOpen ? (
-                  <div id={volumeControlId} className="voice-channel-volume-popover">
-                    <div className="voice-channel-volume-header">
-                      <span>{t('voice.participant_volume_title', { user: displayName })}</span>
-                      <strong>{participantVolumePercent}%</strong>
-                    </div>
-                    {isMe ? (
-                      <p className="voice-channel-volume-note">{t('voice.participant_volume_self_note')}</p>
-                    ) : (
-                      <div className="voice-channel-volume-row">
-                        <input
-                          type="range"
-                          className="voice-volume-slider"
-                          min={0}
-                          max={200}
-                          value={participantVolumePercent}
-                          aria-label={t('voice.participant_volume_aria', { user: displayName })}
-                          onChange={(event) => {
-                            setParticipantPlaybackVolume(participant.userId, Number(event.target.value) / 100);
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="btn-ghost voice-channel-volume-reset"
-                          onClick={() => clearParticipantPlaybackVolume(participant.userId)}
-                          disabled={participantPlaybackVolume[participant.userId] === undefined}
-                        >
-                          {t('voice.reset_volume')}
-                        </button>
-                      </div>
-                    )}
-                    {canWatchLiveStream ? (
-                      <button
-                        type="button"
-                        className="btn-ghost voice-channel-watch-stream-btn"
-                        onClick={() => handleWatchStream(liveStream.streamId)}
-                      >
-                        {t('stream.action_watch_stream')}
-                      </button>
-                    ) : null}
-                  </div>
+                {liveStream ? (
+                  isMe ? (
+                    <span className="voice-channel-view-live-badge">{t('chat.live_badge')}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="voice-channel-view-live-action"
+                      aria-label={t('stream.watch_user_stream', { user: displayName })}
+                      onClick={() => handleWatchStream(liveStream.streamId)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="3" y="5" width="18" height="14" rx="2" />
+                        <path d="m10 9 5 3-5 3V9Z" />
+                      </svg>
+                      <span>{t('chat.live_badge')}</span>
+                    </button>
+                  )
                 ) : null}
               </li>
             );
@@ -476,6 +750,45 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
       <div className="voice-channel-empty">
         <h3>{t('voice.channel_welcome_title', { channel: channelName })}</h3>
       </div>
+      {participantMenu ? (
+        <VoiceParticipantMenu
+          hasCustomVolume={participantPlaybackVolume[participantMenu.userId] !== undefined}
+          menu={participantMenu}
+          networkMetrics={[
+            {
+              label: t('stream.voice_health_gateway_rtt'),
+              value: selectedParticipantNetwork?.gatewayRttMs === null || selectedParticipantNetwork?.gatewayRttMs === undefined
+                ? '--'
+                : `${Math.max(0, Math.round(selectedParticipantNetwork.gatewayRttMs))}ms`,
+            },
+            {
+              label: t('stream.voice_health_gateway_loss'),
+              value: selectedParticipantNetwork?.gatewayLossPct === null || selectedParticipantNetwork?.gatewayLossPct === undefined
+                ? '--'
+                : `${Math.max(0, Math.round(selectedParticipantNetwork.gatewayLossPct))}%`,
+            },
+            {
+              label: t('stream.voice_health_media_loss'),
+              value: selectedParticipantNetwork?.mediaSelfLossPct === null || selectedParticipantNetwork?.mediaSelfLossPct === undefined
+                ? '--'
+                : `${Math.max(0, Math.round(selectedParticipantNetwork.mediaSelfLossPct))}%`,
+            },
+            {
+              label: t('stream.voice_health_freshness'),
+              value: selectedParticipantNetwork?.stale
+                ? t('stream.voice_health_stale')
+                : t('stream.voice_health_fresh'),
+            },
+          ]}
+          onChangeVolume={(volume) => setParticipantPlaybackVolume(participantMenu.userId, volume)}
+          onClose={() => setParticipantMenu(null)}
+          onResetVolume={() => clearParticipantPlaybackVolume(participantMenu.userId)}
+          onWatchStream={handleWatchStream}
+          volumePercent={toVoiceParticipantVolumePercent(
+            participantPlaybackVolume[participantMenu.userId] ?? DEFAULT_VOICE_PARTICIPANT_VOLUME,
+          )}
+        />
+      ) : null}
     </section>
   );
 }
@@ -489,14 +802,41 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
   const gatewayRttMs = useGatewayStore((s) => s.gatewayRttMs);
   const ownedStream = useStreamStore((s) => s.ownedStream);
   const stopSharing = useStreamStore((s) => s.stopSharing);
+  const inputVolume = useVoiceStore((s) => s.inputVolume);
+  const setInputVolume = useVoiceStore((s) => s.setInputVolume);
   const controls = useVoiceControls();
   const lastAudiblePlaybackVolumeRef = useRef(1);
+  const [openVolumeControl, setOpenVolumeControl] = useState<'input' | 'output' | null>(null);
 
   useEffect(() => {
     if (controls.playbackVolume > 0) {
       lastAudiblePlaybackVolumeRef.current = controls.playbackVolume;
     }
   }, [controls.playbackVolume]);
+
+  useEffect(() => {
+    if (!openVolumeControl) return;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Element;
+      if (!target.closest('.voice-bottom-volume-popover') && !target.closest('.voice-bottom-chevron')) {
+        setOpenVolumeControl(null);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpenVolumeControl(null);
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openVolumeControl]);
 
   if (!controls.channelId) return null;
 
@@ -525,77 +865,176 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
 
       <div className="voice-bottom-actions">
         {ownedStream ? (
-          <button
-            type="button"
-            className="btn-ghost voice-bottom-btn voice-bottom-btn--danger"
-            onClick={() => {
-              void stopSharing(sendCommandAwaitAck);
-            }}
-            disabled={controls.isConnecting || ownedStream.status === 'stopping'}
-            title={t('stream.action_stop_sharing')}
-          >
-            <span aria-hidden="true">X</span>
-            <span>{t('stream.action_stop_sharing')}</span>
-          </button>
+          <Tooltip label={t('stream.action_stop_sharing')}>
+            <button
+              type="button"
+              className="voice-bottom-btn voice-bottom-btn--danger"
+              onClick={() => {
+                void stopSharing(sendCommandAwaitAck);
+              }}
+              disabled={controls.isConnecting || ownedStream.status === 'stopping'}
+              aria-label={t('stream.action_stop_sharing')}
+            >
+              <ScreenShareIcon />
+              <SlashIcon />
+            </button>
+          </Tooltip>
         ) : (
+          <Tooltip label={t('stream.action_start_stream')}>
+            <button
+              type="button"
+              className="voice-bottom-btn voice-bottom-btn--stream"
+              onClick={onOpenStreamShareDialog}
+              disabled={controls.isConnecting}
+              aria-label={t('stream.action_start_stream')}
+            >
+              <ScreenShareIcon />
+            </button>
+          </Tooltip>
+        )}
+        <div className="voice-bottom-split">
+          <Tooltip label={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}>
+            <button
+              type="button"
+              className={`voice-bottom-btn voice-bottom-btn--split-main${controls.isMuted ? ' voice-bottom-btn--danger' : ''}`}
+              onClick={controls.handleMute}
+              disabled={controls.isConnecting}
+              aria-label={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
+              aria-pressed={controls.isMuted}
+            >
+              <MicrophoneIcon className="voice-bottom-icon" />
+              {controls.isMuted ? <SlashIcon /> : null}
+            </button>
+          </Tooltip>
+          <Tooltip label={t('voice.mic_input')}>
+            <button
+              type="button"
+              className={`voice-bottom-chevron${openVolumeControl === 'input' ? ' active' : ''}`}
+              aria-label={t('voice.mic_input')}
+              aria-expanded={openVolumeControl === 'input'}
+              aria-haspopup="dialog"
+              onClick={() => setOpenVolumeControl((current) => (current === 'input' ? null : 'input'))}
+            >
+              <ChevronUpIcon />
+            </button>
+          </Tooltip>
+          {openVolumeControl === 'input' ? (
+            <div className="voice-bottom-volume-popover" role="dialog" aria-label={t('voice.mic_input')}>
+              <div className="voice-bottom-volume-header">
+                <strong>{t('voice.mic_input')}</strong>
+                <span>{Math.round(inputVolume * 100)}%</span>
+              </div>
+              <input
+                className="voice-volume-slider"
+                type="range"
+                min={0}
+                max={200}
+                value={Math.round(inputVolume * 100)}
+                aria-label={t('voice.mic_input')}
+                onChange={(event) => setInputVolume(Number(event.target.value) / 100)}
+              />
+              <div className="voice-bottom-volume-scale" aria-hidden="true">
+                <span>0%</span>
+                <span>100%</span>
+                <span>200%</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="voice-bottom-split">
+          <Tooltip label={isSpeakerMuted ? t('voice.speaker_on_title') : t('voice.speaker_off_title')}>
+            <button
+              type="button"
+              className={`voice-bottom-btn voice-bottom-btn--split-main${isSpeakerMuted ? ' voice-bottom-btn--danger' : ''}`}
+              onClick={handleSpeakerToggle}
+              disabled={controls.isConnecting}
+              aria-label={isSpeakerMuted ? t('voice.speaker_on_title') : t('voice.speaker_off_title')}
+              aria-pressed={isSpeakerMuted}
+            >
+              <SpeakerIcon className="voice-bottom-icon" />
+              {isSpeakerMuted ? <SlashIcon /> : null}
+            </button>
+          </Tooltip>
+          <Tooltip label={t('voice.playback')}>
+            <button
+              type="button"
+              className={`voice-bottom-chevron${openVolumeControl === 'output' ? ' active' : ''}`}
+              aria-label={t('voice.playback')}
+              aria-expanded={openVolumeControl === 'output'}
+              aria-haspopup="dialog"
+              onClick={() => setOpenVolumeControl((current) => (current === 'output' ? null : 'output'))}
+            >
+              <ChevronUpIcon />
+            </button>
+          </Tooltip>
+          {openVolumeControl === 'output' ? (
+            <div className="voice-bottom-volume-popover" role="dialog" aria-label={t('voice.playback')}>
+              <div className="voice-bottom-volume-header">
+                <strong>{t('voice.playback')}</strong>
+                <span>{toVoiceVolumePercent(controls.playbackVolume)}%</span>
+              </div>
+              <input
+                className="voice-volume-slider"
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(controls.playbackVolume * 100)}
+                aria-label={t('voice.playback')}
+                onChange={(event) => controls.setPlaybackVolume(Number(event.target.value) / 100)}
+              />
+              <div className="voice-bottom-volume-scale" aria-hidden="true">
+                <span>0%</span>
+                <span>50%</span>
+                <span>100%</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <Tooltip
+          label={
+            controls.isDesktop
+              ? controls.isDesktopMusicCaptureAvailable
+                ? controls.publishedMusic
+                  ? t('voice.stop_music_share')
+                  : t('voice.music_share_title')
+                : t('voice.music_share_unavailable_title')
+              : t('voice.music_share_web_unavailable_title')
+          }
+        >
           <button
             type="button"
-            className="btn-ghost voice-bottom-btn voice-bottom-btn--stream"
-            onClick={onOpenStreamShareDialog}
-            disabled={controls.isConnecting}
-            title={t('stream.action_start_stream')}
+            className={`voice-bottom-btn${controls.publishedMusic ? ' voice-bottom-btn--active' : ''}`}
+            onClick={controls.handleMusicShareToggle}
+            disabled={
+              controls.isConnecting ||
+              !controls.isDesktop ||
+              (!controls.publishedMusic && !controls.isDesktopMusicCaptureAvailable) ||
+              controls.publishedMusic?.status === 'capturing' ||
+              controls.publishedMusic?.status === 'starting' ||
+              controls.publishedMusic?.status === 'stopping'
+            }
+            aria-label={
+              controls.isDesktop
+                ? controls.publishedMusic
+                  ? t('voice.stop_music_share')
+                  : t('voice.share_music')
+                : t('voice.music_share_web_unavailable_title')
+            }
           >
-            <span aria-hidden="true">LIVE</span>
-            <span>{t('stream.action_start_stream')}</span>
+            <MusicNoteIcon className="voice-bottom-icon" />
           </button>
-        )}
-        <button
-          type="button"
-          className={`btn-ghost voice-bottom-btn${controls.isMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
-          onClick={controls.handleMute}
-          disabled={controls.isConnecting}
-          title={controls.isMuted ? t('voice.unmute_title') : t('voice.mute_title')}
-        >
-          <span aria-hidden="true">{controls.isMuted ? 'M-' : 'M+'}</span>
-          <span>{controls.isMuted ? t('voice.muted_label') : t('voice.mic_on_label')}</span>
-        </button>
-        <button
-          type="button"
-          className={`btn-ghost voice-bottom-btn${isSpeakerMuted ? ' voice-bottom-btn--danger' : ' voice-bottom-btn--success'}`}
-          onClick={handleSpeakerToggle}
-          disabled={controls.isConnecting}
-          title={isSpeakerMuted ? t('voice.speaker_on_title') : t('voice.speaker_off_title')}
-        >
-          <span aria-hidden="true">{isSpeakerMuted ? 'S-' : 'S+'}</span>
-          <span>{isSpeakerMuted ? t('voice.speaker_muted_label') : t('voice.speaker_on_label')}</span>
-        </button>
-        <button
-          type="button"
-          className="btn-ghost voice-bottom-btn"
-          onClick={controls.handleMusicShareToggle}
-          disabled={
-            controls.isConnecting ||
-            !controls.isDesktop ||
-            (!controls.publishedMusic && !controls.isDesktopMusicCaptureAvailable) ||
-            controls.publishedMusic?.status === 'capturing' ||
-            controls.publishedMusic?.status === 'starting' ||
-            controls.publishedMusic?.status === 'stopping'
-          }
-          title={controls.isDesktopMusicCaptureAvailable ? t('voice.music_share_title') : t('voice.music_share_unavailable_title')}
-        >
-          <span aria-hidden="true">MU</span>
-          <span>{controls.publishedMusic ? t('voice.stop_music_share') : t('voice.share_music')}</span>
-        </button>
-        <button
-          type="button"
-          className="btn-ghost voice-bottom-btn voice-bottom-btn--leave"
-          onClick={controls.handleLeave}
-          disabled={controls.isConnecting}
-          title={t('voice.leave_title')}
-        >
-          <span aria-hidden="true">X</span>
-          <span>{t('voice.leave')}</span>
-        </button>
+        </Tooltip>
+        <Tooltip label={t('voice.leave_title')}>
+          <button
+            type="button"
+            className="voice-bottom-btn voice-bottom-btn--leave"
+            onClick={controls.handleLeave}
+            disabled={controls.isConnecting}
+            aria-label={t('voice.leave_title')}
+          >
+            <HangupIcon />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
@@ -620,36 +1059,39 @@ export function VoiceSidebarVolumeControls() {
   return (
     <div className="voice-sidebar-volume-controls">
       <div className="voice-audio-toggle-row" aria-label={t('common.volume')}>
-        <button
-          type="button"
-          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'input' ? ' voice-audio-toggle--active' : ''}`}
-          onClick={() => toggleVolumeControl('input')}
-          aria-pressed={expandedVolumeControl === 'input'}
-          aria-label={t('voice.mic_input')}
-          title={t('voice.mic_input')}
-        >
-          <MicrophoneIcon />
-        </button>
-        <button
-          type="button"
-          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'output' ? ' voice-audio-toggle--active' : ''}`}
-          onClick={() => toggleVolumeControl('output')}
-          aria-pressed={expandedVolumeControl === 'output'}
-          aria-label={t('voice.playback')}
-          title={t('voice.playback')}
-        >
-          <SpeakerIcon />
-        </button>
-        <button
-          type="button"
-          className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'music' ? ' voice-audio-toggle--active' : ''}`}
-          onClick={() => toggleVolumeControl('music')}
-          aria-pressed={expandedVolumeControl === 'music'}
-          aria-label={t('voice.shared_music')}
-          title={t('voice.shared_music')}
-        >
-          <MusicNoteIcon />
-        </button>
+        <Tooltip label={t('voice.mic_input')}>
+          <button
+            type="button"
+            className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'input' ? ' voice-audio-toggle--active' : ''}`}
+            onClick={() => toggleVolumeControl('input')}
+            aria-pressed={expandedVolumeControl === 'input'}
+            aria-label={t('voice.mic_input')}
+          >
+            <MicrophoneIcon />
+          </button>
+        </Tooltip>
+        <Tooltip label={t('voice.playback')}>
+          <button
+            type="button"
+            className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'output' ? ' voice-audio-toggle--active' : ''}`}
+            onClick={() => toggleVolumeControl('output')}
+            aria-pressed={expandedVolumeControl === 'output'}
+            aria-label={t('voice.playback')}
+          >
+            <SpeakerIcon />
+          </button>
+        </Tooltip>
+        <Tooltip label={t('voice.shared_music')}>
+          <button
+            type="button"
+            className={`btn-ghost voice-audio-toggle${expandedVolumeControl === 'music' ? ' voice-audio-toggle--active' : ''}`}
+            onClick={() => toggleVolumeControl('music')}
+            aria-pressed={expandedVolumeControl === 'music'}
+            aria-label={t('voice.shared_music')}
+          >
+            <MusicNoteIcon />
+          </button>
+        </Tooltip>
       </div>
 
       {expandedVolumeControl === 'input' ? (

@@ -31,6 +31,8 @@ Current validated state:
 - Phase 2 slice 3 stream audio/controls complete
 - livestream quality controls for resolution/frame-rate/bitrate and best-effort codec selection complete
 - server control panel baseline complete
+- Discord-inspired Web/Windows client interaction and visual-system pass complete
+- Windows screen-source and application-audio picker redesign complete
 - revised M5 stability/UX slice complete (server RTT/roster visibility/bitrate/auth recovery/startup governance)
 - revised M5.2 slice complete (per-user voice network snapshots, close/handshake reconnect hardening, voice/stream layout fixes)
 - mobile web tabbed UI and joined-voice usability pass complete
@@ -123,6 +125,8 @@ Implemented today:
 - browser auth tokens now stay in `sessionStorage` instead of `localStorage`
 - the admin panel no longer persists the management password in browser storage
 - Baker Desktop checks GitHub Releases for lettered client release labels on launch and exposes a non-blocking version picker for selected desktop updates
+- the shared Web/Windows UI intentionally follows Discord's interaction vocabulary for channel navigation, context menus, member controls, voice actions, livestream discovery, and responsive touch behavior; Baker retains its own branding and adds self-hosted network diagnostics plus broader livestream controls
+- Windows screen sharing uses a dedicated preview picker with window/screen tabs and optional system audio; selective application-audio sharing uses a separate searchable picker with live level meters
 - HTTPS dev proxy upstream selection is now runtime-port aware (`runtime-ports.json` + Vite log parsing) to avoid stale `:80` routing that can break external domain voice connectivity
 - dev startup now performs Docker engine readiness checks (best-effort Docker Desktop auto-start + wait), and if Docker backend is stuck in `starting` it performs one automatic recovery attempt (`restart Docker Desktop + wsl --shutdown`) before failing
 - dev startup now reports Docker daemon last-error details and exits early when Docker backend is stuck in `starting`, with explicit `wsl --shutdown` recovery guidance

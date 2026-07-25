@@ -13,6 +13,11 @@ export const zh = {
   },
   admin: {
     title: '服务器控制面板',
+    panel_label: '控制面板',
+    navigation: '控制面板导航',
+    configuration: '配置',
+    operations: '运维',
+    workspace: '工作区',
     login_copy: '请输入管理密码以打开服务器仪表盘。',
     management_password: '管理密码',
     checking: '验证中...',

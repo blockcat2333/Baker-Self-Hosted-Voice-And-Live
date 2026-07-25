@@ -2,6 +2,31 @@
 
 ## 2026-07-25
 
+### Baker 1.1.0 Discord-inspired client/admin UI and desktop 1.1.0a
+
+What changed:
+
+- moved the public server line to stable `1.1.0`
+- reset the matching Windows client label to `1.1.0a`, stored as semver `1.1.0-a`
+- aligned the Web and Windows application shell, server settings, and admin control panel around a shared neutral dark/purple system
+- added Discord-inspired context-menu grouping, submenu behavior, member actions, per-user volume controls, compact voice controls, discoverable tooltips, and touch long-press handling
+- kept channel member lists available during livestream publishing and viewing
+- reworked livestream viewing and sender-status layouts to avoid overflow while exposing Baker's extended quality and network diagnostics
+- rebuilt the Windows screen/window picker and application-audio picker with clear selected states, previews, search, audio capability explanation, live volume meters, and responsive constraints
+
+Why:
+
+- the previous UI exposed working features but made common voice, member, and livestream actions hard to discover
+- Discord provides a familiar interaction vocabulary for realtime community products, reducing user relearning
+- Baker still needs its own controls for self-hosted network visibility, advanced livestream configuration, and selective application-audio capture
+- desktop-only pickers must feel like part of the same product instead of generic auxiliary dialogs
+
+Validation:
+
+- real browser and Electron UI smoke checks
+- Windows source-picker and application-audio-picker interaction checks without starting a share
+- release consistency, typecheck, lint, full workspace tests, production builds, installer build, and Docker all-in-one validation
+
 ### Baker 1.0.14 stale media-port cleanup fix and desktop 1.0.14a
 
 What changed:

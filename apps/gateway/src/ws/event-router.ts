@@ -445,6 +445,35 @@ async function handleVoiceJoin(
     });
   }
 
+  const existingChannelId = runtime.voiceRoom.getChannelForUser(userId);
+  if (existingChannelId === channelId) {
+    return createErrorEnvelope({
+      code: 'VOICE_ALREADY_JOINED',
+      message: 'You are already in this voice channel.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  if (existingChannelId) {
+    const existingParticipant = runtime.voiceRoom.getParticipant(
+      existingChannelId,
+      userId,
+    );
+    const owningConnection = existingParticipant
+      ? runtime.connections.getById(existingParticipant.connectionId)
+      : null;
+    const leaveReply = await handleVoiceLeave(
+      owningConnection ?? connection,
+      reqId,
+      { channelId: existingChannelId },
+      runtime,
+    );
+    if (leaveReply.op === 'error') {
+      return leaveReply;
+    }
+  }
+
   // Create media session to get sessionId + ICE servers.
   // Use a temporary sessionId for the media call; the real UUID comes back from media.
   let mediaSession: MediaSessionResponse;

@@ -14,6 +14,14 @@ export function createGuildsRepository(executor: DatabaseExecutor): GuildsReposi
 
       return guild;
     },
+    async createIfAbsent(input: CreateGuildInput) {
+      const [guild] = await executor
+        .insert(guilds)
+        .values(input)
+        .onConflictDoNothing({ target: guilds.slug })
+        .returning();
+      return guild ?? null;
+    },
     async findById(id: string) {
       const [guild] = await executor.select().from(guilds).where(eq(guilds.id, id)).limit(1);
       return guild ?? null;

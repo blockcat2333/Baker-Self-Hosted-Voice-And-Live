@@ -52,6 +52,72 @@ describe('api app', () => {
     await app.close();
   });
 
+  it('handles concurrent first registrations without duplicating the default workspace', async () => {
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    const responses = await Promise.all([
+      app.inject({
+        method: 'POST',
+        payload: {
+          email: 'parallel-one@example.com',
+          password: 'supersecurepassword',
+          username: 'Parallel One',
+        },
+        url: '/v1/auth/register',
+      }),
+      app.inject({
+        method: 'POST',
+        payload: {
+          email: 'parallel-two@example.com',
+          password: 'supersecurepassword',
+          username: 'Parallel Two',
+        },
+        url: '/v1/auth/register',
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([
+      200, 200,
+    ]);
+
+    const guildResponses = await Promise.all(
+      responses.map((response) =>
+        app.inject({
+          headers: {
+            authorization: `Bearer ${response.json().tokens.accessToken}`,
+          },
+          method: 'GET',
+          url: '/v1/guilds',
+        }),
+      ),
+    );
+
+    expect(guildResponses.map((response) => response.statusCode)).toEqual([
+      200, 200,
+    ]);
+    expect(guildResponses[0]?.json()).toHaveLength(1);
+    expect(guildResponses[1]?.json()).toHaveLength(1);
+    expect(guildResponses[0]?.json()[0].id).toBe(
+      guildResponses[1]?.json()[0].id,
+    );
+
+    const guildId = guildResponses[0]?.json()[0].id as string;
+    const channelsResponse = await app.inject({
+      headers: {
+        authorization: `Bearer ${responses[0]?.json().tokens.accessToken}`,
+      },
+      method: 'GET',
+      url: `/v1/guilds/${guildId}/channels`,
+    });
+
+    expect(channelsResponse.statusCode).toBe(200);
+    expect(channelsResponse.json()).toHaveLength(2);
+
+    await app.close();
+  });
+
   it('runs the auth and text chat backend slice end-to-end', async () => {
     const app = buildApiApp({
       dataAccess: createInMemoryDataAccess(),

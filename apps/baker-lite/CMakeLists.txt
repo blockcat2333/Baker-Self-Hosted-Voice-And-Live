@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
     BakerLite
-    VERSION 1.1.1
+    VERSION 1.1.2
     DESCRIPTION "Native lightweight Baker client"
     HOMEPAGE_URL "https://github.com/blockcat2333/Baker-Self-Hosted-Voice-And-Live"
     LANGUAGES CXX
@@ -10,7 +10,7 @@ project(
 
 # CMake project versions are numeric-only; the public client version may use
 # Baker's lettered client-release suffix.
-set(BAKER_LITE_VERSION "1.1.1a")
+set(BAKER_LITE_VERSION "1.1.2a")
 set(BAKER_LITE_WINDOWS_VERSION_REVISION 1)
 
 if(NOT WIN32)

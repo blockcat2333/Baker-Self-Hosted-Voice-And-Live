@@ -15,6 +15,7 @@ download
 scripts/screenshots
 apps/*/node_modules
 apps/*/.turbo
+apps/baker-lite/out
 apps/desktop/release
 packages/*/node_modules
 packages/*/.turbo

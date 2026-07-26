@@ -48,6 +48,17 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-07-27 Baker 1.1.2 Diagnostics, Proxy Input, And Windows Clients
+
+- advanced the stable server release line to `1.1.2` and reset the Electron and Baker Lite client labels to `1.1.2a`
+- added an administrator-only diagnostic log export containing runtime health and recent all-in-one container logs
+- added bounded log size and automatic credential, token, cookie, authorization, and connection-string redaction
+- made update proxy inputs accept `host:port`, `IP:port`, and protocol-relative addresses by automatically adding `http://`
+- retained explicit validation for unsupported proxy protocols
+- made first-run server settings and shared-workspace initialization safe under concurrent registrations
+- improved Baker Lite livestream stop controls, shared-audio volume propagation, selected bitrate/FPS application, and native SFU media statistics
+- added regression coverage across the protocol, API, Docker log decoder, diagnostic exporter, and Baker Lite UI/media layers
+
 ### 2026-07-26 Baker 1.1.1 SFU Capacity And Voice-State Recovery
 
 - advanced the stable server release line to `1.1.1` and reset the desktop/client label to `1.1.1a`

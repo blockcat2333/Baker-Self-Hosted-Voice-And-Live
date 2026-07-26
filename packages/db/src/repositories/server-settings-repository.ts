@@ -13,6 +13,14 @@ export function createServerSettingsRepository(executor: DatabaseExecutor): Serv
       }
       return settings;
     },
+    async createIfAbsent(input) {
+      const [settings] = await executor
+        .insert(serverSettings)
+        .values(input)
+        .onConflictDoNothing({ target: serverSettings.id })
+        .returning();
+      return settings ?? null;
+    },
     async findById(id) {
       const [settings] = await executor.select().from(serverSettings).where(eq(serverSettings.id, id)).limit(1);
       return settings ?? null;

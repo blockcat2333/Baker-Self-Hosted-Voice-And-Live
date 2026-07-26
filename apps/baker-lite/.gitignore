@@ -1,0 +1,6 @@
+# Native build and package output
+/out/
+
+# Dependency/bootstrap tool logs
+/aqtinstall.log
+/*.log

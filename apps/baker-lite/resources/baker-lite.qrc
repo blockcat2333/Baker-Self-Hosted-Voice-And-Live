@@ -1,0 +1,33 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="styles/teamspeak.qss">styles/teamspeak.qss</file>
+    <file alias="icons/baker.png">icons/baker-lite.png</file>
+    <file alias="icons/connect.svg">icons/connect.svg</file>
+    <file alias="icons/disconnect.svg">icons/disconnect.svg</file>
+    <file alias="icons/server.svg">icons/server.svg</file>
+    <file alias="icons/guild.svg">icons/guild.svg</file>
+    <file alias="icons/chat.svg">icons/chat.svg</file>
+    <file alias="icons/voice.svg">icons/voice.svg</file>
+    <file alias="icons/user.svg">icons/user.svg</file>
+    <file alias="icons/speaking.svg">icons/speaking.svg</file>
+    <file alias="icons/muted.svg">icons/muted.svg</file>
+    <file alias="icons/microphone.svg">icons/microphone.svg</file>
+    <file alias="icons/microphone-muted.svg">icons/microphone-muted.svg</file>
+    <file alias="icons/speaker.svg">icons/speaker.svg</file>
+    <file alias="icons/speaker-muted.svg">icons/speaker-muted.svg</file>
+    <file alias="icons/devices.svg">icons/devices.svg</file>
+    <file alias="icons/music.svg">icons/music.svg</file>
+    <file alias="icons/music-volume.svg">icons/music-volume.svg</file>
+    <file alias="icons/music-volume-muted.svg">icons/music-volume-muted.svg</file>
+    <file alias="icons/screen.svg">icons/screen.svg</file>
+    <file alias="icons/camera.svg">icons/camera.svg</file>
+    <file alias="icons/settings.svg">icons/settings.svg</file>
+    <file alias="icons/update.svg">icons/update.svg</file>
+    <file alias="icons/info.svg">icons/info.svg</file>
+    <file alias="icons/attach.svg">icons/attach.svg</file>
+    <file alias="icons/detach.svg">icons/detach.svg</file>
+    <file alias="icons/fullscreen.svg">icons/fullscreen.svg</file>
+    <file alias="icons/log.svg">icons/log.svg</file>
+    <file alias="icons/connection-log.svg">icons/connection-log.svg</file>
+  </qresource>
+</RCC>

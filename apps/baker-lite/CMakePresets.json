@@ -1,0 +1,77 @@
+{
+  "version": 4,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-x64-base",
+      "hidden": true,
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install",
+        "BAKER_LITE_BUILD_TESTS": "ON",
+        "BAKER_LITE_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
+      "name": "windows-x64-shell",
+      "displayName": "Windows x64 shell (without WebRTC)",
+      "inherits": "windows-x64-base",
+      "binaryDir": "${sourceDir}/out/build-shell",
+      "cacheVariables": {
+        "BAKER_LITE_WITH_WEBRTC": "OFF"
+      }
+    },
+    {
+      "name": "windows-x64-media",
+      "displayName": "Windows x64 full media client",
+      "inherits": "windows-x64-base",
+      "binaryDir": "${sourceDir}/out/build-media",
+      "cacheVariables": {
+        "BAKER_LITE_WITH_WEBRTC": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "shell-debug",
+      "configurePreset": "windows-x64-shell",
+      "configuration": "Debug"
+    },
+    {
+      "name": "shell-release",
+      "configurePreset": "windows-x64-shell",
+      "configuration": "Release"
+    },
+    {
+      "name": "media-release",
+      "configurePreset": "windows-x64-media",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "shell-tests",
+      "configurePreset": "windows-x64-shell",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "media-tests",
+      "configurePreset": "windows-x64-media",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

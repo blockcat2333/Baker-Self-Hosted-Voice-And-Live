@@ -215,6 +215,24 @@ export function createInMemoryDataAccess(): DatabaseAccess {
         guilds.set(guild.id, guild);
         return guild;
       },
+      async createIfAbsent(input) {
+        const existing = Array.from(guilds.values()).find(
+          (guild) => guild.slug === input.slug,
+        );
+        if (existing) {
+          return null;
+        }
+
+        const guild: GuildRecord = {
+          createdAt: new Date(),
+          id: randomUUID(),
+          name: input.name,
+          ownerUserId: input.ownerUserId,
+          slug: input.slug,
+        };
+        guilds.set(guild.id, guild);
+        return guild;
+      },
       async findById(id) {
         return guilds.get(id) ?? null;
       },
@@ -354,6 +372,26 @@ export function createInMemoryDataAccess(): DatabaseAccess {
     },
     serverSettings: {
       async create(input) {
+        const settings: ServerSettingsRecord = {
+          adminPasswordHash: input.adminPasswordHash,
+          allowPublicRegistration: input.allowPublicRegistration ?? true,
+          appPort: input.appPort ?? 5174,
+          createdAt: new Date(),
+          id: input.id,
+          mediaMode: input.mediaMode ?? 'p2p',
+          serverName: input.serverName ?? 'Baker',
+          updatedAt: new Date(),
+          webEnabled: input.webEnabled ?? true,
+          webPort: input.webPort ?? 80,
+        };
+        serverSettings.set(settings.id, settings);
+        return settings;
+      },
+      async createIfAbsent(input) {
+        if (serverSettings.has(input.id)) {
+          return null;
+        }
+
         const settings: ServerSettingsRecord = {
           adminPasswordHash: input.adminPasswordHash,
           allowPublicRegistration: input.allowPublicRegistration ?? true,

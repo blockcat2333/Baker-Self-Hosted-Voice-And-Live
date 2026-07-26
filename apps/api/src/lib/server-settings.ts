@@ -1,4 +1,8 @@
-import type { DatabaseAccess, RepositoryContext, ServerSettingsRecord } from '@baker/db';
+import type {
+  DatabaseAccess,
+  RepositoryContext,
+  ServerSettingsRecord,
+} from '@baker/db';
 import { parseAppEnv } from '@baker/shared';
 
 import { hashPassword, verifyPassword } from './password';
@@ -18,7 +22,10 @@ export async function getOrCreateServerSettings(
       existing.adminPasswordHash,
     );
 
-    if (usesLegacyDefault && env.ADMIN_PANEL_PASSWORD !== LEGACY_DEFAULT_ADMIN_PASSWORD) {
+    if (
+      usesLegacyDefault &&
+      env.ADMIN_PANEL_PASSWORD !== LEGACY_DEFAULT_ADMIN_PASSWORD
+    ) {
       const migrated = await dataAccess.serverSettings.update(existing.id, {
         adminPasswordHash: await hashPassword(env.ADMIN_PANEL_PASSWORD),
       });
@@ -29,7 +36,7 @@ export async function getOrCreateServerSettings(
 
     return existing;
   }
-  return dataAccess.serverSettings.create({
+  const created = await dataAccess.serverSettings.createIfAbsent({
     adminPasswordHash: await hashPassword(env.ADMIN_PANEL_PASSWORD),
     allowPublicRegistration: true,
     appPort: 5174,
@@ -39,6 +46,18 @@ export async function getOrCreateServerSettings(
     webEnabled: true,
     webPort: env.WEB_PORT,
   });
+  if (created) {
+    return created;
+  }
+
+  const concurrentlyCreated =
+    await dataAccess.serverSettings.findById(SERVER_SETTINGS_ID);
+  if (!concurrentlyCreated) {
+    throw new Error(
+      'Server settings were created concurrently but could not be loaded.',
+    );
+  }
+  return concurrentlyCreated;
 }
 
 export async function verifyAdminPassword(

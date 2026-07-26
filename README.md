@@ -28,7 +28,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.1.1`; desktop client `1.1.1a`
+- Release line: server `1.1.2`; desktop clients `1.1.2a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -66,7 +66,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.1
+  blockcat233/baker:1.1.2
 
 docker logs baker
 ```
@@ -78,7 +78,7 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-If you want to follow the newest rolling image instead of pinning this release, replace `1.1.1` with `latest`.
+If you want to follow the newest rolling image instead of pinning this release, replace `1.1.2` with `latest`.
 
 The public deployment guide assumes this all-in-one image. It contains PostgreSQL, Redis, API, Gateway, Media, Caddy, optional coturn, the runtime watchdog, and `supervisorctl` in one container. Admin runtime repair, self-repair, public IP automation restarts, and deployment-settings apply all depend on that supervisor environment. If you run split services manually, Baker can still serve traffic, but you must provide your own process supervision and restart Media/TURN after runtime config changes.
 
@@ -114,7 +114,7 @@ Baker tries several public IP endpoints by default, including endpoints that are
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:1.1.1`
+- Image: `blockcat233/baker:1.1.2`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -173,7 +173,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.1
+  blockcat233/baker:1.1.2
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
@@ -206,7 +206,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.1
+  blockcat233/baker:1.1.2
 ```
 
 Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.

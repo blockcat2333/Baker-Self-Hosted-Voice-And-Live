@@ -1,0 +1,76 @@
+; Baker Lite per-user CPack/NSIS template.
+; It intentionally avoids elevation and writes application state to HKCU.
+
+Unicode true
+
+!define VERSION "@CPACK_PACKAGE_VERSION@"
+!define INST_DIR "@CPACK_TEMPORARY_DIRECTORY@"
+
+!include "MUI2.nsh"
+
+Name "@CPACK_NSIS_PACKAGE_NAME@"
+OutFile "@CPACK_TOPLEVEL_DIRECTORY@/@CPACK_OUTPUT_FILE_NAME@"
+InstallDir "@CPACK_NSIS_INSTALL_ROOT@\@CPACK_PACKAGE_INSTALL_DIRECTORY@"
+InstallDirRegKey HKCU "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "InstallDir"
+RequestExecutionLevel user
+SetCompressor @CPACK_NSIS_COMPRESSOR@
+
+@CPACK_NSIS_DEFINES@
+@CPACK_NSIS_MANIFEST_DPI_AWARE_CODE@
+@CPACK_NSIS_BRANDING_TEXT_CODE@
+@CPACK_NSIS_CRC_CHECK_CODE@
+@CPACK_NSIS_INSTALLER_MUI_ICON_CODE@
+@CPACK_NSIS_INSTALLER_ICON_CODE@
+@CPACK_NSIS_INSTALLER_MUI_WELCOMEFINISH_CODE@
+
+!define MUI_ABORTWARNING
+!define MUI_FINISHPAGE_RUN "$INSTDIR\Baker Lite.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Run Baker Lite"
+
+!insertmacro MUI_PAGE_WELCOME
+@CPACK_NSIS_LICENSE_PAGE@
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+
+Section "Baker Lite" BakerLiteRuntime
+  SetShellVarContext current
+  SetOutPath "$INSTDIR"
+
+@CPACK_NSIS_EXTRA_PREINSTALL_COMMANDS@
+@CPACK_NSIS_FULL_INSTALL@
+@CPACK_NSIS_EXTRA_INSTALL_COMMANDS@
+
+  WriteUninstaller "$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"
+  WriteRegStr HKCU "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "DisplayName" "@CPACK_NSIS_DISPLAY_NAME@"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "DisplayVersion" "@CPACK_PACKAGE_VERSION@"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "Publisher" "@CPACK_PACKAGE_VENDOR@"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "DisplayIcon" "$INSTDIR\@CPACK_NSIS_INSTALLED_ICON_NAME@"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "UninstallString" '"$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"'
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@" "NoRepair" 1
+
+@CPACK_NSIS_CREATE_ICONS@
+@CPACK_NSIS_CREATE_ICONS_EXTRA@
+SectionEnd
+
+Section "Uninstall"
+  SetShellVarContext current
+
+@CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS@
+@CPACK_NSIS_DELETE_ICONS@
+@CPACK_NSIS_DELETE_ICONS_EXTRA@
+@CPACK_NSIS_DELETE_FILES@
+@CPACK_NSIS_DELETE_DIRECTORIES@
+
+  Delete "$INSTDIR\@CPACK_NSIS_UNINSTALL_NAME@.exe"
+  RMDir "$INSTDIR"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@"
+  DeleteRegKey HKCU "Software\@CPACK_PACKAGE_VENDOR@\@CPACK_PACKAGE_INSTALL_REGISTRY_KEY@"
+SectionEnd

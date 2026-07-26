@@ -214,7 +214,7 @@ async function run() {
   if (await settingsBtn.isVisible().catch(() => false)) {
     await settingsBtn.click();
     await page.locator('.settings-dialog').waitFor({ timeout: 10000 });
-    await page.locator('button.settings-dialog-action').last().click();
+    await page.locator('button.settings-row-action--danger').click();
   } else {
     await page.evaluate(() => {
       sessionStorage.clear();

@@ -52,6 +52,72 @@ describe('api app', () => {
     await app.close();
   });
 
+  it('handles concurrent first registrations without duplicating the default workspace', async () => {
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    const responses = await Promise.all([
+      app.inject({
+        method: 'POST',
+        payload: {
+          email: 'parallel-one@example.com',
+          password: 'supersecurepassword',
+          username: 'Parallel One',
+        },
+        url: '/v1/auth/register',
+      }),
+      app.inject({
+        method: 'POST',
+        payload: {
+          email: 'parallel-two@example.com',
+          password: 'supersecurepassword',
+          username: 'Parallel Two',
+        },
+        url: '/v1/auth/register',
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual([
+      200, 200,
+    ]);
+
+    const guildResponses = await Promise.all(
+      responses.map((response) =>
+        app.inject({
+          headers: {
+            authorization: `Bearer ${response.json().tokens.accessToken}`,
+          },
+          method: 'GET',
+          url: '/v1/guilds',
+        }),
+      ),
+    );
+
+    expect(guildResponses.map((response) => response.statusCode)).toEqual([
+      200, 200,
+    ]);
+    expect(guildResponses[0]?.json()).toHaveLength(1);
+    expect(guildResponses[1]?.json()).toHaveLength(1);
+    expect(guildResponses[0]?.json()[0].id).toBe(
+      guildResponses[1]?.json()[0].id,
+    );
+
+    const guildId = guildResponses[0]?.json()[0].id as string;
+    const channelsResponse = await app.inject({
+      headers: {
+        authorization: `Bearer ${responses[0]?.json().tokens.accessToken}`,
+      },
+      method: 'GET',
+      url: `/v1/guilds/${guildId}/channels`,
+    });
+
+    expect(channelsResponse.statusCode).toBe(200);
+    expect(channelsResponse.json()).toHaveLength(2);
+
+    await app.close();
+  });
+
   it('runs the auth and text chat backend slice end-to-end', async () => {
     const app = buildApiApp({
       dataAccess: createInMemoryDataAccess(),
@@ -540,7 +606,9 @@ describe('api app', () => {
   });
 
   it('rejects invalid media region deployment profiles', async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-deployment-region-'));
+    const tempDir = await mkdtemp(
+      join(tmpdir(), 'baker-api-deployment-region-'),
+    );
     vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
 
     const app = buildApiApp({
@@ -602,7 +670,7 @@ describe('api app', () => {
         method: 'PATCH',
         payload: {
           enabled: true,
-          proxyUrl: ' http://127.0.0.1:7890 ',
+          proxyUrl: ' 127.0.0.1:7890 ',
         },
         url: '/v1/admin/updates/proxy',
       });
@@ -729,6 +797,43 @@ describe('api app', () => {
         status: 'failed',
         trigger: 'manual',
       });
+    } finally {
+      await app.close();
+      await rm(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it('exports an admin-only diagnostic log file without Docker access', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'baker-api-log-export-'));
+    vi.stubEnv('BAKER_RUNTIME_DIR', tempDir);
+    vi.stubEnv('DOCKER_SOCKET_PATH', join(tempDir, 'missing-docker.sock'));
+
+    const app = buildApiApp({
+      dataAccess: createInMemoryDataAccess(),
+    });
+
+    try {
+      const unauthorized = await app.inject({
+        method: 'GET',
+        url: '/v1/admin/runtime/logs/export',
+      });
+      expect(unauthorized.statusCode).toBe(401);
+
+      const exported = await app.inject({
+        headers: { 'x-admin-password': 'admin' },
+        method: 'GET',
+        url: '/v1/admin/runtime/logs/export',
+      });
+
+      expect(exported.statusCode).toBe(200);
+      expect(exported.headers['content-type']).toContain('text/plain');
+      expect(exported.headers['cache-control']).toBe('no-store');
+      expect(exported.headers['content-disposition']).toMatch(
+        /^attachment; filename="baker-server-logs-\d{8}T\d{6}Z\.log"$/,
+      );
+      expect(exported.body).toContain('Baker server diagnostic log export');
+      expect(exported.body).toContain('"dockerLogAvailable": false');
+      expect(exported.body).toContain('Container logs unavailable');
     } finally {
       await app.close();
       await rm(tempDir, { force: true, recursive: true });

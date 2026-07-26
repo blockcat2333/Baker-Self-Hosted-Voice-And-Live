@@ -51,6 +51,8 @@ export const zh = {
       '可选代理，仅用于 Baker 更新元数据请求。自动公网 IP 检测不会使用此代理。Docker 镜像拉取仍使用宿主 Docker daemon 网络，可能需要单独配置 Docker daemon 代理或镜像源。',
     update_proxy_enabled: '启用更新代理',
     update_proxy_url: '更新代理 URL',
+    update_proxy_input_hint:
+      '可以直接输入 IP:端口或域名:端口；未填写协议时会自动使用 http://。',
     save_update_proxy: '保存更新代理',
     update_proxy_saved_at: '更新代理设置更新时间：{{time}}',
     target_version: '目标版本',
@@ -105,6 +107,10 @@ export const zh = {
     supervisor_unavailable:
       '当前环境无法访问 Supervisor 控制接口；服务级修复需要 all-in-one 容器。',
     refresh_runtime_status: '刷新状态',
+    export_logs: '导出诊断日志',
+    exporting_logs: '正在导出...',
+    export_logs_hint:
+      '下载运行状态和最近的 all-in-one 容器日志；密码、令牌等已识别的敏感信息会自动脱敏。',
     runtime_repair_action: '修复服务',
     runtime_repair_running: '修复中...',
     confirm_runtime_repair:
@@ -160,6 +166,7 @@ export const zh = {
       '媒体区域 profiles 必须是有效的 JSON 数组。',
     error_apply_deployment: '应用部署设置失败。',
     error_runtime_health: '刷新运行状态失败。',
+    error_export_logs: '导出诊断日志失败。',
     error_runtime_repair: '修复运行服务失败。',
     error_save_self_repair: '保存自我修复设置失败。',
     error_save_public_ip: '保存公网 IP 自动化设置失败。',

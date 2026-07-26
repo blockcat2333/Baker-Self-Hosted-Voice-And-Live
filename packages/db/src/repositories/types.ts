@@ -72,6 +72,7 @@ export interface RefreshTokensRepository {
 
 export interface GuildsRepository {
   create(input: CreateGuildInput): Promise<GuildRecord>;
+  createIfAbsent(input: CreateGuildInput): Promise<GuildRecord | null>;
   findById(id: string): Promise<GuildRecord | null>;
   findBySlug(slug: string): Promise<GuildRecord | null>;
   listForUser(userId: string): Promise<GuildRecord[]>;
@@ -119,6 +120,7 @@ export interface StreamSessionsRepository {
 
 export interface ServerSettingsRepository {
   create(input: CreateServerSettingsInput): Promise<ServerSettingsRecord>;
+  createIfAbsent(input: CreateServerSettingsInput): Promise<ServerSettingsRecord | null>;
   findById(id: string): Promise<ServerSettingsRecord | null>;
   update(id: string, input: UpdateServerSettingsInput): Promise<ServerSettingsRecord | null>;
 }

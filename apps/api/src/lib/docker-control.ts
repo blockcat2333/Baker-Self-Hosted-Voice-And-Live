@@ -14,6 +14,11 @@ export interface DockerContainerInfo {
   name: string | null;
 }
 
+export interface DockerContainerLogOptions {
+  tail?: number;
+  timestamps?: boolean;
+}
+
 interface DockerMount {
   Destination?: string;
   Name?: string;
@@ -109,6 +114,28 @@ export class DockerEngineClient {
       id: inspect?.Id ?? null,
       name: inspect?.Name ? inspect.Name.replace(/^\//, '') : null,
     };
+  }
+
+  async getCurrentContainerLogs(
+    options: DockerContainerLogOptions = {},
+  ): Promise<string> {
+    const id = await this.getCurrentContainerId();
+    if (!id) {
+      throw new Error('Unable to determine the current Baker container ID.');
+    }
+
+    const tail = Math.max(1, Math.min(options.tail ?? 10_000, 50_000));
+    const query = new URLSearchParams({
+      stderr: 'true',
+      stdout: 'true',
+      tail: String(tail),
+      timestamps: String(options.timestamps ?? true),
+    });
+    const payload = await this.requestBuffer(
+      'GET',
+      `/containers/${encodeURIComponent(id)}/logs?${query.toString()}`,
+    );
+    return decodeDockerLogStream(payload);
   }
 
   async startUpdateHelper(input: StartUpdateHelperInput) {
@@ -222,7 +249,7 @@ export class DockerEngineClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    return this.request(method, path, body).then((text) => {
+    return this.requestText(method, path, body).then((text) => {
       if (!text) {
         return {} as T;
       }
@@ -231,14 +258,16 @@ export class DockerEngineClient {
   }
 
   private requestText(method: string, path: string, body?: unknown) {
-    return this.request(method, path, body);
+    return this.requestBuffer(method, path, body).then((payload) =>
+      payload.toString('utf8'),
+    );
   }
 
-  private request(
+  private requestBuffer(
     method: string,
     path: string,
     body?: unknown,
-  ): Promise<string> {
+  ): Promise<Buffer> {
     const payload = body === undefined ? null : JSON.stringify(body);
 
     return new Promise((resolve, reject) => {
@@ -258,14 +287,19 @@ export class DockerEngineClient {
           const chunks: Buffer[] = [];
           response.on('data', (chunk: Buffer) => chunks.push(chunk));
           response.on('end', () => {
-            const text = Buffer.concat(chunks).toString('utf8');
+            const responseBody = Buffer.concat(chunks);
             if ((response.statusCode ?? 500) >= 400) {
               reject(
-                new Error(readDockerError(text, response.statusCode ?? 500)),
+                new Error(
+                  readDockerError(
+                    responseBody.toString('utf8'),
+                    response.statusCode ?? 500,
+                  ),
+                ),
               );
               return;
             }
-            resolve(text);
+            resolve(responseBody);
           });
         },
       );
@@ -277,6 +311,29 @@ export class DockerEngineClient {
       request.end();
     });
   }
+}
+
+export function decodeDockerLogStream(payload: Buffer) {
+  if (payload.length < 8) {
+    return payload.toString('utf8');
+  }
+
+  const frames: Buffer[] = [];
+  let offset = 0;
+  while (offset + 8 <= payload.length) {
+    const streamType = payload[offset];
+    const frameLength = payload.readUInt32BE(offset + 4);
+    const frameEnd = offset + 8 + frameLength;
+    if ((streamType !== 1 && streamType !== 2) || frameEnd > payload.length) {
+      return payload.toString('utf8');
+    }
+    frames.push(payload.subarray(offset + 8, frameEnd));
+    offset = frameEnd;
+  }
+
+  return offset === payload.length && frames.length > 0
+    ? Buffer.concat(frames).toString('utf8')
+    : payload.toString('utf8');
 }
 
 function readDockerError(text: string, statusCode: number) {

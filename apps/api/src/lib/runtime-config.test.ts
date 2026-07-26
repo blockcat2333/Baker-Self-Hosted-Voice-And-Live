@@ -96,7 +96,7 @@ describe('runtime deployment config', () => {
       await writeFile(
         join(tempDir, 'runtime.env'),
         [
-          "MEDIA_REGION_PROFILES='[{\"id\":\"old\",\"hosts\":[\"old.example\"],\"sfuRtcMinPort\":23305,\"sfuRtcMaxPort\":23400}]'",
+          'MEDIA_REGION_PROFILES=\'[{"id":"old","hosts":["old.example"],"sfuRtcMinPort":23305,"sfuRtcMaxPort":23400}]\'',
           "SFU_ANNOUNCED_IP='113.80.68.23'",
           "SFU_RTC_MIN_PORT='50000'",
           "SFU_RTC_MAX_PORT='50100'",
@@ -120,9 +120,7 @@ describe('runtime deployment config', () => {
       expect(pending?.previousSettings?.mediaRegionProfiles).toContain(
         'old.example',
       );
-      expect(pending?.previousSettings?.mediaRegionProfiles).toContain(
-        '23305',
-      );
+      expect(pending?.previousSettings?.mediaRegionProfiles).toContain('23305');
     } finally {
       await rm(tempDir, { force: true, recursive: true });
     }
@@ -174,7 +172,7 @@ describe('runtime deployment config', () => {
 
       const updated = await updateRuntimeUpdateProxySettings({
         enabled: true,
-        proxyUrl: ' http://127.0.0.1:7890 ',
+        proxyUrl: ' 127.0.0.1:7890 ',
       });
       expect(updated).toMatchObject({
         enabled: true,

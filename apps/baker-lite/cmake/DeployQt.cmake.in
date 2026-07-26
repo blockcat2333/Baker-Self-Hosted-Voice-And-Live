@@ -1,0 +1,43 @@
+if(NOT WIN32)
+    return()
+endif()
+
+set(_baker_lite_install_root "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+if(CMAKE_INSTALL_CONFIG_NAME STREQUAL "Debug")
+    set(_baker_lite_executable "${_baker_lite_install_root}/Baker Lited.exe")
+    set(_baker_lite_deploy_configuration --debug)
+else()
+    set(_baker_lite_executable "${_baker_lite_install_root}/Baker Lite.exe")
+    set(_baker_lite_deploy_configuration --release)
+endif()
+if(NOT EXISTS "${_baker_lite_executable}")
+    message(FATAL_ERROR "Installed Baker Lite executable not found: ${_baker_lite_executable}")
+endif()
+
+execute_process(
+    COMMAND
+        "@BAKER_LITE_WINDEPLOYQT@"
+        ${_baker_lite_deploy_configuration}
+        --force
+        --compiler-runtime
+        --no-translations
+        --dir "${_baker_lite_install_root}"
+        "${_baker_lite_executable}"
+    COMMAND_ERROR_IS_FATAL ANY
+)
+
+set(_baker_lite_forbidden_runtime_patterns
+    "Qt6Qml*.dll"
+    "Qt6Quick*.dll"
+    "Qt6WebEngine*.dll"
+    "QtWebEngineProcess.exe"
+    "node.exe"
+    "electron.exe"
+    "chrome_elf.dll"
+)
+foreach(_pattern IN LISTS _baker_lite_forbidden_runtime_patterns)
+    file(GLOB_RECURSE _matches "${_baker_lite_install_root}/${_pattern}")
+    if(_matches)
+        message(FATAL_ERROR "Forbidden browser/QML runtime was deployed: ${_matches}")
+    endif()
+endforeach()

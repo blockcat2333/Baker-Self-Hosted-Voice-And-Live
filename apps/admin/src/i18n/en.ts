@@ -52,6 +52,8 @@ export const en = {
       'Optional proxy for Baker update metadata requests. Public IP automation is never proxied by this setting. Docker image pulls still use the host Docker daemon network and may require a Docker daemon proxy or mirror.',
     update_proxy_enabled: 'Enable update proxy',
     update_proxy_url: 'Update Proxy URL',
+    update_proxy_input_hint:
+      'You can enter an IP:port or host:port directly; http:// is added automatically when no protocol is provided.',
     save_update_proxy: 'Save Update Proxy',
     update_proxy_saved_at: 'Update proxy settings updated: {{time}}',
     target_version: 'Target Version',
@@ -109,6 +111,10 @@ export const en = {
     supervisor_unavailable:
       'Supervisor control is unavailable in this environment; service repair requires the all-in-one container.',
     refresh_runtime_status: 'Refresh Runtime',
+    export_logs: 'Export Diagnostic Logs',
+    exporting_logs: 'Exporting Logs...',
+    export_logs_hint:
+      'Downloads runtime health and the latest all-in-one container logs. Passwords, tokens, and other recognized credentials are redacted automatically.',
     runtime_repair_action: 'Repair Services',
     runtime_repair_running: 'Repairing...',
     confirm_runtime_repair:
@@ -166,6 +172,7 @@ export const en = {
       'Media region profiles must be a valid JSON array.',
     error_apply_deployment: 'Failed to apply deployment settings.',
     error_runtime_health: 'Failed to refresh runtime status.',
+    error_export_logs: 'Failed to export diagnostic logs.',
     error_runtime_repair: 'Failed to repair runtime services.',
     error_save_self_repair: 'Failed to save self-repair settings.',
     error_save_public_ip: 'Failed to save public IP automation settings.',

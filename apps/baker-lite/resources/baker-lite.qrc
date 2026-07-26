@@ -21,6 +21,7 @@
     <file alias="icons/music-volume-muted.svg">icons/music-volume-muted.svg</file>
     <file alias="icons/screen.svg">icons/screen.svg</file>
     <file alias="icons/camera.svg">icons/camera.svg</file>
+    <file alias="icons/stop-live.svg">icons/stop-live.svg</file>
     <file alias="icons/settings.svg">icons/settings.svg</file>
     <file alias="icons/update.svg">icons/update.svg</file>
     <file alias="icons/info.svg">icons/info.svg</file>

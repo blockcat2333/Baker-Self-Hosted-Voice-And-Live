@@ -43,7 +43,8 @@ class MediaCoordinator final : public QObject {
   void setMasterVolume(double volume);
   void setParticipantVolume(const QString& userId, double volume);
 
-  void startMusicShare(const QString& channelId, quint32 processId);
+  void startMusicShare(const QString& channelId, quint32 processId,
+                       double volume = 1.0);
   void stopMusicShare();
   void stopAllMusic();
   void listenToMusic(const QString& channelId, const QString& musicId);
@@ -53,7 +54,7 @@ class MediaCoordinator final : public QObject {
 
   void startStream(const QString& channelId, StreamSourceType sourceType,
                    const QString& sourceId, const StreamQuality& quality,
-                   bool shareAudio);
+                   bool shareAudio, double sharedAudioVolume = 1.0);
   void stopOwnedStream();
   void watchStream(const QString& channelId, const QString& streamId);
   void unwatchStream(const QString& streamId);

@@ -1128,6 +1128,11 @@
         <translation>共享来源音频</translation>
     </message>
     <message>
+        <location filename="../../src/ui/Dialogs.cpp" line="970"/>
+        <source>Shared audio volume</source>
+        <translation>共享音频音量</translation>
+    </message>
+    <message>
         <location filename="../../src/ui/Dialogs.cpp" line="929"/>
         <source>Exclude Baker Lite audio</source>
         <translation>排除 Baker Lite 音频</translation>

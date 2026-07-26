@@ -926,6 +926,14 @@ ScreenSourceDialog::ScreenSourceDialog(QWidget *parent) : QDialog(parent) {
 
   auto *refreshButton = new QPushButton(tr("Refresh sources"), this);
   shareAudioCheck_ = new QCheckBox(tr("Share source audio"), this);
+  sharedAudioVolumeSlider_ = new QSlider(Qt::Horizontal, this);
+  sharedAudioVolumeSlider_->setObjectName(
+      QStringLiteral("sharedAudioVolumeSlider"));
+  sharedAudioVolumeSlider_->setAccessibleName(tr("Shared audio volume"));
+  sharedAudioVolumeSlider_->setRange(0, 200);
+  sharedAudioVolumeSlider_->setValue(100);
+  sharedAudioVolumeValue_ = new QLabel(QStringLiteral("100%"), this);
+  sharedAudioVolumeValue_->setMinimumWidth(48);
   excludeOwnProcessCheck_ = new QCheckBox(tr("Exclude Baker Lite audio"), this);
   shareAudioCheck_->setChecked(true);
   excludeOwnProcessCheck_->setChecked(true);
@@ -955,6 +963,12 @@ ScreenSourceDialog::ScreenSourceDialog(QWidget *parent) : QDialog(parent) {
   });
 
   auto *qualityRow = new QFormLayout();
+  auto *sharedAudioVolumeWidget = new QWidget(this);
+  auto *sharedAudioVolumeLayout = new QHBoxLayout(sharedAudioVolumeWidget);
+  sharedAudioVolumeLayout->setContentsMargins(0, 0, 0, 0);
+  sharedAudioVolumeLayout->addWidget(sharedAudioVolumeSlider_, 1);
+  sharedAudioVolumeLayout->addWidget(sharedAudioVolumeValue_);
+  qualityRow->addRow(tr("Shared audio volume"), sharedAudioVolumeWidget);
   qualityRow->addRow(tr("Resolution"), resolutionCombo_);
   qualityRow->addRow(tr("Frame rate"), fpsCombo_);
   qualityRow->addRow(tr("Bitrate"), bitrateCombo_);
@@ -976,6 +990,12 @@ ScreenSourceDialog::ScreenSourceDialog(QWidget *parent) : QDialog(parent) {
 
   connect(refreshButton, &QPushButton::clicked, this,
           &ScreenSourceDialog::refreshRequested);
+  connect(shareAudioCheck_, &QCheckBox::toggled, sharedAudioVolumeWidget,
+          &QWidget::setEnabled);
+  connect(sharedAudioVolumeSlider_, &QSlider::valueChanged, this,
+          [this](const int value) {
+            sharedAudioVolumeValue_->setText(QStringLiteral("%1%").arg(value));
+          });
   connect(sourceList_, &QListWidget::itemDoubleClicked, this,
           [this] { accept(); });
 }
@@ -1017,6 +1037,7 @@ void ScreenSourceDialog::setSelection(const CaptureSelection &selection) {
     }
   }
   shareAudioCheck_->setChecked(selection.shareAudio);
+  sharedAudioVolumeSlider_->setValue(selection.sharedAudioVolumePercent);
   excludeOwnProcessCheck_->setChecked(selection.excludeOwnProcess);
   resolutionCombo_->setCurrentText(selection.resolution);
   fpsCombo_->setCurrentText(QString::number(selection.framesPerSecond));
@@ -1035,6 +1056,7 @@ CaptureSelection ScreenSourceDialog::selection() const {
       source.id,
       source.kind,
       shareAudioCheck_->isChecked(),
+      sharedAudioVolumeSlider_->value(),
       excludeOwnProcessCheck_->isChecked(),
       resolutionCombo_->currentText(),
       fpsCombo_->currentText().toInt(),

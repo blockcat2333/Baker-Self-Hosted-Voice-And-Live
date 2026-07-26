@@ -8,6 +8,11 @@ project(
     LANGUAGES CXX
 )
 
+# CMake project versions are numeric-only; the public client version may use
+# Baker's lettered client-release suffix.
+set(BAKER_LITE_VERSION "1.1.1a")
+set(BAKER_LITE_WINDOWS_VERSION_REVISION 1)
+
 if(NOT WIN32)
     message(FATAL_ERROR "Baker Lite currently supports Windows x64 only.")
 endif()
@@ -122,7 +127,7 @@ target_link_libraries(
 target_compile_definitions(
     baker-lite-core
     PUBLIC
-        BAKER_LITE_VERSION="${PROJECT_VERSION}"
+        BAKER_LITE_VERSION="${BAKER_LITE_VERSION}"
         $<$<BOOL:${BAKER_LITE_WITH_WEBRTC}>:BAKER_LITE_WITH_WEBRTC=1>
         NOMINMAX
         UNICODE

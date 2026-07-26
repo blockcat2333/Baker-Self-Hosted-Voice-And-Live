@@ -23,6 +23,7 @@ class NativeSfuSession final {
       const QString& command, const QJsonObject& data)>;
   using StateCallback = std::function<void(RuntimeState)>;
   using VideoCallback = std::function<void(QImage)>;
+  using StatisticsCallback = std::function<void(MediaStatistics)>;
   using ErrorCallback =
       std::function<void(const QString& scope, const QString& message)>;
 
@@ -32,7 +33,8 @@ class NativeSfuSession final {
       webrtc::scoped_refptr<webrtc::AudioTrackInterface> localAudio,
       webrtc::scoped_refptr<webrtc::VideoTrackInterface> localVideo,
       Command command, StateCallback stateCallback,
-      VideoCallback videoCallback, ErrorCallback errorCallback);
+      VideoCallback videoCallback, StatisticsCallback statisticsCallback,
+      ErrorCallback errorCallback, StreamQuality streamQuality = {});
   ~NativeSfuSession();
 
   NativeSfuSession(const NativeSfuSession&) = delete;

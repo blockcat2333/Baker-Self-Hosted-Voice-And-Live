@@ -140,6 +140,7 @@ struct CaptureSelection {
   QString sourceId;
   CaptureSourceKind kind = CaptureSourceKind::Screen;
   bool shareAudio = true;
+  int sharedAudioVolumePercent = 100;
   bool excludeOwnProcess = true;
   QString resolution = QStringLiteral("1280x720");
   int framesPerSecond = 30;

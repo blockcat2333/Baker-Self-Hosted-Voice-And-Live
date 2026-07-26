@@ -72,10 +72,24 @@ export const AdminUpdateVersionsResponseSchema = z.object({
   versions: z.array(AdminUpdateVersionSchema),
 });
 
+export function normalizeHttpProxyUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return `http://${trimmed.replace(/^\/+/, '')}`;
+}
+
 function isHttpProxyUrl(value: string) {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return (
+      Boolean(parsed.hostname) &&
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+    );
   } catch {
     return false;
   }
@@ -90,7 +104,12 @@ export const AdminUpdateProxySettingsSchema = z.object({
 export const AdminUpdateProxySettingsRequestSchema = z
   .object({
     enabled: z.boolean(),
-    proxyUrl: z.string().trim().max(2048),
+    proxyUrl: z
+      .string()
+      .trim()
+      .max(2048)
+      .transform(normalizeHttpProxyUrl)
+      .pipe(z.string().max(2048)),
   })
   .superRefine((value, ctx) => {
     if (value.enabled && !value.proxyUrl) {
@@ -105,7 +124,7 @@ export const AdminUpdateProxySettingsRequestSchema = z
     if (value.proxyUrl && !isHttpProxyUrl(value.proxyUrl)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Proxy URL must use http:// or https://.',
+        message: 'Proxy URL must be a valid HTTP or HTTPS address.',
         path: ['proxyUrl'],
       });
     }

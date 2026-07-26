@@ -24,8 +24,9 @@ class StubRtcBackend final : public RtcBackend {
     reject(configuration.descriptor.sessionId, QStringLiteral("voice"));
   }
   void startMusicPublish(const SessionConfiguration& configuration,
-                         quint32 processId) override {
+                         quint32 processId, double volume) override {
     Q_UNUSED(processId)
+    Q_UNUSED(volume)
     reject(configuration.descriptor.sessionId, QStringLiteral("music"));
   }
   void startMusicListen(const SessionConfiguration& configuration) override {
@@ -34,11 +35,13 @@ class StubRtcBackend final : public RtcBackend {
   void startStreamPublish(const SessionConfiguration& configuration,
                           StreamSourceType sourceType, const QString& sourceId,
                           const StreamQuality& quality,
-                          bool shareAudio) override {
+                          bool shareAudio,
+                          double sharedAudioVolume) override {
     Q_UNUSED(sourceType)
     Q_UNUSED(sourceId)
     Q_UNUSED(quality)
     Q_UNUSED(shareAudio)
+    Q_UNUSED(sharedAudioVolume)
     reject(configuration.descriptor.sessionId, QStringLiteral("stream"));
   }
   void startStreamWatch(const SessionConfiguration& configuration) override {

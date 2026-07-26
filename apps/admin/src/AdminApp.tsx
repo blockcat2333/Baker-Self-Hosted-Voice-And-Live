@@ -30,6 +30,7 @@ import {
   AdminWorkspaceStateSchema,
   AuthUserSchema,
   ChannelSummarySchema,
+  normalizeHttpProxyUrl,
 } from '@baker/protocol';
 
 import { LanguageSwitcher } from './i18n/LanguageSwitcher';
@@ -99,6 +100,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
     null,
   );
   const [isRuntimeLoading, setIsRuntimeLoading] = useState(false);
+  const [isExportingLogs, setIsExportingLogs] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState('server');
 
   const [serverName, setServerName] = useState('Baker');
@@ -468,7 +470,9 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
         {
           body: JSON.stringify({
             enabled: updateProxyEnabled,
-            proxyUrl: updateProxyEnabled ? updateProxyUrl : '',
+            proxyUrl: updateProxyEnabled
+              ? normalizeHttpProxyUrl(updateProxyUrl)
+              : '',
           }),
           method: 'PATCH',
         },
@@ -634,6 +638,55 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
       );
     } finally {
       setIsRuntimeLoading(false);
+    }
+  }
+
+  async function handleExportRuntimeLogs() {
+    setIsExportingLogs(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        `${apiOrigin}/v1/admin/runtime/logs/export`,
+        {
+          headers: password ? { 'x-admin-password': password } : {},
+          method: 'GET',
+        },
+      );
+      if (!response.ok) {
+        const body = await response.text();
+        let message = `HTTP ${response.status}`;
+        try {
+          const json = JSON.parse(body) as { message?: unknown };
+          if (typeof json.message === 'string') {
+            message = json.message;
+          }
+        } catch {
+          if (body.trim()) {
+            message = body.trim();
+          }
+        }
+        throw new Error(message);
+      }
+
+      const disposition = response.headers.get('content-disposition') ?? '';
+      const filename =
+        /filename="?([^";]+)"?/i.exec(disposition)?.[1] ??
+        'baker-server-logs.log';
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : t('admin.error_export_logs'),
+      );
+    } finally {
+      setIsExportingLogs(false);
     }
   }
 
@@ -1179,10 +1232,23 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                 <input
                   value={updateProxyUrl}
                   onChange={(event) => setUpdateProxyUrl(event.target.value)}
-                  placeholder="http://127.0.0.1:7890"
+                  onBlur={() =>
+                    setUpdateProxyUrl((current) =>
+                      normalizeHttpProxyUrl(current),
+                    )
+                  }
+                  placeholder="127.0.0.1:7890"
                   disabled={!updateProxyEnabled}
+                  aria-describedby="admin-update-proxy-hint"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  inputMode="url"
+                  spellCheck={false}
                 />
               </label>
+              <p id="admin-update-proxy-hint" className="admin-channel-hint">
+                {t('admin.update_proxy_input_hint')}
+              </p>
               <div className="admin-inline-actions">
                 <button
                   type="submit"
@@ -1299,6 +1365,17 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
               </button>
               <button
                 type="button"
+                className="admin-secondary-btn"
+                onClick={() => void handleExportRuntimeLogs()}
+                disabled={isExportingLogs}
+                title={t('admin.export_logs_hint')}
+              >
+                {isExportingLogs
+                  ? t('admin.exporting_logs')
+                  : t('admin.export_logs')}
+              </button>
+              <button
+                type="button"
                 className="admin-primary-btn"
                 onClick={() => void handleRepairRuntime()}
                 disabled={
@@ -1310,6 +1387,7 @@ export function AdminApp({ apiBaseUrl = '' }: AdminAppProps) {
                   : t('admin.runtime_repair_action')}
               </button>
             </div>
+            <p className="admin-channel-hint">{t('admin.export_logs_hint')}</p>
             <form className="admin-form" onSubmit={handleSaveSelfRepair}>
               <div className="admin-checkbox-row">
                 <label>

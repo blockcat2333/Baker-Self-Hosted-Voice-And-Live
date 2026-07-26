@@ -41,8 +41,11 @@ private slots:
   void sharedMusicVolumeUsesDistinctIcon();
   void networkProblemAppearsAfterUserName();
   void liveIndicatorsAreRed();
+  void stopLiveButtonIsProminentWhileStreaming();
+  void unattachedStreamStatusAppearsInLiveStatus();
   void chatMessagesIncludeDate();
   void streamDialogUsesProtocolBitrateTiers();
+  void sharingDialogsPreserveIndependentVolumes();
   void musicDialogShowsLiveLevels();
   void liveStreamUsesPopupWindow();
 };
@@ -383,6 +386,50 @@ void MainWindowTest::liveIndicatorsAreRed() {
   QVERIFY(liveStatus->styleSheet().contains(QStringLiteral("#ef626c")));
 }
 
+void MainWindowTest::stopLiveButtonIsProminentWhileStreaming() {
+  MainWindow window;
+  auto *toolbar = window.findChild<QToolBar *>(QStringLiteral("mainToolBar"));
+  auto *action =
+      window.findChild<QAction *>(QStringLiteral("stopCaptureAction"));
+  QVERIFY(toolbar);
+  QVERIFY(action);
+  QVERIFY(!action->isVisible());
+  QVERIFY(!action->icon().isNull());
+
+  window.setConnectionState(ConnectionState::Connected);
+  window.setIdentity(QStringLiteral("11111111-1111-4111-8111-111111111111"),
+                     QStringLiteral("Test user"));
+  window.setVoiceChannel(QStringLiteral("22222222-2222-4222-8222-222222222222"),
+                         QStringLiteral("Voice"));
+  window.setCaptureActive(true);
+
+  auto *button =
+      qobject_cast<QToolButton *>(toolbar->widgetForAction(action));
+  QVERIFY(action->isVisible());
+  QVERIFY(action->isEnabled());
+  QVERIFY(button);
+  QCOMPARE(button->objectName(), QStringLiteral("stopCaptureToolButton"));
+  QCOMPARE(button->toolButtonStyle(), Qt::ToolButtonTextBesideIcon);
+  QVERIFY(button->styleSheet().contains(QStringLiteral("#b63c45")));
+
+  QSignalSpy stopSpy(&window, &MainWindow::stopCaptureRequested);
+  action->trigger();
+  QCOMPARE(stopSpy.count(), 1);
+
+  window.setCaptureActive(false);
+  QVERIFY(!action->isVisible());
+}
+
+void MainWindowTest::unattachedStreamStatusAppearsInLiveStatus() {
+  MainWindow window;
+  window.setStreamStatus(QStringLiteral("owned-stream"),
+                         QStringLiteral("H264 | 1920x1080 | 6000 kbps"));
+  auto *liveStatus = window.findChild<QLabel *>(QStringLiteral("liveStatus"));
+  QVERIFY(liveStatus);
+  QCOMPARE(liveStatus->text(),
+           QStringLiteral("H264 | 1920x1080 | 6000 kbps"));
+}
+
 void MainWindowTest::chatMessagesIncludeDate() {
   MainWindow window;
   ChatMessage message;
@@ -422,6 +469,33 @@ void MainWindowTest::streamDialogUsesProtocolBitrateTiers() {
     actual.append(bitrate->itemData(index).toInt());
   }
   QCOMPARE(actual, expected);
+}
+
+void MainWindowTest::sharingDialogsPreserveIndependentVolumes() {
+  ScreenSourceDialog streamDialog;
+  streamDialog.setSources({
+      {QStringLiteral("screen"),
+       QStringLiteral("Screen"),
+       CaptureSourceKind::Screen,
+       {}},
+  });
+  CaptureSelection streamSelection;
+  streamSelection.sourceId = QStringLiteral("screen");
+  streamSelection.shareAudio = true;
+  streamSelection.sharedAudioVolumePercent = 135;
+  streamDialog.setSelection(streamSelection);
+  QCOMPARE(streamDialog.selection().sharedAudioVolumePercent, 135);
+
+  MusicSourceDialog musicDialog;
+  MusicSourceOption musicSource;
+  musicSource.id = QStringLiteral("42");
+  musicSource.name = QStringLiteral("Music player");
+  musicDialog.setSources({musicSource});
+  MusicSourceSelection musicSelection;
+  musicSelection.sourceId = QStringLiteral("42");
+  musicSelection.volumePercent = 65;
+  musicDialog.setSelection(musicSelection);
+  QCOMPARE(musicDialog.selection().volumePercent, 65);
 }
 
 void MainWindowTest::musicDialogShowsLiveLevels() {

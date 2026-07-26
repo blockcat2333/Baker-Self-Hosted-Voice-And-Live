@@ -23,13 +23,14 @@ class RtcBackend : public QObject {
 
   virtual void startVoice(const SessionConfiguration& configuration) = 0;
   virtual void startMusicPublish(const SessionConfiguration& configuration,
-                                 quint32 processId) = 0;
+                                 quint32 processId, double volume) = 0;
   virtual void startMusicListen(const SessionConfiguration& configuration) = 0;
   virtual void startStreamPublish(const SessionConfiguration& configuration,
                                   StreamSourceType sourceType,
                                   const QString& sourceId,
                                   const StreamQuality& quality,
-                                  bool shareAudio) = 0;
+                                  bool shareAudio,
+                                  double sharedAudioVolume) = 0;
   virtual void startStreamWatch(const SessionConfiguration& configuration) = 0;
   virtual void stopSession(const QString& sessionId) = 0;
   virtual void stopAll() = 0;

@@ -19,8 +19,8 @@ $artifact = Get-Item -LiteralPath $ArtifactPath
 if (-not $artifact -or $artifact.PSIsContainer) {
     throw "Installer artifact does not exist: $ArtifactPath"
 }
-if ($Version -notmatch '^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
-    throw "Version must be SemVer-compatible: $Version"
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:[a-z]|[-+][0-9A-Za-z.-]+)?$') {
+    throw "Version must use Baker client or SemVer-compatible format: $Version"
 }
 
 $uri = $null

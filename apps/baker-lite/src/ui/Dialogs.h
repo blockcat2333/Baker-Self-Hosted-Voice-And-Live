@@ -209,6 +209,8 @@ private:
   QList<CaptureSourceOption> sources_;
   QListWidget *sourceList_ = nullptr;
   QCheckBox *shareAudioCheck_ = nullptr;
+  QSlider *sharedAudioVolumeSlider_ = nullptr;
+  QLabel *sharedAudioVolumeValue_ = nullptr;
   QCheckBox *excludeOwnProcessCheck_ = nullptr;
   QComboBox *resolutionCombo_ = nullptr;
   QComboBox *fpsCombo_ = nullptr;

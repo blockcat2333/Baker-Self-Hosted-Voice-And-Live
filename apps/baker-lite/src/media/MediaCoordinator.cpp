@@ -217,13 +217,14 @@ void MediaCoordinator::setParticipantVolume(const QString& userId,
 }
 
 void MediaCoordinator::startMusicShare(const QString& channelId,
-                                       quint32 processId) {
+                                       quint32 processId, double volume) {
   if (channelId.isEmpty() || processId == 0 || !ownedMusicId_.isEmpty()) {
     return;
   }
   send(Operation::MusicStart, QStringLiteral("music.start"),
        {{QStringLiteral("channelId"), channelId}},
-       {{QStringLiteral("processId"), static_cast<qint64>(processId)}});
+       {{QStringLiteral("processId"), static_cast<qint64>(processId)},
+        {QStringLiteral("volume"), std::clamp(volume, 0.0, 2.0)}});
 }
 
 void MediaCoordinator::stopMusicShare() {
@@ -282,7 +283,8 @@ void MediaCoordinator::startStream(const QString& channelId,
                                    StreamSourceType sourceType,
                                    const QString& sourceId,
                                    const StreamQuality& quality,
-                                   bool shareAudio) {
+                                   bool shareAudio,
+                                   double sharedAudioVolume) {
   if (channelId.isEmpty() || sourceId.isEmpty() ||
       !ownedStreamId_.isEmpty()) {
     return;
@@ -300,6 +302,8 @@ void MediaCoordinator::startStream(const QString& channelId,
        {{QStringLiteral("sourceId"), sourceId},
         {QStringLiteral("sourceType"), localSourceTypeName(sourceType)},
         {QStringLiteral("shareAudio"), shareAudio},
+        {QStringLiteral("sharedAudioVolume"),
+         std::clamp(sharedAudioVolume, 0.0, 2.0)},
         {QStringLiteral("codec"), static_cast<int>(quality.codec)},
         {QStringLiteral("resolution"), quality.resolution},
         {QStringLiteral("frameRate"), quality.frameRate},
@@ -527,7 +531,8 @@ void MediaCoordinator::startConfiguredSession(Operation operation,
     backend_->startMusicPublish(
         configuration,
         static_cast<quint32>(
-            context.value(QStringLiteral("processId")).toInteger()));
+            context.value(QStringLiteral("processId")).toInteger()),
+        context.value(QStringLiteral("volume")).toDouble(1.0));
     emit musicStateChanged();
     return;
   }
@@ -571,7 +576,8 @@ void MediaCoordinator::startConfiguredSession(Operation operation,
         configuration,
         sourceType,
         context.value(QStringLiteral("sourceId")).toString(), quality,
-        context.value(QStringLiteral("shareAudio")).toBool());
+        context.value(QStringLiteral("shareAudio")).toBool(),
+        context.value(QStringLiteral("sharedAudioVolume")).toDouble(1.0));
     emit streamStateChanged();
     return;
   }

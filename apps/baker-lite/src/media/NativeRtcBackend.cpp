@@ -197,6 +197,7 @@ class Peer final : public webrtc::PeerConnectionObserver {
 
 struct Session {
   SessionConfiguration configuration;
+  StreamQuality streamQuality;
   RuntimeState state = RuntimeState::Preparing;
   QHash<QString, std::shared_ptr<Peer>> peers;
   webrtc::scoped_refptr<webrtc::AudioTrackInterface> localAudioTrack;
@@ -231,12 +232,13 @@ class NativeRtcBackend final : public RtcBackend {
   void shutdown() override;
   void startVoice(const SessionConfiguration& configuration) override;
   void startMusicPublish(const SessionConfiguration& configuration,
-                         quint32 processId) override;
+                         quint32 processId, double volume) override;
   void startMusicListen(const SessionConfiguration& configuration) override;
   void startStreamPublish(const SessionConfiguration& configuration,
                           StreamSourceType sourceType, const QString& sourceId,
                           const StreamQuality& quality,
-                          bool shareAudio) override;
+                          bool shareAudio,
+                          double sharedAudioVolume) override;
   void startStreamWatch(const SessionConfiguration& configuration) override;
   void stopSession(const QString& sessionId) override;
   void stopAll() override;
@@ -265,6 +267,8 @@ class NativeRtcBackend final : public RtcBackend {
                   const QString& type, const QJsonObject& fields = {});
   void reportError(const QString& scope, const QString& message);
   void postVideoFrame(const QString& sessionId, QImage image);
+  void postStatistics(const QString& sessionId,
+                      const MediaStatistics& statistics);
   void postPeerState(const QString& sessionId, RuntimeState state);
   void createOffersForUsers(Session& session,
                             const QSet<QString>& remoteUsers);
@@ -644,11 +648,14 @@ void NativeRtcBackend::startVoice(
 }
 
 void NativeRtcBackend::startMusicPublish(
-    const SessionConfiguration& configuration, quint32 processId) {
+    const SessionConfiguration& configuration, quint32 processId,
+    double volume) {
   auto session = std::make_shared<Session>();
   session->configuration = configuration;
   session->localAudioTrack =
       createInjectedAudioTrack(*session, configuration.descriptor.sessionId);
+  session->injectedAudioSource->SetVolume(
+      std::clamp(volume, 0.0, 2.0));
   if (!attachLoopback(*session, processId,
                       audio::ProcessLoopbackCapture::Mode::IncludeProcessTree)) {
     reportError(QStringLiteral("music"),
@@ -679,9 +686,11 @@ void NativeRtcBackend::startMusicListen(
 
 void NativeRtcBackend::startStreamPublish(
     const SessionConfiguration& configuration, StreamSourceType sourceType,
-    const QString& sourceId, const StreamQuality& quality, bool shareAudio) {
+    const QString& sourceId, const StreamQuality& quality, bool shareAudio,
+    double sharedAudioVolume) {
   auto session = std::make_shared<Session>();
   session->configuration = configuration;
+  session->streamQuality = quality;
   if (sourceType == StreamSourceType::Screen ||
       sourceType == StreamSourceType::Window) {
     session->desktopSource =
@@ -715,6 +724,8 @@ void NativeRtcBackend::startStreamPublish(
         createInjectedAudioTrack(*session,
                                  configuration.descriptor.sessionId +
                                      QStringLiteral("-system"));
+    session->injectedAudioSource->SetVolume(
+        std::clamp(sharedAudioVolume, 0.0, 2.0));
     attachLoopback(
         *session, static_cast<quint32>(QCoreApplication::applicationPid()),
         audio::ProcessLoopbackCapture::Mode::ExcludeProcessTree);
@@ -1078,8 +1089,16 @@ Peer* NativeRtcBackend::ensurePeer(Session& session,
         encoding.max_bitrate_bps =
             session.configuration.descriptor.mode ==
                     SessionMode::StreamPublish
-                ? std::optional<int>(16'000'000)
+                ? std::optional<int>(
+                      std::clamp(session.streamQuality.bitrateKbps,
+                                 500, 50'000) *
+                      1000)
                 : std::nullopt;
+        if (session.configuration.descriptor.mode ==
+            SessionMode::StreamPublish) {
+          encoding.max_framerate = std::clamp(
+              session.streamQuality.frameRate, 1, 120);
+        }
       }
       added.value()->SetParameters(parameters);
     }
@@ -1144,6 +1163,16 @@ void NativeRtcBackend::postVideoFrame(const QString& sessionId,
       this,
       [this, sessionId, image = std::move(image)] {
         Q_EMIT remoteVideoFrameAvailable(sessionId, image);
+      },
+      Qt::QueuedConnection);
+}
+
+void NativeRtcBackend::postStatistics(
+    const QString& sessionId, const MediaStatistics& statistics) {
+  QMetaObject::invokeMethod(
+      this,
+      [this, sessionId, statistics] {
+        Q_EMIT statisticsUpdated(sessionId, statistics);
       },
       Qt::QueuedConnection);
 }
@@ -1313,9 +1342,13 @@ void NativeRtcBackend::startSfu(Session& session) {
       [this, id](QImage image) {
         postVideoFrame(id, std::move(image));
       },
+      [this, id](const MediaStatistics& statistics) {
+        postStatistics(id, statistics);
+      },
       [this](const QString& scope, const QString& message) {
         reportError(scope, message);
-      });
+      },
+      session.streamQuality);
   session.sfu->setOutputState(outputMuted_,
                               masterVolume_ * session.volume);
   session.sfu->start();

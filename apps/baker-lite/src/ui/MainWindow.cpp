@@ -180,8 +180,11 @@ void MainWindow::createActions() {
   screenAction_->setObjectName(QStringLiteral("screenAction"));
   cameraAction_ = new QAction(QIcon(iconPath("camera")), {}, this);
   cameraAction_->setObjectName(QStringLiteral("cameraAction"));
-  stopCaptureAction_ = new QAction({}, this);
+  stopCaptureAction_ =
+      new QAction(QIcon(iconPath("stop-live")), {}, this);
+  stopCaptureAction_->setObjectName(QStringLiteral("stopCaptureAction"));
   stopCaptureAction_->setEnabled(false);
+  stopCaptureAction_->setVisible(false);
   watchLiveAction_ = new QAction(QIcon(iconPath("screen")), {}, this);
   watchLiveAction_->setEnabled(false);
 
@@ -263,6 +266,20 @@ void MainWindow::createToolBar() {
   mainToolBar_->addAction(musicAction_);
   mainToolBar_->addAction(screenAction_);
   mainToolBar_->addAction(cameraAction_);
+  mainToolBar_->addAction(stopCaptureAction_);
+  if (auto *stopButton = qobject_cast<QToolButton *>(
+          mainToolBar_->widgetForAction(stopCaptureAction_))) {
+    stopButton->setObjectName(QStringLiteral("stopCaptureToolButton"));
+    stopButton->setAccessibleName(tr("Stop live stream"));
+    stopButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    stopButton->setStyleSheet(
+        QStringLiteral(
+            "QToolButton { color: white; background: #b63c45; "
+            "border: 1px solid #ef626c; border-radius: 3px; "
+            "padding: 4px 8px; }"
+            "QToolButton:hover { background: #d34d57; }"
+            "QToolButton:pressed { background: #8f3038; }"));
+  }
   mainToolBar_->addAction(watchLiveAction_);
   mainToolBar_->addSeparator();
   mainToolBar_->addAction(settingsAction_);
@@ -1075,6 +1092,7 @@ void MainWindow::setCaptureActive(const bool active) {
                             !currentVoiceChannelId_.isEmpty();
   screenAction_->setEnabled(sessionReady && !active);
   cameraAction_->setEnabled(sessionReady && !active);
+  stopCaptureAction_->setVisible(active);
   stopCaptureAction_->setEnabled(sessionReady && active);
   updateLiveVisuals();
 }
@@ -1212,6 +1230,7 @@ void MainWindow::setStreamStatus(const QString &streamId,
     window->setStreamStatus(status);
     return;
   }
+  setLiveStatus(status);
 }
 
 void MainWindow::detachStream(const QString &streamId) {

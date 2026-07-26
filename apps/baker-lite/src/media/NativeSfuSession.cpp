@@ -9,13 +9,17 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace baker::media {
 namespace {
@@ -64,6 +68,174 @@ QString producerSource(SessionMode mode) {
   return QStringLiteral("stream");
 }
 
+std::optional<double> nativeNumber(const nlohmann::json& object,
+                                   const char* key) {
+  const auto iterator = object.find(key);
+  if (iterator == object.end() || !iterator->is_number()) {
+    return std::nullopt;
+  }
+  return iterator->get<double>();
+}
+
+const nlohmann::json* findStat(const nlohmann::json& stats,
+                               const std::string& id) {
+  if (!stats.is_array() || id.empty()) {
+    return nullptr;
+  }
+  for (const auto& stat : stats) {
+    if (stat.is_object() && stat.value("id", std::string()) == id) {
+      return &stat;
+    }
+  }
+  return nullptr;
+}
+
+bool isVideoStat(const nlohmann::json& stat) {
+  return stat.value("kind", stat.value("mediaType", std::string())) ==
+         "video";
+}
+
+const nlohmann::json* findVideoStat(const nlohmann::json& stats,
+                                    const char* type) {
+  if (!stats.is_array()) {
+    return nullptr;
+  }
+  for (const auto& stat : stats) {
+    if (stat.is_object() &&
+        stat.value("type", std::string()) == type &&
+        isVideoStat(stat)) {
+      return &stat;
+    }
+  }
+  return nullptr;
+}
+
+QString codecName(const nlohmann::json& stats,
+                  const nlohmann::json& primary) {
+  const std::string codecId =
+      primary.value("codecId", std::string());
+  const nlohmann::json* codec = findStat(stats, codecId);
+  if (!codec) {
+    return {};
+  }
+  const QString mime = QString::fromStdString(
+      codec->value("mimeType", std::string()));
+  const qsizetype separator = mime.indexOf(u'/');
+  return (separator >= 0 ? mime.mid(separator + 1) : mime).toUpper();
+}
+
+QString fallbackCodecName(VideoCodec codec) {
+  switch (codec) {
+    case VideoCodec::H264:
+      return QStringLiteral("H264");
+    case VideoCodec::Vp8:
+      return QStringLiteral("VP8");
+    case VideoCodec::Vp9:
+      return QStringLiteral("VP9");
+    case VideoCodec::Av1:
+      return QStringLiteral("AV1");
+    case VideoCodec::Default:
+      return QStringLiteral("AUTO");
+  }
+  return QStringLiteral("AUTO");
+}
+
+QSize fallbackFrameSize(const QString& resolution) {
+  if (resolution == QStringLiteral("1440p")) {
+    return {2560, 1440};
+  }
+  if (resolution == QStringLiteral("1080p")) {
+    return {1920, 1080};
+  }
+  if (resolution == QStringLiteral("480p")) {
+    return {854, 480};
+  }
+  return {1280, 720};
+}
+
+struct StatisticsSample {
+  MediaStatistics statistics;
+  double bytes = 0.0;
+  bool hasBytes = false;
+};
+
+std::optional<StatisticsSample> parseVideoStatistics(
+    const nlohmann::json& stats, bool outbound,
+    const StreamQuality& fallbackQuality) {
+  const nlohmann::json* primary = findVideoStat(
+      stats, outbound ? "outbound-rtp" : "inbound-rtp");
+  if (!primary) {
+    return std::nullopt;
+  }
+
+  StatisticsSample sample;
+  sample.statistics.codec = codecName(stats, *primary);
+  if (sample.statistics.codec.isEmpty()) {
+    sample.statistics.codec = fallbackCodecName(fallbackQuality.codec);
+  }
+  const auto width = nativeNumber(*primary, "frameWidth");
+  const auto height = nativeNumber(*primary, "frameHeight");
+  sample.statistics.frameSize =
+      width && height
+          ? QSize(static_cast<int>(*width), static_cast<int>(*height))
+          : fallbackFrameSize(fallbackQuality.resolution);
+  sample.statistics.framesPerSecond =
+      nativeNumber(*primary, "framesPerSecond")
+          .value_or(static_cast<double>(fallbackQuality.frameRate));
+  sample.statistics.qualityLimitationReason =
+      QString::fromStdString(
+          primary->value("qualityLimitationReason", std::string()));
+
+  const char* bytesField = outbound ? "bytesSent" : "bytesReceived";
+  if (const auto bytes = nativeNumber(*primary, bytesField)) {
+    sample.bytes = *bytes;
+    sample.hasBytes = true;
+  }
+
+  const nlohmann::json* network = primary;
+  if (outbound) {
+    const std::string remoteId =
+        primary->value("remoteId", std::string());
+    network = findStat(stats, remoteId);
+    if (!network) {
+      network = findVideoStat(stats, "remote-inbound-rtp");
+    }
+  }
+  if (network) {
+    if (const auto fraction = nativeNumber(*network, "fractionLost")) {
+      sample.statistics.packetLossPercent =
+          std::clamp(*fraction * 100.0, 0.0, 100.0);
+    } else {
+      const double lost =
+          nativeNumber(*network, "packetsLost").value_or(0.0);
+      const double packets =
+          nativeNumber(*network, "packetsReceived")
+              .value_or(0.0);
+      if (lost + packets > 0.0) {
+        sample.statistics.packetLossPercent =
+            std::clamp(lost / (lost + packets) * 100.0, 0.0, 100.0);
+      }
+    }
+    if (const auto rtt = nativeNumber(*network, "roundTripTime")) {
+      sample.statistics.roundTripTimeMs = *rtt * 1000.0;
+    }
+  }
+
+  if (sample.statistics.roundTripTimeMs <= 0.0 && stats.is_array()) {
+    for (const auto& stat : stats) {
+      if (!stat.is_object() ||
+          stat.value("type", std::string()) != "candidate-pair") {
+        continue;
+      }
+      if (const auto rtt = nativeNumber(stat, "currentRoundTripTime")) {
+        sample.statistics.roundTripTimeMs = *rtt * 1000.0;
+        break;
+      }
+    }
+  }
+  return sample;
+}
+
 }  // namespace
 
 class NativeSfuSession::Impl final
@@ -77,7 +249,8 @@ class NativeSfuSession::Impl final
        webrtc::scoped_refptr<webrtc::AudioTrackInterface> localAudio,
        webrtc::scoped_refptr<webrtc::VideoTrackInterface> localVideo,
        Command command, StateCallback stateCallback,
-       VideoCallback videoCallback, ErrorCallback errorCallback)
+       VideoCallback videoCallback, StatisticsCallback statisticsCallback,
+       ErrorCallback errorCallback, StreamQuality streamQuality)
       : configuration_(std::move(configuration)),
         factory_(factory),
         localAudio_(std::move(localAudio)),
@@ -85,7 +258,9 @@ class NativeSfuSession::Impl final
         command_(std::move(command)),
         stateCallback_(std::move(stateCallback)),
         videoCallback_(std::move(videoCallback)),
-        errorCallback_(std::move(errorCallback)) {}
+        statisticsCallback_(std::move(statisticsCallback)),
+        errorCallback_(std::move(errorCallback)),
+        streamQuality_(std::move(streamQuality)) {}
 
   ~Impl() override { stop(); }
 
@@ -102,6 +277,7 @@ class NativeSfuSession::Impl final
     if (stopped_.exchange(true)) {
       return;
     }
+    statisticsWake_.notify_all();
     if (worker_.joinable()) {
       worker_.request_stop();
       worker_.join();
@@ -302,6 +478,7 @@ class NativeSfuSession::Impl final
         }
       }
       stateCallback_(RuntimeState::Active);
+      pollStatistics(token);
     } catch (const std::exception& error) {
       stateCallback_(RuntimeState::Failed);
       errorCallback_(QStringLiteral("sfu"),
@@ -389,11 +566,93 @@ class NativeSfuSession::Impl final
       producers_.insert_or_assign(producer->GetId(), std::move(producer));
     }
     if (localVideo_) {
+      std::vector<webrtc::RtpEncodingParameters> encodings(1);
+      encodings.front().max_bitrate_bps =
+          std::clamp(streamQuality_.bitrateKbps, 500, 50'000) * 1000;
+      encodings.front().max_framerate =
+          std::clamp(streamQuality_.frameRate, 1, 120);
       std::unique_ptr<mediasoupclient::Producer> producer(
-          sendTransport_->Produce(this, localVideo_.get(), nullptr, nullptr,
-                                  nullptr, nativeAppData));
+          sendTransport_->Produce(this, localVideo_.get(), &encodings,
+                                  nullptr, nullptr, nativeAppData));
+      std::scoped_lock lock(mutex_);
       producers_.insert_or_assign(producer->GetId(), std::move(producer));
     }
+  }
+
+  void pollStatistics(std::stop_token token) {
+    if (!statisticsCallback_ ||
+        (configuration_.descriptor.mode != SessionMode::StreamPublish &&
+         configuration_.descriptor.mode != SessionMode::StreamWatch)) {
+      return;
+    }
+    std::unique_lock waitLock(statisticsWaitMutex_);
+    while (!token.stop_requested() && !stopped_.load()) {
+      statisticsWake_.wait_for(
+          waitLock, std::chrono::seconds(1),
+          [this, &token] {
+            return token.stop_requested() || stopped_.load();
+          });
+      if (token.stop_requested() || stopped_.load()) {
+        break;
+      }
+      waitLock.unlock();
+      publishStatistics();
+      waitLock.lock();
+    }
+  }
+
+  void publishStatistics() {
+    std::optional<StatisticsSample> sample;
+    {
+      std::scoped_lock lock(mutex_);
+      try {
+        if (configuration_.descriptor.mode ==
+            SessionMode::StreamPublish) {
+          for (const auto& [id, producer] : producers_) {
+            if (producer && !producer->IsClosed() &&
+                producer->GetKind() == "video") {
+              sample = parseVideoStatistics(
+                  producer->GetStats(), true, streamQuality_);
+              break;
+            }
+          }
+        } else {
+          for (const auto& [id, record] : consumers_) {
+            if (record.consumer && !record.consumer->IsClosed() &&
+                record.consumer->GetKind() == "video") {
+              sample = parseVideoStatistics(
+                  record.consumer->GetStats(), false, streamQuality_);
+              break;
+            }
+          }
+        }
+      } catch (const std::exception& error) {
+        errorCallback_(QStringLiteral("sfu-stats"),
+                       QString::fromUtf8(error.what()));
+        return;
+      }
+    }
+    if (!sample) {
+      return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (sample->hasBytes && lastStatisticsAt_ !=
+                                std::chrono::steady_clock::time_point{}) {
+      const double elapsed = std::chrono::duration<double>(
+                                 now - lastStatisticsAt_)
+                                 .count();
+      if (elapsed > 0.0 && sample->bytes >= lastStatisticsBytes_) {
+        sample->statistics.bitrateKbps =
+            (sample->bytes - lastStatisticsBytes_) * 8.0 /
+            elapsed / 1000.0;
+      }
+    }
+    if (sample->hasBytes) {
+      lastStatisticsBytes_ = sample->bytes;
+      lastStatisticsAt_ = now;
+    }
+    statisticsCallback_(sample->statistics);
   }
 
   bool matchesProducer(const QJsonObject& producer) const {
@@ -492,7 +751,9 @@ class NativeSfuSession::Impl final
   Command command_;
   StateCallback stateCallback_;
   VideoCallback videoCallback_;
+  StatisticsCallback statisticsCallback_;
   ErrorCallback errorCallback_;
+  StreamQuality streamQuality_;
   mediasoupclient::Device device_;
   std::unique_ptr<mediasoupclient::SendTransport> sendTransport_;
   std::unique_ptr<mediasoupclient::RecvTransport> recvTransport_;
@@ -502,6 +763,10 @@ class NativeSfuSession::Impl final
   std::unordered_map<std::string, ConsumerRecord> consumers_;
   std::jthread worker_;
   std::mutex mutex_;
+  std::mutex statisticsWaitMutex_;
+  std::condition_variable statisticsWake_;
+  std::chrono::steady_clock::time_point lastStatisticsAt_;
+  double lastStatisticsBytes_ = 0.0;
   std::atomic_bool stopped_ = true;
   bool outputMuted_ = false;
   double outputVolume_ = 1.0;
@@ -513,12 +778,14 @@ NativeSfuSession::NativeSfuSession(
     webrtc::scoped_refptr<webrtc::AudioTrackInterface> localAudio,
     webrtc::scoped_refptr<webrtc::VideoTrackInterface> localVideo,
     Command command, StateCallback stateCallback,
-    VideoCallback videoCallback, ErrorCallback errorCallback)
+    VideoCallback videoCallback, StatisticsCallback statisticsCallback,
+    ErrorCallback errorCallback, StreamQuality streamQuality)
     : impl_(std::make_unique<Impl>(
           std::move(configuration), factory, std::move(localAudio),
           std::move(localVideo), std::move(command),
           std::move(stateCallback), std::move(videoCallback),
-          std::move(errorCallback))) {}
+          std::move(statisticsCallback), std::move(errorCallback),
+          std::move(streamQuality))) {}
 
 NativeSfuSession::~NativeSfuSession() = default;
 void NativeSfuSession::start() { impl_->start(); }

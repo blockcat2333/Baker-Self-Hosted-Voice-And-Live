@@ -431,7 +431,8 @@ void ApplicationController::connectUi() {
   connect(window_, &ui::MainWindow::startMusicSharingRequested, this,
           [this](const ui::MusicSourceSelection &selection) {
             media_->startMusicShare(media_->voiceChannelId(),
-                                    selection.sourceId.toUInt());
+                                    selection.sourceId.toUInt(),
+                                    selection.volumePercent / 100.0);
           });
   connect(window_, &ui::MainWindow::stopMusicSharingRequested, media_,
           &media::MediaCoordinator::stopAllMusic);
@@ -459,7 +460,8 @@ void ApplicationController::connectUi() {
               return;
             }
             media_->startStream(channelId, sourceType, selection.sourceId,
-                                quality, selection.shareAudio);
+                                quality, selection.shareAudio,
+                                selection.sharedAudioVolumePercent / 100.0);
             window_->setLiveStatus(tr("Starting live stream…"));
           });
   connect(window_, &ui::MainWindow::stopCaptureRequested, media_,

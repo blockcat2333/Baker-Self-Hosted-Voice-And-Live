@@ -3,8 +3,8 @@
 IDI_BAKER_LITE ICON "@CMAKE_CURRENT_SOURCE_DIR@/resources/icons/baker-lite.ico"
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
- PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@BAKER_LITE_WINDOWS_VERSION_REVISION@
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,@BAKER_LITE_WINDOWS_VERSION_REVISION@
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -21,12 +21,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Baker\0"
             VALUE "FileDescription", "Baker Lite native voice client\0"
-            VALUE "FileVersion", "@PROJECT_VERSION@\0"
+            VALUE "FileVersion", "@BAKER_LITE_VERSION@\0"
             VALUE "InternalName", "baker-lite\0"
             VALUE "LegalCopyright", "Copyright (C) Baker contributors\0"
             VALUE "OriginalFilename", "Baker Lite.exe\0"
             VALUE "ProductName", "Baker Lite\0"
-            VALUE "ProductVersion", "@PROJECT_VERSION@\0"
+            VALUE "ProductVersion", "@BAKER_LITE_VERSION@\0"
         END
     END
     BLOCK "VarFileInfo"

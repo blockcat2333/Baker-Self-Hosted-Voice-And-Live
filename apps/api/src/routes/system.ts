@@ -55,6 +55,7 @@ import {
   RuntimeRepairLockError,
   updateSelfRepairSettings,
 } from '../lib/runtime-health';
+import { createRuntimeLogExport } from '../lib/runtime-log-export';
 import {
   readDeploymentPendingMarker,
   readDeploymentRuntimeSettings,
@@ -174,6 +175,12 @@ interface SystemRoutesRequest {
   params: unknown;
 }
 
+interface SystemRoutesReply {
+  header(name: string, value: string): SystemRoutesReply;
+  send(payload: string): unknown;
+  type(contentType: string): SystemRoutesReply;
+}
+
 interface SystemRoutesApp {
   dataAccess: DatabaseAccess;
   delete(
@@ -182,7 +189,10 @@ interface SystemRoutesApp {
   ): unknown;
   get(
     path: string,
-    handler: (request: SystemRoutesRequest) => Promise<unknown>,
+    handler: (
+      request: SystemRoutesRequest,
+      reply: SystemRoutesReply,
+    ) => Promise<unknown>,
   ): unknown;
   patch(
     path: string,
@@ -683,6 +693,20 @@ export function registerSystemRoutes(app: SystemRoutesApp) {
   app.get('/v1/admin/runtime/health', async (request) => {
     await requireAdmin(app, request);
     return AdminRuntimeHealthSchema.parse(await getRuntimeHealth());
+  });
+
+  app.get('/v1/admin/runtime/logs/export', async (request, reply) => {
+    await requireAdmin(app, request);
+    const exported = await createRuntimeLogExport();
+    return reply
+      .header('Cache-Control', 'no-store')
+      .header(
+        'Content-Disposition',
+        `attachment; filename="${exported.filename}"`,
+      )
+      .header('X-Content-Type-Options', 'nosniff')
+      .type('text/plain; charset=utf-8')
+      .send(exported.content);
   });
 
   app.post('/v1/admin/runtime/repair', async (request) => {

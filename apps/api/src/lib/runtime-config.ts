@@ -1,6 +1,8 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { normalizeHttpProxyUrl } from '@baker/protocol';
+
 export interface DeploymentRuntimeSettings {
   adminHostPort: number;
   allowedHosts: string;
@@ -412,8 +414,7 @@ export async function writeDeploymentPendingMarker(
   const mergedKeys = Array.from(
     new Set([...(existing?.changedKeys ?? []), ...changedKeys]),
   ).sort();
-  const markerPreviousSettings =
-    existing?.previousSettings ?? previousSettings;
+  const markerPreviousSettings = existing?.previousSettings ?? previousSettings;
   await mkdir(dirname(path), { recursive: true });
   await writeFile(
     path,
@@ -623,7 +624,9 @@ export async function readRuntimeUpdateProxySettings(
       enabled:
         typeof parsed.enabled === 'boolean' ? parsed.enabled : defaults.enabled,
       proxyUrl:
-        typeof parsed.proxyUrl === 'string' ? parsed.proxyUrl.trim() : '',
+        typeof parsed.proxyUrl === 'string'
+          ? normalizeHttpProxyUrl(parsed.proxyUrl)
+          : '',
       updatedAt:
         typeof parsed.updatedAt === 'string'
           ? parsed.updatedAt
@@ -661,7 +664,7 @@ export async function updateRuntimeUpdateProxySettings(
 ) {
   const next: RuntimeUpdateProxySettings = {
     enabled: input.enabled,
-    proxyUrl: input.proxyUrl.trim(),
+    proxyUrl: normalizeHttpProxyUrl(input.proxyUrl),
     updatedAt: new Date().toISOString(),
   };
 

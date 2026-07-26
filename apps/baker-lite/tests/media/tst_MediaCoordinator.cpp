@@ -28,7 +28,8 @@ void MediaCoordinatorTest::windowStreamUsesScreenProtocolType() {
       StreamSourceType::Window,
       QStringLiteral("1234"),
       quality,
-      true);
+      true,
+      1.0);
 
   QCOMPARE(commandSpy.count(), 1);
   const QList<QVariant> command = commandSpy.takeFirst();

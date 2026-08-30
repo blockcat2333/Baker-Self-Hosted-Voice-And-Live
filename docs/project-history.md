@@ -1,5 +1,28 @@
 # Project History
 
+## 2026-08-30
+
+### Baker 1.1.3 Aliyun DNS-01 HTTPS entrypoint
+
+What changed:
+
+- added an optional HTTPS listener to the all-in-one Supervisor image on container port `3443/tcp`
+- compiled Caddy with `caddy-dns/alidns` and configured ACME DNS-01 through environment placeholders
+- persisted Caddy's renewable certificate state under `/var/lib/baker/caddy`
+- documented FRP TCP forwarding from a nonstandard public port to the Baker HTTPS listener without changing TURN or SFU mappings
+
+Why:
+
+- browser microphone, camera, screen capture, and secure WebSocket use require a trusted HTTPS origin
+- the overseas relay exposes only nonstandard ports, so HTTP-01 and TLS-ALPN-01 cannot validate through public `80/443`
+- terminating TLS inside the existing all-in-one container preserves the single-container deployment model and avoids changing Synology DSM certificate configuration
+
+Validation:
+
+- targeted all-in-one configuration, update-helper, healthcheck, and runtime-library tests
+- release consistency and formatting checks
+- GitHub Actions production image build before publishing the release tag
+
 ## 2026-07-25
 
 ### Baker 1.1.0 Discord-inspired client/admin UI and desktop 1.1.0a

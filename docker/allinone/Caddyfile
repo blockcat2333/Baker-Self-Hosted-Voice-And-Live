@@ -1,4 +1,8 @@
-:80 {
+{
+	auto_https disable_redirects
+}
+
+(baker_web) {
 	encode zstd gzip
 
 	route {
@@ -21,6 +25,12 @@
 		}
 	}
 }
+
+:80 {
+	import baker_web
+}
+
+import /var/lib/baker/runtime/caddy/https.caddy
 
 :8080 {
 	encode zstd gzip

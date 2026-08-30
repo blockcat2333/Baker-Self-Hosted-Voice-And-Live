@@ -51,7 +51,13 @@ FROM workspace-base AS proxy-builder
 
 RUN pnpm turbo run build --filter=@baker/web --filter=@baker/admin
 
+FROM caddy:2.10-builder-alpine AS caddy-builder
+
+RUN xcaddy build --with github.com/caddy-dns/alidns@v1.0.29
+
 FROM caddy:2.10-alpine AS caddy-binary
+
+COPY --from=caddy-builder /usr/bin/caddy /usr/bin/caddy
 
 FROM postgres:16-bookworm AS allinone-runtime
 
@@ -60,6 +66,8 @@ ENV PATH=/pnpm:/usr/lib/postgresql/16/bin:/usr/local/sbin:/usr/local/bin:/usr/sb
 ENV NODE_ENV=production
 ENV BAKER_DATA_DIR=/var/lib/baker
 ENV BAKER_RUNTIME_DIR=/var/lib/baker/runtime
+ENV XDG_CONFIG_HOME=/var/lib/baker/caddy/config
+ENV XDG_DATA_HOME=/var/lib/baker/caddy/data
 ENV PGDATA=/var/lib/baker/postgres
 ENV REDIS_DATA_DIR=/var/lib/baker/redis
 ENV TURN_ENABLED=false
@@ -91,6 +99,7 @@ COPY docker/runtime/lib.sh /opt/baker-runtime/lib.sh
 COPY docker/runtime/node-service-entrypoint.sh /opt/baker-runtime/node-service-entrypoint.sh
 COPY docker/runtime/standalone-help.sh /opt/baker-runtime/standalone-help.sh
 COPY docker/allinone/Caddyfile /etc/caddy/Caddyfile
+COPY docker/allinone/configure-caddy.sh /opt/baker-allinone/configure-caddy.sh
 COPY docker/allinone/supervisord.conf /etc/baker/supervisord.conf
 COPY docker/allinone/entrypoint.sh /opt/baker-allinone/entrypoint.sh
 COPY docker/allinone/healthcheck.sh /opt/baker-allinone/healthcheck.sh
@@ -108,6 +117,7 @@ RUN sed -i 's/\r$//' \
     /opt/baker-runtime/node-service-entrypoint.sh \
     /opt/baker-runtime/standalone-help.sh \
     /opt/baker-allinone/entrypoint.sh \
+    /opt/baker-allinone/configure-caddy.sh \
     /opt/baker-allinone/healthcheck.sh \
     /opt/baker-allinone/lib.sh \
     /opt/baker-allinone/node-service.sh \
@@ -122,6 +132,7 @@ RUN sed -i 's/\r$//' \
     /opt/baker-runtime/node-service-entrypoint.sh \
     /opt/baker-runtime/standalone-help.sh \
     /opt/baker-allinone/entrypoint.sh \
+    /opt/baker-allinone/configure-caddy.sh \
     /opt/baker-allinone/healthcheck.sh \
     /opt/baker-allinone/lib.sh \
     /opt/baker-allinone/node-service.sh \
@@ -129,7 +140,7 @@ RUN sed -i 's/\r$//' \
     /opt/baker-allinone/redis.sh \
     /opt/baker-allinone/turn.sh
 
-EXPOSE 80 8080 3478/tcp 3478/udp 50000-50100/tcp 50000-50100/udp
+EXPOSE 80 8080 3443/tcp 3478/tcp 3478/udp 50000-50100/tcp 50000-50100/udp
 VOLUME ["/var/lib/baker"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 CMD ["/opt/baker-allinone/healthcheck.sh"]

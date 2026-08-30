@@ -48,6 +48,15 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-08-30 Baker 1.1.3 Aliyun DNS-01 HTTPS
+
+- advanced the stable server release line to `1.1.3` and matching Windows client labels to `1.1.3a`
+- built the all-in-one Caddy binary with the pinned AliDNS DNS provider
+- added an optional `3443/tcp` HTTPS listener for nonstandard FRP TCP entrypoints
+- persisted Caddy ACME and certificate state inside the existing `/var/lib/baker` data root
+- kept Aliyun credentials in container environment placeholders rather than generated Caddy configuration
+- documented trusted HTTPS/WSS, certificate renewal, FRP forwarding, and independent TURN/SFU media routing for dual-region deployments
+
 ### 2026-07-27 Baker 1.1.2 Diagnostics, Proxy Input, And Windows Clients
 
 - advanced the stable server release line to `1.1.2` and reset the Electron and Baker Lite client labels to `1.1.2a`

@@ -26,7 +26,7 @@ Baker 是一个面向私有部署场景的实时通信平台，适合私有社�
 
 ## 当前状态
 
-- 当前发布线：服务端 `1.1.2`；桌面客户端 `1.1.2a`
+- 当前发布线：服务端 `1.1.3`；桌面客户端 `1.1.3a`
 - 当前已经完成并验证到 Milestone 5 的稳定性与部署加固阶段
 - 单仓库包含 Web、桌面壳层、管理后台、API、Gateway 和 Media 边界服务
 - 已实现认证、聊天、在线状态、语音、直播信令、弹窗观看和服务端设置
@@ -64,7 +64,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.2
+  blockcat233/baker:1.1.3
 
 docker logs baker
 ```
@@ -76,7 +76,7 @@ docker logs baker
 
 首次启动会打印一次管理后台密码。运行时密钥、Redis 数据和 PostgreSQL 数据都会保存在挂载卷里的 `/var/lib/baker` 下，因此后续直接 `docker restart baker` 就能保留实例状态。
 
-如果你想始终跟随最新滚动版本，也可以把 `1.1.2` 换成 `latest`。
+如果你想始终跟随最新滚动版本，也可以把 `1.1.3` 换成 `latest`。
 
 公开部署教程默认使用这个 all-in-one 镜像。它在同一个容器里包含 PostgreSQL、Redis、API、Gateway、Media、Caddy、可选 coturn、运行时 watchdog 和 `supervisorctl`。管理后台里的服务修复、自我修复、公网 IP 自动化重启，以及部署设置应用，都依赖这个 Supervisor 环境。如果你手动拆分运行多个服务，Baker 仍然可以提供流量，但你需要自己提供进程守护，并在运行时配置变化后自行重启 Media/TURN。
 
@@ -112,7 +112,7 @@ Baker 默认会尝试多个公网 IP 检测源，其中包含一些在中国大�
 
 如果你更喜欢用 Docker Desktop 图形界面，而不是命令行，请按下面这些值填写：
 
-- 镜像：`blockcat233/baker:1.1.2`
+- 镜像：`blockcat233/baker:1.1.3`
 - 容器名：`baker` 或 `baker-test`
 - 端口：
   - 宿主机 `3000` -> 容器 `80/tcp`
@@ -173,7 +173,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.2
+  blockcat233/baker:1.1.3
 ```
 
 如果没有显式设置 `TURN_URLS`，Baker 会根据 `TURN_EXTERNAL_IP` 和 `TURN_PORT` 自动生成；如果你希望客户端拿到固定域名形式的 TURN 地址，也可以自己显式设置 `TURN_URLS`。
@@ -206,7 +206,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.2
+  blockcat233/baker:1.1.3
 ```
 
 然后进入管理后台，在“服务器设置 -> 媒体模式”里从 `p2p` 切换到 `sfu`。切换会立即重建当前语音和直播媒体会话，但不会断开文字聊天 WebSocket。如果 SFU 公网 IP 或端口范围没有配置好，管理 API 会明确拒绝切换，而不是静默退回 P2P。
@@ -235,10 +235,10 @@ MEDIA_REGION_PROFILES='[
     "hosts": ["hkserver.evergarden.space"],
     "sfuAnnouncedIp": "168.70.50.141",
     "sfuRtcMinPort": 23335,
-    "sfuRtcMaxPort": 23400,
+    "sfuRtcMaxPort": 23340,
     "turnUrls": [
-      "turn:hkserver.evergarden.space:23304?transport=udp",
-      "turn:hkserver.evergarden.space:23304?transport=tcp"
+      "turn:hkserver.evergarden.space:23334?transport=udp",
+      "turn:hkserver.evergarden.space:23334?transport=tcp"
     ]
   }
 ]'
@@ -251,9 +251,30 @@ MEDIA_REGION_PROFILES='[
 运维注意事项：
 
 - 大陆用户访问大陆入口，例如 `https://violet.evergarden.space/`。
-- 海外用户访问海外入口，例如 `https://hkserver.evergarden.space:23303/`；如果香港服务器能提供标准 `443/tcp`，则可以直接使用 `https://hkserver.evergarden.space/`。
+- 海外用户访问海外入口，例如 `https://hkserver.evergarden.space:23333/`；如果香港服务器能提供标准 `443/tcp`，则可以直接使用 `https://hkserver.evergarden.space/`。
+- 海外 Web 端口必须真正完成可信 TLS 握手。即使 TURN/SFU 媒体端口可达，`http://` 页面也不能使用浏览器的麦克风、摄像头和屏幕捕获 API。
+- 使用 FRP TCP 代理时，可以在香港中继服务器先终止 TLS 再反向代理到 Baker，也可以在隧道后的独立反向代理上终止 TLS。必须保留 `Host`、`X-Forwarded-Host`、`Origin` 和 WebSocket Upgrade，否则 Baker 可能无法选中正确的区域 profile。
+- 证书自动续签需要可达的 ACME 验证路径。能开放标准 `80/443` 时可使用 HTTP-01/TLS-ALPN-01；只能开放非标准 HTTPS 端口时应使用 DNS-01。
+- Baker Desktop 可以连接 HTTP Baker 地址，因为 Electron 渲染器自行管理媒体权限；这不代表同一 HTTP 地址适合普通网页浏览器。
 - 首次启动后，`MEDIA_REGION_PROFILES` 会写入 `runtime.env`，也可以在管理后台“部署设置 -> 媒体区域 Profiles JSON”里编辑。
 - 公网 IP 自动化只维护全局 TURN/SFU 地址；多区域 profile 是明确的静态路由，香港 relay IP 或端口变化时需要手动更新 profile。
+
+### 可选：all-in-one 内置 Aliyun DNS-01 HTTPS
+
+当 FRP 中继只能提供非标准公网端口，并且域名由阿里云 DNS 托管时，all-in-one 镜像可以直接终止 HTTPS。先发布容器 `3443/tcp`，再启用可选监听器：
+
+```bash
+-p 3443:3443/tcp \
+-e BAKER_HTTPS_ENABLED=true \
+-e BAKER_HTTPS_HOST=hkserver.evergarden.space \
+-e BAKER_HTTPS_PORT=3443 \
+-e ALIYUN_ACCESS_KEY_ID='<RAM AccessKey ID>' \
+-e ALIYUN_ACCESS_KEY_SECRET='<RAM AccessKey Secret>'
+```
+
+FRP Web 代理应使用 TCP 模式，把公网 HTTPS 端口的 TLS 流量原样转发到 Docker 宿主机 `3443`。例如 `hkserver.evergarden.space:23333 -> 192.168.233.2:3443`，海外访问地址仍为 `https://hkserver.evergarden.space:23333/`。TURN 与 SFU 映射相互独立，不需要随 Web 入口一起修改。
+
+Caddy 会通过阿里云 DNS-01 申请并自动续签证书。ACME 账号、证书和私钥保存在 `/var/lib/baker/caddy`，升级时必须继续挂载现有 `/var/lib/baker` 数据卷。应使用只具备目标域名记录管理权限的专用 RAM 用户，不要使用阿里云主账号 AccessKey。AccessKey 值只保留在容器环境变量中，不会写入生成的 Caddyfile。
 
 ## 部署说明
 

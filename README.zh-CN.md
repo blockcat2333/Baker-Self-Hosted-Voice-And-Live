@@ -235,10 +235,10 @@ MEDIA_REGION_PROFILES='[
     "hosts": ["hkserver.evergarden.space"],
     "sfuAnnouncedIp": "168.70.50.141",
     "sfuRtcMinPort": 23335,
-    "sfuRtcMaxPort": 23400,
+    "sfuRtcMaxPort": 23340,
     "turnUrls": [
-      "turn:hkserver.evergarden.space:23304?transport=udp",
-      "turn:hkserver.evergarden.space:23304?transport=tcp"
+      "turn:hkserver.evergarden.space:23334?transport=udp",
+      "turn:hkserver.evergarden.space:23334?transport=tcp"
     ]
   }
 ]'
@@ -251,9 +251,30 @@ MEDIA_REGION_PROFILES='[
 运维注意事项：
 
 - 大陆用户访问大陆入口，例如 `https://violet.evergarden.space/`。
-- 海外用户访问海外入口，例如 `https://hkserver.evergarden.space:23303/`；如果香港服务器能提供标准 `443/tcp`，则可以直接使用 `https://hkserver.evergarden.space/`。
+- 海外用户访问海外入口，例如 `https://hkserver.evergarden.space:23333/`；如果香港服务器能提供标准 `443/tcp`，则可以直接使用 `https://hkserver.evergarden.space/`。
+- 海外 Web 端口必须真正完成可信 TLS 握手。即使 TURN/SFU 媒体端口可达，`http://` 页面也不能使用浏览器的麦克风、摄像头和屏幕捕获 API。
+- 使用 FRP TCP 代理时，可以在香港中继服务器先终止 TLS 再反向代理到 Baker，也可以在隧道后的独立反向代理上终止 TLS。必须保留 `Host`、`X-Forwarded-Host`、`Origin` 和 WebSocket Upgrade，否则 Baker 可能无法选中正确的区域 profile。
+- 证书自动续签需要可达的 ACME 验证路径。能开放标准 `80/443` 时可使用 HTTP-01/TLS-ALPN-01；只能开放非标准 HTTPS 端口时应使用 DNS-01。
+- Baker Desktop 可以连接 HTTP Baker 地址，因为 Electron 渲染器自行管理媒体权限；这不代表同一 HTTP 地址适合普通网页浏览器。
 - 首次启动后，`MEDIA_REGION_PROFILES` 会写入 `runtime.env`，也可以在管理后台“部署设置 -> 媒体区域 Profiles JSON”里编辑。
 - 公网 IP 自动化只维护全局 TURN/SFU 地址；多区域 profile 是明确的静态路由，香港 relay IP 或端口变化时需要手动更新 profile。
+
+### 可选：all-in-one 内置 Aliyun DNS-01 HTTPS
+
+当 FRP 中继只能提供非标准公网端口，并且域名由阿里云 DNS 托管时，all-in-one 镜像可以直接终止 HTTPS。先发布容器 `3443/tcp`，再启用可选监听器：
+
+```bash
+-p 3443:3443/tcp \
+-e BAKER_HTTPS_ENABLED=true \
+-e BAKER_HTTPS_HOST=hkserver.evergarden.space \
+-e BAKER_HTTPS_PORT=3443 \
+-e ALIYUN_ACCESS_KEY_ID='<RAM AccessKey ID>' \
+-e ALIYUN_ACCESS_KEY_SECRET='<RAM AccessKey Secret>'
+```
+
+FRP Web 代理应使用 TCP 模式，把公网 HTTPS 端口的 TLS 流量原样转发到 Docker 宿主机 `3443`。例如 `hkserver.evergarden.space:23333 -> 192.168.233.2:3443`，海外访问地址仍为 `https://hkserver.evergarden.space:23333/`。TURN 与 SFU 映射相互独立，不需要随 Web 入口一起修改。
+
+Caddy 会通过阿里云 DNS-01 申请并自动续签证书。ACME 账号、证书和私钥保存在 `/var/lib/baker/caddy`，升级时必须继续挂载现有 `/var/lib/baker` 数据卷。应使用只具备目标域名记录管理权限的专用 RAM 用户，不要使用阿里云主账号 AccessKey。AccessKey 值只保留在容器环境变量中，不会写入生成的 Caddyfile。
 
 ## 部署说明
 

@@ -335,6 +335,8 @@ docs/        Architecture, history, status, and decisions
 
 - [Beginner Deployment Guide](docs/beginner-deployment.md)
 - [Beginner Deployment Guide (Chinese)](docs/beginner-deployment.zh-CN.md)
+- [Aliyun DNS-01 HTTPS Guide](docs/aliyun-dns01-https.md)
+- [Aliyun DNS-01 HTTPS Guide (Chinese)](docs/aliyun-dns01-https.zh-CN.md)
 - [Chinese Guide / 中文说明](./README.zh-CN.md)
 - [Project Overview](docs/project-overview.md)
 - [Current Status](docs/current-status.md)

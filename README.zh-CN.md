@@ -334,6 +334,8 @@ docs/        架构、历史、状态与决策记录
 
 - [新手部署指南](docs/beginner-deployment.zh-CN.md)
 - [Beginner Deployment Guide](docs/beginner-deployment.md)
+- [阿里云 DNS-01 HTTPS 指南](docs/aliyun-dns01-https.zh-CN.md)
+- [Aliyun DNS-01 HTTPS Guide](docs/aliyun-dns01-https.md)
 - [English Guide](./README.md)
 - [项目概览](docs/project-overview.md)
 - [当前状态](docs/current-status.md)

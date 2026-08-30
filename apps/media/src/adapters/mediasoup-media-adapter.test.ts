@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseAppEnv } from '@baker/shared';
 
 const mocks = vi.hoisted(() => ({
+  createRouter: vi.fn(),
   createWebRtcServer: vi.fn(),
   createWebRtcTransport: vi.fn(),
   createWorker: vi.fn(),
@@ -32,17 +33,46 @@ beforeEach(() => {
     sctpParameters: undefined,
   }));
   mocks.createWorker.mockReset();
+  mocks.createRouter.mockReset();
+  mocks.createRouter.mockImplementation(async () => ({
+    createWebRtcTransport: mocks.createWebRtcTransport,
+    rtpCapabilities: {},
+  }));
   mocks.createWorker.mockResolvedValue({
-    createRouter: vi.fn(async () => ({
-      createWebRtcTransport: mocks.createWebRtcTransport,
-      rtpCapabilities: {},
-    })),
+    createRouter: mocks.createRouter,
     createWebRtcServer: mocks.createWebRtcServer,
     on: vi.fn(),
   });
 });
 
 describe('MediasoupMediaAdapter shared WebRTC servers', () => {
+  it('offers H.264 before the optional browser codecs', async () => {
+    const adapter = new MediasoupMediaAdapter(parseAppEnv({
+      NODE_ENV: 'test',
+      SFU_ANNOUNCED_IP: '127.0.0.1',
+      SFU_RTC_MAX_PORT: '23340',
+      SFU_RTC_MIN_PORT: '23335',
+    }));
+    const session = {
+      channelId: '00000000-0000-4000-8000-000000000021',
+      mode: 'voice' as const,
+      sessionId: '00000000-0000-4000-8000-000000000022',
+      transportMode: 'sfu' as const,
+      userId: '00000000-0000-4000-8000-000000000023',
+    };
+    await adapter.createSession(session);
+    await adapter.createSfuTransport({ ...session, direction: 'send' });
+
+    const [{ mediaCodecs }] = mocks.createRouter.mock.calls[0] as [{ mediaCodecs: Array<{ mimeType: string }> }];
+    expect(mediaCodecs.map((codec) => codec.mimeType)).toEqual([
+      'audio/opus',
+      'video/H264',
+      'video/VP8',
+      'video/VP9',
+      'video/AV1',
+    ]);
+  });
+
   it('reuses one fixed listen port per media region across transports', async () => {
     const adapter = new MediasoupMediaAdapter(
       parseAppEnv({

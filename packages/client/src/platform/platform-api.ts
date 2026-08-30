@@ -20,16 +20,31 @@ declare global {
   interface Window {
     bakerDesktop?: {
       checkForUpdate(targetVersion: string): Promise<{ feedUrl: string }>;
-      clearSavedServer(): Promise<void>;
+      clearServerSession(serverId: string): Promise<void>;
       downloadUpdate(): Promise<void>;
       getAppInfo(): Promise<{ logsDirectory: string; platform: string; version: string }>;
-      getSavedServer(): Promise<{
-        apiBaseUrl: string;
-        gatewayUrl: string;
-        input: string;
-        savedAt: string;
-        serverVersion: string;
+      getServerRegistry(): Promise<{
+        activeServerId: string | null;
+        schemaVersion: 2;
+        servers: Array<{
+          apiBaseUrl: string;
+          createdAt: string;
+          gatewayUrl: string;
+          id: string;
+          input: string;
+          lastConnectedAt: string | null;
+          name: string;
+          order: number;
+          savedAt: string;
+          serverVersion: string;
+        }>;
+      }>;
+      getServerSession(serverId: string): Promise<{
+        accessToken: string;
+        refreshToken: string;
+        user: { email: string; id: string; username: string } | null;
       } | null>;
+      getSessionSecurity(): Promise<{ persistent: boolean }>;
       installUpdate(): Promise<void>;
       logError(payload: { message: string; scope: string; stack?: string }): Promise<void>;
       listUpdateVersions(): Promise<{
@@ -61,19 +76,45 @@ declare global {
       openExternal(url: string): Promise<void>;
       openLogs(): Promise<void>;
       platform: 'desktop';
-      saveServer(config: {
-        apiBaseUrl: string;
-        gatewayUrl: string;
-        input: string;
-        savedAt: string;
-        serverVersion: string;
+      saveServerRegistry(registry: {
+        activeServerId: string | null;
+        schemaVersion: 2;
+        servers: Array<{
+          apiBaseUrl: string;
+          createdAt: string;
+          gatewayUrl: string;
+          id: string;
+          input: string;
+          lastConnectedAt: string | null;
+          name: string;
+          order: number;
+          savedAt: string;
+          serverVersion: string;
+        }>;
       }): Promise<{
-        apiBaseUrl: string;
-        gatewayUrl: string;
-        input: string;
-        savedAt: string;
-        serverVersion: string;
+        activeServerId: string | null;
+        schemaVersion: 2;
+        servers: Array<{
+          apiBaseUrl: string;
+          createdAt: string;
+          gatewayUrl: string;
+          id: string;
+          input: string;
+          lastConnectedAt: string | null;
+          name: string;
+          order: number;
+          savedAt: string;
+          serverVersion: string;
+        }>;
       }>;
+      saveServerSession(
+        serverId: string,
+        session: {
+          accessToken: string;
+          refreshToken: string;
+          user: { email: string; id: string; username: string } | null;
+        },
+      ): Promise<{ persisted: boolean }>;
       selectScreenSource(): Promise<{ shareAudio: boolean; sourceId: string } | null>;
       selectMusicSource(): Promise<{ processId: number } | null>;
       startExcludedSystemAudioCapture(): Promise<{

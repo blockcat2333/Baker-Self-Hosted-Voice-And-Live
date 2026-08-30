@@ -1,5 +1,5 @@
 import { sendCommandAwaitAck } from '../gateway/gateway-store';
-import { useStreamStore } from './stream-store';
+import { subscribeToStreamIdRemaps, useStreamStore } from './stream-store';
 
 const STREAM_POPUP_ROOT_ID = 'baker-stream-popup-root';
 const STREAM_POPUP_GRACE_MS = 250;
@@ -188,6 +188,19 @@ export function focusStreamPopupWindow(streamId: string) {
   pruneClosedPopups();
   popupEntries.get(streamId)?.handle.focus();
 }
+
+export function remapStreamPopupWindow(previousStreamId: string, nextStreamId: string) {
+  if (previousStreamId === nextStreamId || popupEntries.has(nextStreamId)) return;
+  const entry = popupEntries.get(previousStreamId);
+  if (!entry) return;
+  popupEntries.delete(previousStreamId);
+  entry.streamId = nextStreamId;
+  entry.handle.document.title = buildStreamPopupTitle(nextStreamId);
+  popupEntries.set(nextStreamId, entry);
+  emitPopupRegistryChanged();
+}
+
+subscribeToStreamIdRemaps(remapStreamPopupWindow);
 
 export function closeStreamPopup(streamId: string) {
   const entry = removePopupEntry(streamId);

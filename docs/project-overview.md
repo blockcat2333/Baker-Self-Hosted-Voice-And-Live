@@ -111,7 +111,8 @@ Implemented today:
 - livestream start now supports user-selected resolution/frame-rate capture presets persisted as stream-session metadata
 - livestream quality now includes fixed bitrate presets plus `1440p`, and publish senders apply best-effort WebRTC max-bitrate parameters
 - watched livestream popup viewers now include a live WebRTC stats panel (codec/resolution/fps/bitrate/loss/jitter/dropped frames)
-- screen-share publish tracks now set `contentHint='detail'`, publish offers also apply sender `degradationPreference`, and pre-publish controls expose a best-effort codec selector (`Browser Default` / `H.264` / `VP8` / `VP9` / `AV1`)
+- livestream publishing now defaults to H.264; the client only enables locally supported H.264/VP8/VP9/AV1 choices, applies the selected codec to P2P transceivers and SFU producers, and passes the requested bitrate, frame rate, and balanced degradation policy to the sender
+- 60 FPS screen capture reapplies a motion-oriented capture constraint after source selection and reports target, capture, send, and receive rates separately so source or encoder limitations remain visible
 - broadcasters now get a live `Your Stream` health panel showing target/send fps, bitrate, resolution, preferred-vs-negotiated codec, active peers, and browser limitation reason to help spot local encoder pressure
 - voice link quality is now per-user: gateway publishes per-connection `GW RTT/GW Loss` and clients publish local `Media Loss`, merged into `voice.network.updated`
 - voice channel roster visibility now works even when the user has not joined voice (gateway roster snapshots + channel-list rendering)
@@ -125,7 +126,14 @@ Implemented today:
 - browser auth tokens now stay in `sessionStorage` instead of `localStorage`
 - the admin panel no longer persists the management password in browser storage
 - Baker Desktop checks GitHub Releases for lettered client release labels on launch and exposes a non-blocking version picker for selected desktop updates
+- Baker Desktop keeps a versioned multi-server registry in its left rail, verifies both HTTP health and the gateway before switching, and leaves the current server connected when a saved target is offline
+- desktop sign-in sessions are isolated per saved server and encrypted through Electron `safeStorage`; when secure storage is unavailable, sessions remain memory-only and plaintext fallback is forbidden
 - the shared Web/Windows UI intentionally follows Discord's interaction vocabulary for channel navigation, context menus, member controls, voice actions, livestream discovery, and responsive touch behavior; Baker retains its own branding and adds self-hosted network diagnostics plus broader livestream controls
+- remote shared music now has a compact playback mute/volume split control, and voice speaking indication uses a 50 ms attack with hysteresis in both the main participant view and the channel roster
+- gateway half-open detection closes the connection after three missed application-level pongs; voice, livestream publish/watch, and shared-music publish/listen preserve user intent through automatic ICE/SFU/media-session recovery instead of silently leaving
+- media recovery uses bounded exponential retry intervals, escalates after the fifth failed attempt with a sound and persistent in-app dialog, continues retrying in the background, and supports immediate retry or explicit abandonment
+- authenticated `media.session.reconnect` refreshes ICE/SFU resources without removing the logical room member/publication; clients fall back to the legacy leave/re-enter commands when connected to an older server
+- SFU consumers now expose the same combined inbound RTP statistics as P2P playback, including negotiated codec, resolution, derived bitrate/frame rate, packet loss, jitter, and dropped frames
 - Windows screen sharing uses a dedicated preview picker with window/screen tabs and optional system audio; selective application-audio sharing uses a separate searchable picker with live level meters
 - HTTPS dev proxy upstream selection is now runtime-port aware (`runtime-ports.json` + Vite log parsing) to avoid stale `:80` routing that can break external domain voice connectivity
 - dev startup now performs Docker engine readiness checks (best-effort Docker Desktop auto-start + wait), and if Docker backend is stuck in `starting` it performs one automatic recovery attempt (`restart Docker Desktop + wsl --shutdown`) before failing

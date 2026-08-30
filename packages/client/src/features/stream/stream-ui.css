@@ -338,6 +338,10 @@
   white-space: normal;
 }
 
+.stream-live-detail-warning {
+  color: var(--warning, #f0b232);
+}
+
 /* The popup viewer is a video canvas first; diagnostics are an optional inspector. */
 .stream-popup-body {
   background: #0b0c0f;

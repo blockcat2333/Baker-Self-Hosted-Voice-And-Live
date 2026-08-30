@@ -1,14 +1,33 @@
-import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useState } from 'react';
-
-import { AppRoot, createDesktopPlatformApi, useAuthStore } from '@baker/client';
+import { Component, type ErrorInfo, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
-  type DesktopServerConfig,
+  AppRoot,
+  createDesktopPlatformApi,
+  i18n,
+  type ServerRailConnectionState,
+  type ServerSwitcherModel,
+  useAuthStore,
+  useChatStore,
+  useGatewayStore,
+} from '@baker/client';
+
+import {
   isServerVersionGreaterThanClient,
   normalizeServerInput,
   probeGateway,
   readServerHealth,
+  readServerIdentity,
 } from './server-config';
+import { createDesktopAuthSessionPersistence } from './desktop-session-persistence';
+import {
+  createDesktopServerEntry,
+  createEmptyServerRegistry,
+  removeDesktopServer,
+  type DesktopServerEntry,
+  type DesktopServerRegistry,
+  upsertDesktopServer,
+} from './server-registry';
+import { DesktopServerSwitchCoordinator } from './server-switch';
 
 type DesktopAppInfo = {
   logsDirectory: string;
@@ -45,6 +64,7 @@ type DesktopUpdateVersionsResponse = {
 };
 
 type DesktopPhase = 'loading' | 'setup' | 'app';
+type ServerReachability = 'available' | 'checking' | 'unavailable';
 
 class DesktopErrorBoundary extends Component<
   { children: ReactNode },
@@ -117,13 +137,24 @@ function updateEventLabel(event: UpdateEventPayload | null) {
 }
 
 export function DesktopApp() {
+  const [, setInterfaceLanguage] = useState(i18n.language);
+  const t = i18n.t.bind(i18n);
   const platformApi = useMemo(() => createDesktopPlatformApi(), []);
+  const gatewayStatus = useGatewayStore((s) => s.status);
   const [phase, setPhase] = useState<DesktopPhase>('loading');
   const [appInfo, setAppInfo] = useState<DesktopAppInfo | null>(null);
-  const [serverConfig, setServerConfig] = useState<DesktopServerConfig | null>(null);
+  const [registry, setRegistry] = useState<DesktopServerRegistry>(() => createEmptyServerRegistry());
+  const [serverConfig, setServerConfig] = useState<DesktopServerEntry | null>(null);
   const [serverInput, setServerInput] = useState('');
   const [bootError, setBootError] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [busyServerId, setBusyServerId] = useState<string | null>(null);
+  const [serverReachability, setServerReachability] = useState<Record<string, ServerReachability>>({});
+  const [isServerManagerOpen, setIsServerManagerOpen] = useState(false);
+  const [editingServerId, setEditingServerId] = useState<string | 'new' | null>(null);
+  const [pendingRemovalId, setPendingRemovalId] = useState<string | null>(null);
+  const [serverNotice, setServerNotice] = useState<string | null>(null);
+  const [sessionSecurityWarning, setSessionSecurityWarning] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateEvent, setUpdateEvent] = useState<UpdateEventPayload | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -134,6 +165,15 @@ export function DesktopApp() {
   const [selectedUpdateTag, setSelectedUpdateTag] = useState('');
   const [isUpdateChooserOpen, setIsUpdateChooserOpen] = useState(false);
   const [isUpdateNoticeDismissed, setIsUpdateNoticeDismissed] = useState(false);
+  const serverSwitchCoordinatorRef = useRef(new DesktopServerSwitchCoordinator());
+
+  useEffect(() => {
+    const handleLanguageChanged = (language: string) => setInterfaceLanguage(language);
+    i18n.on('languageChanged', handleLanguageChanged);
+    return () => {
+      i18n.off('languageChanged', handleLanguageChanged);
+    };
+  }, []);
 
   useEffect(() => {
     return window.bakerDesktop?.onUpdateEvent((event) => {
@@ -147,6 +187,50 @@ export function DesktopApp() {
       }
     });
   }, []);
+
+  const registryProbeKey = registry.servers
+    .map((server) => `${server.id}:${server.apiBaseUrl}`)
+    .join('|');
+
+  useEffect(() => {
+    if (!registryProbeKey) return;
+    let cancelled = false;
+
+    async function probeSavedServers() {
+      const servers = registry.servers;
+      setServerReachability((current) => ({
+        ...current,
+        ...Object.fromEntries(servers.map((server) => [server.id, 'checking' as const])),
+      }));
+      await Promise.all(
+        servers.map(async (server) => {
+          try {
+            await Promise.all([
+              readServerHealth(server.apiBaseUrl, 5_000),
+              probeGateway(server.gatewayUrl, 5_000),
+            ]);
+            if (!cancelled) {
+              setServerReachability((current) => ({ ...current, [server.id]: 'available' }));
+            }
+          } catch {
+            if (!cancelled) {
+              setServerReachability((current) => ({ ...current, [server.id]: 'unavailable' }));
+            }
+          }
+        }),
+      );
+    }
+
+    void probeSavedServers();
+    const timer = window.setInterval(() => void probeSavedServers(), 30_000);
+    const handleFocus = () => void probeSavedServers();
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [registry.servers, registryProbeKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,18 +246,36 @@ export function DesktopApp() {
         void refreshUpdateVersions({ openChooser: false, silent: true });
       }
 
-      const saved = await window.bakerDesktop?.getSavedServer();
+      const [saved, security] = await Promise.all([
+        window.bakerDesktop?.getServerRegistry(),
+        window.bakerDesktop?.getSessionSecurity(),
+      ]);
       if (cancelled) {
         return;
       }
 
-      if (!saved) {
+      if (security && !security.persistent) {
+        setSessionSecurityWarning(
+          'Windows secure storage is unavailable. Sign-in sessions will only be kept until Baker closes.',
+        );
+      }
+
+      const nextRegistry = saved ?? createEmptyServerRegistry();
+      setRegistry(nextRegistry);
+      const active = nextRegistry.servers.find((server) => server.id === nextRegistry.activeServerId) ?? null;
+      if (!active) {
         setPhase('setup');
         return;
       }
 
-      setServerInput(saved.input);
-      await connectWithConfig(saved, info?.version ?? '0.0.0');
+      setServerInput(active.input);
+      setServerConfig(active);
+      setServerVersionWarning(
+        isServerVersionGreaterThanClient(active.serverVersion, info?.version ?? '0.0.0')
+          ? `Server ${active.serverVersion} is newer than this client ${info?.version ?? '0.0.0'}. Check GitHub releases for a matching desktop client.`
+          : null,
+      );
+      setPhase('app');
     }
 
     void boot().catch((err) => {
@@ -186,44 +288,120 @@ export function DesktopApp() {
     };
   }, []);
 
-  async function connectWithConfig(config: DesktopServerConfig, appVersion: string) {
-    setIsConnecting(true);
+  async function validateServer(server: DesktopServerEntry) {
+    setServerReachability((current) => ({ ...current, [server.id]: 'checking' }));
+    const [health, identity] = await Promise.all([
+      readServerHealth(server.apiBaseUrl),
+      readServerIdentity(server.apiBaseUrl),
+      probeGateway(server.gatewayUrl),
+    ]);
+    const now = new Date().toISOString();
+    setServerReachability((current) => ({ ...current, [server.id]: 'available' }));
+    return {
+      ...server,
+      lastConnectedAt: now,
+      name: identity.serverName,
+      savedAt: now,
+      serverVersion: health.version,
+    };
+  }
+
+  async function commitActiveServer(server: DesktopServerEntry, sourceRegistry = registry) {
+    useGatewayStore.getState().disconnect();
+    useChatStore.getState().reset();
+    useAuthStore.getState().clearRuntimeSession();
+
+    const nextRegistry = upsertDesktopServer(sourceRegistry, server, true);
+    const saved = (await window.bakerDesktop?.saveServerRegistry(nextRegistry)) ?? nextRegistry;
+    setRegistry(saved);
+    setServerConfig(server);
+    setServerInput(server.input);
+    const appVersion = appInfo?.version ?? '0.0.0';
+    setServerVersionWarning(
+      isServerVersionGreaterThanClient(server.serverVersion, appVersion)
+        ? `Server ${server.serverVersion} is newer than this client ${appVersion}. Check GitHub releases for a matching desktop client.`
+        : null,
+    );
+    setPhase('app');
+  }
+
+  async function selectServer(serverId: string) {
+    const target = registry.servers.find((server) => server.id === serverId);
+    if (!target || busyServerId) return;
+    setBusyServerId(serverId);
     setBootError(null);
+    setServerNotice(null);
 
     try {
-      const health = await readServerHealth(config.apiBaseUrl);
-      await probeGateway(config.gatewayUrl);
-      const nextConfig = {
-        ...config,
-        savedAt: new Date().toISOString(),
-        serverVersion: health.version,
-      };
-      await window.bakerDesktop?.saveServer(nextConfig);
-      setServerConfig(nextConfig);
-      setServerVersionWarning(
-        isServerVersionGreaterThanClient(health.version, appVersion)
-          ? `Server ${health.version} is newer than this client ${appVersion}. Check GitHub releases for a matching desktop client.`
-          : null,
+      const outcome = await serverSwitchCoordinatorRef.current.run(
+        target,
+        validateServer,
+        commitActiveServer,
       );
-      setPhase('app');
+      if (outcome.status === 'superseded') return;
+    } catch (err) {
+      setServerReachability((current) => ({ ...current, [serverId]: 'unavailable' }));
+      const message = err instanceof Error ? err.message : 'Failed to connect to Baker server.';
+      setServerNotice(message);
+      void window.bakerDesktop?.logError({
+        message,
+        scope: 'server-switch',
+        stack: err instanceof Error ? err.stack : undefined,
+      });
     } finally {
-      setIsConnecting(false);
+      setBusyServerId((current) => (current === serverId ? null : current));
     }
   }
 
   async function handleConnect() {
-    const appVersion = appInfo?.version ?? '0.0.0';
-
+    let requestServerId: string | null = null;
+    setIsConnecting(true);
+    setBootError(null);
     try {
       const normalized = normalizeServerInput(serverInput);
-      await connectWithConfig(
-        {
-          ...normalized,
-          savedAt: new Date().toISOString(),
-          serverVersion: '0.0.0',
-        },
-        appVersion,
+      const existing = registry.servers.find(
+        (server) => server.apiBaseUrl === normalized.apiBaseUrl && server.id !== editingServerId,
       );
+      if (existing) {
+        throw new Error(`This server is already saved as ${existing.name}.`);
+      }
+
+      const editing = editingServerId && editingServerId !== 'new'
+        ? registry.servers.find((server) => server.id === editingServerId) ?? null
+        : null;
+      const now = new Date().toISOString();
+      const draft = editing
+        ? {
+            ...editing,
+            ...normalized,
+            savedAt: now,
+          }
+        : createDesktopServerEntry(
+            { ...normalized, savedAt: now, serverVersion: '0.0.0' },
+            {
+              id: crypto.randomUUID(),
+              name: 'Baker',
+              now,
+              order: registry.servers.length,
+            },
+          );
+      setBusyServerId(draft.id);
+      requestServerId = draft.id;
+      const outcome = await serverSwitchCoordinatorRef.current.run(
+        draft,
+        validateServer,
+        async (validated) => {
+          if (editing && editing.apiBaseUrl !== validated.apiBaseUrl) {
+            await window.bakerDesktop?.clearServerSession(editing.id);
+          }
+          await commitActiveServer(validated, upsertDesktopServer(registry, validated));
+        },
+      );
+      if (outcome.status === 'superseded') return;
+      const validated = outcome.value;
+      setEditingServerId(null);
+      setIsServerManagerOpen(false);
+      setServerNotice(t('servers.connected_notice', { server: validated.name }));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to connect to Baker server.';
       setBootError(message);
@@ -232,6 +410,9 @@ export function DesktopApp() {
         scope: 'server-connect',
         stack: err instanceof Error ? err.stack : undefined,
       });
+    } finally {
+      setBusyServerId((current) => (current === requestServerId ? null : current));
+      setIsConnecting(false);
     }
   }
 
@@ -308,14 +489,120 @@ export function DesktopApp() {
     }
   }
 
-  async function switchServer() {
-    await useAuthStore.getState().logout();
-    await window.bakerDesktop?.clearSavedServer();
-    setServerConfig(null);
-    setServerVersionWarning(null);
+  function openServerManager() {
+    setPendingRemovalId(null);
+    setEditingServerId(null);
     setBootError(null);
-    setPhase('setup');
+    setIsServerManagerOpen(true);
   }
+
+  function beginAddServer() {
+    setPendingRemovalId(null);
+    setEditingServerId('new');
+    setServerInput('');
+    setBootError(null);
+    setIsServerManagerOpen(true);
+  }
+
+  function beginEditServer(serverId: string) {
+    const server = registry.servers.find((entry) => entry.id === serverId);
+    if (!server) return;
+    setPendingRemovalId(null);
+    setEditingServerId(serverId);
+    setServerInput(server.input);
+    setBootError(null);
+    setIsServerManagerOpen(true);
+  }
+
+  function requestRemoveServer(serverId: string) {
+    setEditingServerId(null);
+    setPendingRemovalId(serverId);
+    setIsServerManagerOpen(true);
+  }
+
+  async function confirmRemoveServer() {
+    if (!pendingRemovalId) return;
+    serverSwitchCoordinatorRef.current.cancel();
+    const wasActive = registry.activeServerId === pendingRemovalId;
+    let nextRegistry = removeDesktopServer(registry, pendingRemovalId);
+    await window.bakerDesktop?.clearServerSession(pendingRemovalId);
+
+    if (wasActive) {
+      const availableFallback = nextRegistry.servers.find(
+        (server) => serverReachability[server.id] === 'available',
+      );
+      if (availableFallback) {
+        nextRegistry = { ...nextRegistry, activeServerId: availableFallback.id };
+      }
+      useGatewayStore.getState().disconnect();
+      useChatStore.getState().reset();
+      useAuthStore.getState().clearRuntimeSession();
+    }
+
+    const saved = (await window.bakerDesktop?.saveServerRegistry(nextRegistry)) ?? nextRegistry;
+    setRegistry(saved);
+    setPendingRemovalId(null);
+
+    if (!wasActive) return;
+    const fallback = saved.servers.find((server) => server.id === saved.activeServerId) ?? null;
+    setServerConfig(fallback);
+    setServerInput(fallback?.input ?? '');
+    setServerVersionWarning(null);
+    if (fallback) {
+      setPhase('app');
+      setIsServerManagerOpen(false);
+    } else {
+      setPhase('setup');
+      setEditingServerId('new');
+    }
+  }
+
+  const authSessionPersistence = useMemo(
+    () =>
+      serverConfig
+        ? createDesktopAuthSessionPersistence(serverConfig.id, () => {
+            setSessionSecurityWarning(
+              'Windows secure storage is unavailable. Sign-in sessions will only be kept until Baker closes.',
+            );
+          })
+        : undefined,
+    [serverConfig],
+  );
+
+  function railState(serverId: string): ServerRailConnectionState {
+    if (serverId === registry.activeServerId) {
+      if (gatewayStatus === 'ready') return 'connected';
+      if (
+        gatewayStatus === 'connecting' ||
+        gatewayStatus === 'authenticating' ||
+        gatewayStatus === 'reconnecting'
+      ) {
+        return 'connecting';
+      }
+      if (gatewayStatus === 'error') return 'error';
+    }
+    const reachability = serverReachability[serverId];
+    if (reachability === 'available') return 'available';
+    if (reachability === 'unavailable') return 'unavailable';
+    return 'connecting';
+  }
+
+  const serverSwitcher: ServerSwitcherModel = {
+    activeServerId: registry.activeServerId,
+    busyServerId,
+    entries: registry.servers.map((server) => ({
+      address: server.apiBaseUrl,
+      id: server.id,
+      name: server.name,
+      state: railState(server.id),
+    })),
+    onAdd: beginAddServer,
+    onEdit: beginEditServer,
+    onManage: openServerManager,
+    onRemove: requestRemoveServer,
+    onRetry: (serverId) => void selectServer(serverId),
+    onSelect: (serverId) => void selectServer(serverId),
+  };
 
   const selectedUpdateVersion =
     updateCatalog?.versions.find((version) => version.tag === selectedUpdateTag) ?? null;
@@ -336,6 +623,132 @@ export function DesktopApp() {
       {isCheckingVersions ? 'Checking...' : updateCatalog?.hasNewer ? 'Update available' : 'Update'}
     </button>
   );
+  const pendingRemovalServer = registry.servers.find((server) => server.id === pendingRemovalId) ?? null;
+  const desktopServerManagerOverlay = isServerManagerOpen ? (
+    <div
+      className="desktop-server-manager-backdrop"
+      role="presentation"
+      onClick={() => {
+        if (!isConnecting) setIsServerManagerOpen(false);
+      }}
+    >
+      <section
+        className="desktop-server-manager"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="desktop-server-manager-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="desktop-server-manager-header">
+          <div>
+            <p className="desktop-boot-eyebrow">Baker Desktop</p>
+            <h2 id="desktop-server-manager-title">{t('servers.manager_title')}</h2>
+            <p>{t('servers.manager_description')}</p>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => setIsServerManagerOpen(false)}
+            disabled={isConnecting}
+          >
+            {t('servers.close')}
+          </button>
+        </header>
+
+        <div className="desktop-server-manager-list">
+          {registry.servers.map((server) => (
+            <div
+              key={server.id}
+              className={`desktop-server-manager-row${registry.activeServerId === server.id ? ' active' : ''}`}
+            >
+              <button
+                type="button"
+                className="desktop-server-manager-main"
+                onClick={() => void selectServer(server.id)}
+                disabled={Boolean(busyServerId)}
+              >
+                <span className={`desktop-server-manager-dot desktop-server-manager-dot--${railState(server.id)}`} />
+                <span>
+                  <strong>{server.name}</strong>
+                  <small>{server.apiBaseUrl}</small>
+                </span>
+                {registry.activeServerId === server.id ? <em>{t('servers.current')}</em> : null}
+              </button>
+              <div className="desktop-server-manager-actions">
+                <button type="button" onClick={() => beginEditServer(server.id)}>
+                  {t('common.edit')}
+                </button>
+                <button type="button" className="danger" onClick={() => requestRemoveServer(server.id)}>
+                  {t('servers.remove_short')}
+                </button>
+              </div>
+            </div>
+          ))}
+          {registry.servers.length === 0 ? (
+            <p className="desktop-server-manager-empty">{t('servers.empty')}</p>
+          ) : null}
+        </div>
+
+        {pendingRemovalServer ? (
+          <div className="desktop-server-remove-confirm" role="alert">
+            <div>
+              <strong>{t('servers.remove_confirm_title', { server: pendingRemovalServer.name })}</strong>
+              <span>{t('servers.remove_confirm_copy')}</span>
+            </div>
+            <div>
+              <button type="button" className="btn-ghost" onClick={() => setPendingRemovalId(null)}>
+                {t('common.cancel')}
+              </button>
+              <button type="button" className="btn-primary danger" onClick={() => void confirmRemoveServer()}>
+                {t('servers.remove')}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {editingServerId ? (
+          <form
+            className="desktop-server-editor"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleConnect();
+            }}
+          >
+            <label className="desktop-server-field">
+              <span>{editingServerId === 'new' ? t('servers.add') : t('servers.edit_address')}</span>
+              <input
+                type="text"
+                value={serverInput}
+                onChange={(event) => setServerInput(event.target.value)}
+                placeholder="example.com or 192.168.1.10:3323"
+                autoFocus
+              />
+              <small>{t('servers.address_hint')}</small>
+            </label>
+            {bootError ? <p className="desktop-boot-error">{bootError}</p> : null}
+            <div className="desktop-server-editor-actions">
+              <button type="button" className="btn-ghost" onClick={() => setEditingServerId(null)}>
+                {t('common.cancel')}
+              </button>
+              <button type="submit" className="btn-primary" disabled={isConnecting}>
+                {isConnecting
+                  ? t('servers.checking')
+                  : editingServerId === 'new'
+                    ? t('servers.add_and_connect')
+                    : t('servers.save_and_connect')}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <footer className="desktop-server-manager-footer">
+            <button type="button" className="btn-primary" onClick={beginAddServer}>
+              {t('servers.add')}
+            </button>
+          </footer>
+        )}
+      </section>
+    </div>
+  ) : null;
   const desktopUpdateOverlay = (
     <>
       {updateNotice ? (
@@ -464,15 +877,34 @@ export function DesktopApp() {
       <DesktopErrorBoundary>
         <>
           <AppRoot
+            key={serverConfig.id}
             apiBaseUrl={serverConfig.apiBaseUrl}
+            authSessionPersistence={authSessionPersistence}
+            authSessionScope={`desktop:${serverConfig.id}`}
             desktopUpdateAction={updateAction}
             gatewayUrl={serverConfig.gatewayUrl}
-            onChangeServer={() => {
-              void switchServer();
-            }}
+            onChangeServer={openServerManager}
             platformApi={platformApi}
+            serverSwitcher={serverSwitcher}
             versionWarning={warning}
           />
+          {desktopServerManagerOverlay}
+          {serverNotice ? (
+            <div className="desktop-server-notice" role="status">
+              <span>{serverNotice}</span>
+              <button type="button" onClick={() => setServerNotice(null)} aria-label="Dismiss">
+                ×
+              </button>
+            </div>
+          ) : null}
+          {sessionSecurityWarning ? (
+            <div className="desktop-session-warning" role="status">
+              <span>{sessionSecurityWarning}</span>
+              <button type="button" onClick={() => setSessionSecurityWarning(null)} aria-label="Dismiss">
+                ×
+              </button>
+            </div>
+          ) : null}
           {desktopUpdateOverlay}
         </>
       </DesktopErrorBoundary>

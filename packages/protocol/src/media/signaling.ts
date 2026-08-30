@@ -189,12 +189,33 @@ export const MediaModeUpdatedEventDataSchema = z.object({
   reason: z.enum(['admin_changed']),
 });
 
+/**
+ * Rebuild the transport resources for an already-authorized logical media
+ * session without removing the participant/publication from its room.
+ */
+export const MediaSessionReconnectCommandDataSchema = SfuSessionDescriptorSchema;
+
+export const MediaSessionReconnectAckDataSchema = z.object({
+  iceServers: z.array(IceServerSchema),
+  mediaMode: MediaTransportModeSchema,
+  session: SfuSessionDescriptorSchema,
+  sfu: SfuSessionInfoSchema.optional(),
+});
+
+export const MediaSessionRestartedEventDataSchema = z.object({
+  session: SfuSessionDescriptorSchema,
+  userId: z.string().uuid(),
+});
+
 export type IceServer = z.infer<typeof IceServerSchema>;
 export type MediaCapabilities = z.infer<typeof MediaCapabilitiesSchema>;
 export type MediaModeUpdatedEventData = z.infer<typeof MediaModeUpdatedEventDataSchema>;
 export type MediaTransportMode = z.infer<typeof MediaTransportModeSchema>;
 export type MediaSessionDescriptor = z.infer<typeof MediaSessionDescriptorSchema>;
 export type MediaSessionResponse = z.infer<typeof MediaSessionResponseSchema>;
+export type MediaSessionReconnectAckData = z.infer<typeof MediaSessionReconnectAckDataSchema>;
+export type MediaSessionReconnectCommandData = z.infer<typeof MediaSessionReconnectCommandDataSchema>;
+export type MediaSessionRestartedEventData = z.infer<typeof MediaSessionRestartedEventDataSchema>;
 export type MediaSignalCommandData = z.infer<typeof MediaSignalCommandDataSchema>;
 export type MediaSignalPayload = z.infer<typeof MediaSignalPayloadSchema>;
 export type MediaSignalRelayEventData = z.infer<typeof MediaSignalRelayEventDataSchema>;

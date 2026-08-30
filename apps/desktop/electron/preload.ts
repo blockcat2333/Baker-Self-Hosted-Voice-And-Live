@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+import type { AuthSessionSnapshot } from '@baker/client';
+import type { DesktopServerRegistry } from '../src/server-registry';
+
 type UpdateEventPayload = {
   error?: string;
   feedUrl?: string;
@@ -26,14 +29,6 @@ type DesktopUpdateVersionsResponse = {
   latestVersion: string | null;
   repository: string;
   versions: DesktopUpdateVersion[];
-};
-
-type SavedServerConfig = {
-  apiBaseUrl: string;
-  gatewayUrl: string;
-  input: string;
-  savedAt: string;
-  serverVersion: string;
 };
 
 type ScreenSourceSelection = {
@@ -73,8 +68,8 @@ type MusicPickerData = {
 };
 
 contextBridge.exposeInMainWorld('bakerDesktop', {
-  async clearSavedServer() {
-    await ipcRenderer.invoke('desktop:clear-server');
+  async clearServerSession(serverId: string) {
+    await ipcRenderer.invoke('desktop:clear-server-session', serverId);
   },
   async downloadUpdate() {
     await ipcRenderer.invoke('desktop:update-download');
@@ -86,8 +81,14 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
       version: string;
     };
   },
-  async getSavedServer() {
-    return (await ipcRenderer.invoke('desktop:get-saved-server')) as SavedServerConfig | null;
+  async getServerRegistry() {
+    return (await ipcRenderer.invoke('desktop:get-server-registry')) as DesktopServerRegistry;
+  },
+  async getServerSession(serverId: string) {
+    return (await ipcRenderer.invoke('desktop:get-server-session', serverId)) as AuthSessionSnapshot | null;
+  },
+  async getSessionSecurity() {
+    return (await ipcRenderer.invoke('desktop:get-session-security')) as { persistent: boolean };
   },
   async installUpdate() {
     await ipcRenderer.invoke('desktop:update-install');
@@ -109,8 +110,13 @@ contextBridge.exposeInMainWorld('bakerDesktop', {
     await ipcRenderer.invoke('desktop:open-logs');
   },
   platform: 'desktop' as const,
-  async saveServer(config: SavedServerConfig) {
-    return (await ipcRenderer.invoke('desktop:save-server', config)) as SavedServerConfig;
+  async saveServerRegistry(registry: DesktopServerRegistry) {
+    return (await ipcRenderer.invoke('desktop:save-server-registry', registry)) as DesktopServerRegistry;
+  },
+  async saveServerSession(serverId: string, session: AuthSessionSnapshot) {
+    return (await ipcRenderer.invoke('desktop:save-server-session', serverId, session)) as {
+      persisted: boolean;
+    };
   },
   async listUpdateVersions() {
     return (await ipcRenderer.invoke('desktop:update-versions')) as DesktopUpdateVersionsResponse;

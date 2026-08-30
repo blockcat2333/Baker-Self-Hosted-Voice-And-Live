@@ -1,9 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, safeStorage, session, shell } from 'electron';
 import { NsisUpdater } from 'electron-updater';
+
+import type { AuthSessionSnapshot } from '@baker/client';
 
 import { desktopMediaCapturePatchScript, isDesktopMediaPermissionAllowed } from './desktop-media';
 import {
@@ -31,6 +34,18 @@ import {
   isVersionGreater,
   normalizeReleaseTag,
 } from '../src/versioning';
+import {
+  createEmptyServerRegistry,
+  parseDesktopServerRegistry,
+  type DesktopServerRegistry,
+} from '../src/server-registry';
+import {
+  createEmptyEncryptedSessionFile,
+  decryptAuthSession,
+  encryptAuthSession,
+  isAuthSessionSnapshot,
+  parseEncryptedSessionFile,
+} from './server-session-vault';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const releaseBaseUrl =
@@ -38,6 +53,7 @@ const releaseBaseUrl =
 const githubReleasesUrl =
   'https://api.github.com/repos/blockcat2333/Baker-Self-Hosted-Voice-And-Live/releases?per_page=100';
 const serverConfigFile = 'server.json';
+const serverSessionFile = 'server-sessions.json';
 
 function getDesktopIconPath() {
   if (app.isPackaged) {
@@ -45,14 +61,6 @@ function getDesktopIconPath() {
   }
 
   return path.resolve(currentDirectory, '../../build/icons/baker-icon.png');
-}
-
-interface SavedServerConfig {
-  apiBaseUrl: string;
-  gatewayUrl: string;
-  input: string;
-  serverVersion: string;
-  savedAt: string;
 }
 
 interface UpdateEventPayload {
@@ -118,6 +126,56 @@ let activeMusicPicker:
 
 function getServerConfigPath() {
   return path.join(app.getPath('userData'), serverConfigFile);
+}
+
+function getServerSessionPath() {
+  return path.join(app.getPath('userData'), serverSessionFile);
+}
+
+const inMemoryServerSessions = new Map<string, AuthSessionSnapshot>();
+let serverSessionWriteQueue: Promise<void> = Promise.resolve();
+
+async function writeDesktopJson(filePath: string, value: unknown) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, JSON.stringify(value, null, 2), 'utf8');
+}
+
+async function readServerRegistry(): Promise<DesktopServerRegistry> {
+  try {
+    const raw = await fs.readFile(getServerConfigPath(), 'utf8');
+    const parsed = parseDesktopServerRegistry(JSON.parse(raw) as unknown, randomUUID);
+    if (parsed.migrated) {
+      await writeDesktopJson(getServerConfigPath(), parsed.registry);
+    }
+    return parsed.registry;
+  } catch {
+    return createEmptyServerRegistry();
+  }
+}
+
+async function writeServerRegistry(value: unknown): Promise<DesktopServerRegistry> {
+  const parsed = parseDesktopServerRegistry(value, randomUUID).registry;
+  await writeDesktopJson(getServerConfigPath(), parsed);
+  return parsed;
+}
+
+async function readEncryptedSessions() {
+  try {
+    const raw = await fs.readFile(getServerSessionPath(), 'utf8');
+    return parseEncryptedSessionFile(JSON.parse(raw) as unknown);
+  } catch {
+    return createEmptyEncryptedSessionFile();
+  }
+}
+
+function updateEncryptedSessions(update: (vault: Awaited<ReturnType<typeof readEncryptedSessions>>) => void) {
+  const operation = serverSessionWriteQueue.then(async () => {
+    const vault = await readEncryptedSessions();
+    update(vault);
+    await writeDesktopJson(getServerSessionPath(), vault);
+  });
+  serverSessionWriteQueue = operation.catch(() => undefined);
+  return operation;
 }
 
 function getLogFilePath() {
@@ -1651,27 +1709,66 @@ app.whenReady().then(async () => {
     version: app.getVersion(),
   }));
 
-  ipcMain.handle('desktop:get-saved-server', async () => {
-    try {
-      const raw = await fs.readFile(getServerConfigPath(), 'utf8');
-      return JSON.parse(raw) as SavedServerConfig;
-    } catch {
-      return null;
-    }
+  ipcMain.handle('desktop:get-server-registry', async () => {
+    return readServerRegistry();
   });
 
-  ipcMain.handle('desktop:save-server', async (_event, config: SavedServerConfig) => {
-    await fs.mkdir(app.getPath('userData'), { recursive: true });
-    await fs.writeFile(getServerConfigPath(), JSON.stringify(config, null, 2), 'utf8');
-    return config;
+  ipcMain.handle('desktop:save-server-registry', async (_event, registry: unknown) => {
+    return writeServerRegistry(registry);
   });
 
-  ipcMain.handle('desktop:clear-server', async () => {
-    try {
-      await fs.unlink(getServerConfigPath());
-    } catch {
-      // Already cleared.
+  ipcMain.handle('desktop:get-session-security', async () => ({
+    persistent: safeStorage.isEncryptionAvailable(),
+  }));
+
+  ipcMain.handle('desktop:get-server-session', async (_event, serverId: string) => {
+    if (typeof serverId !== 'string' || !serverId) return null;
+    const memorySession = inMemoryServerSessions.get(serverId);
+    if (memorySession) return memorySession;
+    if (!safeStorage.isEncryptionAvailable()) return null;
+
+    await serverSessionWriteQueue;
+    const vault = await readEncryptedSessions();
+    const encrypted = vault.sessions[serverId];
+    if (!encrypted) return null;
+    const sessionSnapshot = decryptAuthSession(safeStorage, encrypted);
+    if (sessionSnapshot) {
+      inMemoryServerSessions.set(serverId, sessionSnapshot);
+      return sessionSnapshot;
     }
+
+    await updateEncryptedSessions((current) => {
+      delete current.sessions[serverId];
+    });
+    await writeLog('auth', `Discarded an unreadable encrypted session for server ${serverId}.`);
+    return null;
+  });
+
+  ipcMain.handle('desktop:save-server-session', async (_event, serverId: string, value: unknown) => {
+    if (typeof serverId !== 'string' || !serverId || !isAuthSessionSnapshot(value)) {
+      throw new Error('Invalid desktop server session.');
+    }
+    inMemoryServerSessions.set(serverId, value);
+    if (!safeStorage.isEncryptionAvailable()) {
+      await updateEncryptedSessions((vault) => {
+        delete vault.sessions[serverId];
+      });
+      return { persisted: false };
+    }
+
+    const encrypted = encryptAuthSession(safeStorage, value);
+    await updateEncryptedSessions((vault) => {
+      vault.sessions[serverId] = encrypted;
+    });
+    return { persisted: true };
+  });
+
+  ipcMain.handle('desktop:clear-server-session', async (_event, serverId: string) => {
+    if (typeof serverId !== 'string' || !serverId) return;
+    inMemoryServerSessions.delete(serverId);
+    await updateEncryptedSessions((vault) => {
+      delete vault.sessions[serverId];
+    });
   });
 
   ipcMain.handle('desktop:update-versions', async () => {

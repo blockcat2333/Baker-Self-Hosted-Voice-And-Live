@@ -4,7 +4,8 @@ type VoiceSfxType =
   | 'self_join'
   | 'self_leave'
   | 'peer_join'
-  | 'peer_leave';
+  | 'peer_leave'
+  | 'recovery_failed';
 
 let audioContext: AudioContext | null = null;
 
@@ -86,6 +87,11 @@ export function playVoiceSfx(type: VoiceSfxType): void {
     case 'peer_leave':
       playTone(ctx, 610, now, 0.08, 0.03);
       playTone(ctx, 430, now + 0.09, 0.1, 0.03);
+      break;
+    case 'recovery_failed':
+      playTone(ctx, 520, now, 0.12, 0.05);
+      playTone(ctx, 390, now + 0.14, 0.14, 0.05);
+      playTone(ctx, 290, now + 0.3, 0.18, 0.055);
       break;
   }
 }

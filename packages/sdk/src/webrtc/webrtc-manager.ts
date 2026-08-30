@@ -33,6 +33,7 @@ export type PeerConnectionFactory = (iceServers: RTCIceServer[]) => RTCPeerConne
 export interface CreateOfferOptions {
   degradationPreference?: RTCDegradationPreference;
   maxVideoBitrateKbps?: number;
+  maxVideoFramerate?: number;
   preferredVideoCodec?: VideoCodecPreference;
 }
 
@@ -106,6 +107,47 @@ function readCodecLabel(record: RTCStats | null): string | null {
 
   const slashIndex = mimeType.indexOf('/');
   return slashIndex >= 0 ? mimeType.slice(slashIndex + 1).toUpperCase() : mimeType.toUpperCase();
+}
+
+export function summarizeVideoReceiveStats(
+  reports: Iterable<RTCStatsReport>,
+): PeerVideoReceiveSample | null {
+  for (const report of reports) {
+    const stats: RTCStats[] = [];
+    report.forEach((stat) => stats.push(stat));
+
+    const inboundVideo = stats.find((stat) => {
+      if (stat.type !== 'inbound-rtp') return false;
+      return (readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType')) === 'video';
+    }) ?? null;
+    const trackVideo = stats.find((stat) => {
+      if ((stat.type as string) !== 'track') return false;
+      return (readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType')) === 'video';
+    }) ?? null;
+    const primary = inboundVideo ?? trackVideo;
+    if (!primary) continue;
+
+    const codecId = readStringField(primary, 'codecId');
+    const codecStat = codecId ? stats.find((stat) => stat.id === codecId) ?? null : null;
+    const dimensions = trackVideo ?? inboundVideo ?? primary;
+    const jitter = readNumberField(primary, 'jitter');
+
+    return {
+      bytesReceived: readNumberField(primary, 'bytesReceived'),
+      codec: readCodecLabel(codecStat) ?? readCodecLabel(primary),
+      frameHeight: readNumberField(dimensions, 'frameHeight'),
+      frameWidth: readNumberField(dimensions, 'frameWidth'),
+      framesDecoded: readNumberField(primary, 'framesDecoded'),
+      framesDropped: readNumberField(dimensions, 'framesDropped') ?? readNumberField(primary, 'framesDropped'),
+      framesPerSecond: readNumberField(dimensions, 'framesPerSecond') ?? readNumberField(primary, 'framesPerSecond'),
+      jitterMs: jitter === null ? null : Math.round(jitter * 1000),
+      packetsLost: readNumberField(primary, 'packetsLost'),
+      packetsReceived: readNumberField(primary, 'packetsReceived'),
+      timestampMs: Number.isFinite(primary.timestamp) ? Math.round(primary.timestamp) : null,
+    };
+  }
+
+  return null;
 }
 
 export function summarizeAggregateVideoSendStats(
@@ -416,15 +458,17 @@ export class WebRtcManager {
 
   private async applyVideoSenderParameters(
     pc: RTCPeerConnection,
-    options: Pick<CreateOfferOptions, 'degradationPreference' | 'maxVideoBitrateKbps'>,
+    options: Pick<CreateOfferOptions, 'degradationPreference' | 'maxVideoBitrateKbps' | 'maxVideoFramerate'>,
   ): Promise<void> {
     const hasBitrate = Number.isFinite(options.maxVideoBitrateKbps) && (options.maxVideoBitrateKbps ?? 0) > 0;
+    const hasFramerate = Number.isFinite(options.maxVideoFramerate) && (options.maxVideoFramerate ?? 0) > 0;
     const hasDegradationPreference = typeof options.degradationPreference === 'string';
-    if (!hasBitrate && !hasDegradationPreference) {
+    if (!hasBitrate && !hasFramerate && !hasDegradationPreference) {
       return;
     }
 
     const targetBps = hasBitrate ? Math.round((options.maxVideoBitrateKbps ?? 0) * 1000) : null;
+    const targetFps = hasFramerate ? Math.round(options.maxVideoFramerate ?? 0) : null;
     const videoSenders = pc.getSenders().filter((sender) => sender.track?.kind === 'video');
 
     for (const sender of videoSenders) {
@@ -438,6 +482,7 @@ export class WebRtcManager {
         const nextEncodings = currentEncodings.map((encoding) => ({
           ...encoding,
           ...(targetBps ? { maxBitrate: targetBps } : {}),
+          ...(targetFps ? { maxFramerate: targetFps } : {}),
         }));
         await sender.setParameters({
           ...current,
@@ -491,7 +536,7 @@ export class WebRtcManager {
       this.applyVideoCodecPreferences(pc, options.preferredVideoCodec);
     }
 
-    if (options?.maxVideoBitrateKbps || options?.degradationPreference) {
+    if (options?.maxVideoBitrateKbps || options?.maxVideoFramerate || options?.degradationPreference) {
       await this.applyVideoSenderParameters(pc, options);
     }
 
@@ -755,63 +800,7 @@ export class WebRtcManager {
       return null;
     }
 
-    const stats: RTCStats[] = [];
-    report.forEach((stat) => {
-      stats.push(stat);
-    });
-
-    let inboundVideo: RTCStats | null = null;
-    let trackVideo: RTCStats | null = null;
-
-    for (const stat of stats) {
-      if (stat.type === 'inbound-rtp') {
-        const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-        if (kind === 'video') {
-          inboundVideo = stat;
-          break;
-        }
-      }
-    }
-
-    for (const stat of stats) {
-      if ((stat.type as string) !== 'track') continue;
-      const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-      if (kind === 'video') {
-        trackVideo = stat;
-        break;
-      }
-    }
-
-    if (!inboundVideo && !trackVideo) {
-      return null;
-    }
-
-    const primaryVideoStat = inboundVideo ?? trackVideo;
-    if (!primaryVideoStat) {
-      return null;
-    }
-
-    const codecId = readStringField(primaryVideoStat, 'codecId');
-    const codecStat = codecId ? stats.find((stat) => stat.id === codecId) ?? null : null;
-
-    return {
-      bytesReceived: readNumberField(primaryVideoStat, 'bytesReceived'),
-      codec: readCodecLabel(codecStat),
-      frameHeight: readNumberField(trackVideo ?? inboundVideo!, 'frameHeight'),
-      frameWidth: readNumberField(trackVideo ?? inboundVideo!, 'frameWidth'),
-      framesDecoded: readNumberField(primaryVideoStat, 'framesDecoded'),
-      framesDropped: readNumberField(trackVideo ?? inboundVideo!, 'framesDropped'),
-      framesPerSecond: readNumberField(trackVideo ?? inboundVideo!, 'framesPerSecond'),
-      jitterMs:
-        readNumberField(primaryVideoStat, 'jitter') !== null
-          ? Math.round((readNumberField(primaryVideoStat, 'jitter') ?? 0) * 1000)
-          : null,
-      packetsLost: readNumberField(primaryVideoStat, 'packetsLost'),
-      packetsReceived: readNumberField(primaryVideoStat, 'packetsReceived'),
-      timestampMs: Number.isFinite(primaryVideoStat.timestamp)
-        ? Math.round(primaryVideoStat.timestamp)
-        : null,
-    };
+    return summarizeVideoReceiveStats([report]);
   }
 
   /**

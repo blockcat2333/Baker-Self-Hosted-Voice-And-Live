@@ -199,6 +199,18 @@ describe('gateway popup cleanup', () => {
     expect(useGatewayStore.getState().gatewayRttMs).toBe(0);
   });
 
+  it('closes a half-open gateway after three consecutive missing pongs', () => {
+    useGatewayStore.getState().connect({} as never, 'ws://gateway.example.test/ws');
+    useGatewayStore.setState({ status: 'authenticating' });
+    clientRefs.latest?.emitEnvelope({ data: {}, op: 'ack', reqId: 'req-auth' });
+
+    vi.advanceTimersByTime(15_100);
+
+    expect(useGatewayStore.getState().status).toBe('reconnecting');
+    expect(handleVoiceGatewayWillReconnect).toHaveBeenCalledOnce();
+    expect(handleStreamGatewayWillReconnect).toHaveBeenCalledOnce();
+  });
+
   it('stores voice roster snapshots from gateway events', () => {
     const channelId = '11111111-1111-4111-8111-111111111111';
     useGatewayStore.getState().connect({} as never, 'ws://gateway.example.test/ws');

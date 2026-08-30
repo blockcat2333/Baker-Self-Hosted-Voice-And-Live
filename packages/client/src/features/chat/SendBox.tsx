@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiClient } from '@baker/sdk';
 
 import { useChatStore } from './chat-store';
+import { Tooltip } from './Tooltip';
 
 export interface SendBoxProps {
   api: ApiClient;
@@ -13,7 +14,14 @@ export interface SendBoxProps {
 export function SendBox({ api, channelId }: SendBoxProps) {
   const { t } = useTranslation();
   const [text, setText] = useState('');
+  const [showAttachmentHint, setShowAttachmentHint] = useState(false);
   const sendMessage = useChatStore((s) => s.sendMessage);
+
+  useEffect(() => {
+    if (!showAttachmentHint) return;
+    const timer = window.setTimeout(() => setShowAttachmentHint(false), 1_600);
+    return () => window.clearTimeout(timer);
+  }, [showAttachmentHint]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,9 +44,16 @@ export function SendBox({ api, channelId }: SendBoxProps) {
 
   return (
     <form className="send-box" onSubmit={handleSubmit}>
-      <span className="send-box-add" aria-hidden="true">
-        +
-      </span>
+      <Tooltip label={t('chat.file_transfer_in_development')} open={showAttachmentHint}>
+        <button
+          type="button"
+          className="send-box-add"
+          aria-label={t('chat.file_transfer_in_development')}
+          onClick={() => setShowAttachmentHint(true)}
+        >
+          <span aria-hidden="true">+</span>
+        </button>
+      </Tooltip>
       <textarea
         className="send-input"
         value={text}

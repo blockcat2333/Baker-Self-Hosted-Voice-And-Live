@@ -38,6 +38,7 @@ vi.mock('./music-media', () => ({
 }));
 
 import { useAuthStore } from '../auth/auth-store';
+import { resetMediaRecoveryStore } from '../recovery/recovery-store';
 import { useMusicStore } from './music-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
@@ -161,6 +162,7 @@ beforeEach(() => {
 
 afterEach(() => {
   useMusicStore.getState().reset();
+  resetMediaRecoveryStore();
   useAuthStore.setState({
     accessToken: null,
     error: null,
@@ -236,6 +238,69 @@ describe('music store playback', () => {
     expect(audioElements[0]?.volume).toBe(1);
   });
 
+  it('applies one playback volume to multiple remote music streams', async () => {
+    const secondMusicId = '77777777-7777-4777-8777-777777777777';
+    const secondHostUserId = '88888888-8888-4888-8888-888888888888';
+    const secondHostSessionId = '99999999-9999-4999-8999-999999999999';
+    const sendCommandAwaitAck = vi.fn(async (_command: string, data: unknown) => {
+      const requestedMusicId = (data as { musicId: string }).musicId;
+      return {
+        channelId,
+        hostSessionId: requestedMusicId === musicId ? hostSessionId : secondHostSessionId,
+        hostUserId: requestedMusicId === musicId ? hostUserId : secondHostUserId,
+        iceServers: [],
+        mediaMode: 'p2p',
+        musicId: requestedMusicId,
+        sessionId: listenerSessionId,
+      };
+    });
+
+    useMusicStore.getState().handleMusicStateUpdated(
+      { channelId, publications: [publication()] },
+      sendCommandAwaitAck,
+      vi.fn(),
+    );
+    await flushPromises();
+    const firstTrack = createTrack('first-remote-music-track');
+    latestCallbacks?.onRemoteTrack?.(
+      hostUserId,
+      firstTrack,
+      [new MockMediaStream([firstTrack]) as unknown as MediaStream],
+    );
+
+    useMusicStore.getState().handleMusicStateUpdated(
+      {
+        channelId,
+        publications: [
+          {
+            ...publication(),
+            listeners: [{ sessionId: listenerSessionId, userId: listenerUserId }],
+          },
+          {
+            ...publication(),
+            hostUserId: secondHostUserId,
+            listeners: [{ sessionId: listenerSessionId, userId: listenerUserId }],
+            musicId: secondMusicId,
+            sessionId: secondHostSessionId,
+          },
+        ],
+      },
+      sendCommandAwaitAck,
+      vi.fn(),
+    );
+    await flushPromises();
+    const secondTrack = createTrack('second-remote-music-track');
+    latestCallbacks?.onRemoteTrack?.(
+      secondHostUserId,
+      secondTrack,
+      [new MockMediaStream([secondTrack]) as unknown as MediaStream],
+    );
+
+    expect(audioElements).toHaveLength(2);
+    useMusicStore.getState().setPlaybackVolume(0.35);
+    expect(audioElements.map((audio) => audio.volume)).toEqual([0.35, 0.35]);
+  });
+
   it('clamps stored playback volume before writing it to a remote audio element', async () => {
     const sendCommandAwaitAck = vi.fn().mockResolvedValue({
       channelId,
@@ -261,5 +326,39 @@ describe('music store playback', () => {
 
     expect(() => latestCallbacks?.onRemoteTrack?.(hostUserId, track, [stream])).not.toThrow();
     expect(audioElements[0]?.volume).toBe(1);
+  });
+
+  it('preserves playback intent and volume across a gateway reconnect', async () => {
+    const sendRawCommand = vi.fn();
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      hostSessionId,
+      hostUserId,
+      iceServers: [],
+      mediaMode: 'p2p',
+      musicId,
+      sessionId: listenerSessionId,
+    });
+    useMusicStore.getState().setPlaybackVolume(0.4);
+    useMusicStore.getState().handleMusicStateUpdated(
+      { channelId, publications: [publication()] },
+      sendCommandAwaitAck,
+      sendRawCommand,
+    );
+    await flushPromises();
+
+    useMusicStore.getState().handleGatewayWillReconnect();
+    expect(useMusicStore.getState().listeningById[musicId]).toMatchObject({
+      status: 'reconnecting',
+    });
+
+    await useMusicStore.getState().handleGatewayReconnected();
+    await flushPromises();
+
+    expect(sendCommandAwaitAck).toHaveBeenCalledTimes(2);
+    expect(useMusicStore.getState().listeningById[musicId]).toMatchObject({
+      status: 'listening',
+    });
+    expect(useMusicStore.getState().playbackVolume).toBe(0.4);
   });
 });

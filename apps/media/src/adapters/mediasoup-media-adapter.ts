@@ -30,6 +30,23 @@ const mediaCodecs: RouterMediaCodec[] = [
   {
     clockRate: 90000,
     kind: 'video',
+    mimeType: 'video/H264',
+    parameters: {
+      'level-asymmetry-allowed': 1,
+      'packetization-mode': 1,
+      'profile-level-id': '42e01f',
+    },
+    rtcpFeedback: [
+      { type: 'nack' },
+      { parameter: 'pli', type: 'nack' },
+      { type: 'ccm', parameter: 'fir' },
+      { type: 'goog-remb' },
+      { type: 'transport-cc' },
+    ],
+  },
+  {
+    clockRate: 90000,
+    kind: 'video',
     mimeType: 'video/VP8',
     parameters: {
       'x-google-start-bitrate': 1000,
@@ -45,12 +62,22 @@ const mediaCodecs: RouterMediaCodec[] = [
   {
     clockRate: 90000,
     kind: 'video',
-    mimeType: 'video/H264',
+    mimeType: 'video/VP9',
     parameters: {
-      'level-asymmetry-allowed': 1,
-      'packetization-mode': 1,
-      'profile-level-id': '42e01f',
+      'profile-id': 0,
     },
+    rtcpFeedback: [
+      { type: 'nack' },
+      { parameter: 'pli', type: 'nack' },
+      { type: 'ccm', parameter: 'fir' },
+      { type: 'goog-remb' },
+      { type: 'transport-cc' },
+    ],
+  },
+  {
+    clockRate: 90000,
+    kind: 'video',
+    mimeType: 'video/AV1',
     rtcpFeedback: [
       { type: 'nack' },
       { parameter: 'pli', type: 'nack' },

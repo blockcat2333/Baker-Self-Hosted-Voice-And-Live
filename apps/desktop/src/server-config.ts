@@ -12,6 +12,10 @@ export interface ServerHealth {
   version: string;
 }
 
+export interface ServerIdentity {
+  serverName: string;
+}
+
 export { isServerVersionGreaterThanClient, isVersionGreater } from './versioning';
 
 const HEALTH_TIMEOUT_MS = 15000;
@@ -102,6 +106,31 @@ export async function readServerHealth(
     };
   } catch (error) {
     throw explainFetchError(error, healthUrl, timeoutMs);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function readServerIdentity(
+  apiBaseUrl: string,
+  timeoutMs = HEALTH_TIMEOUT_MS,
+): Promise<ServerIdentity> {
+  const controller = new AbortController();
+  const configUrl = `${apiBaseUrl}/v1/meta/public-config`;
+  const timeout = setTimeout(() => controller.abort(createTimeoutReason(configUrl, timeoutMs)), timeoutMs);
+
+  try {
+    const response = await fetch(configUrl, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Server identity check failed with HTTP ${response.status}.`);
+    }
+    const data = (await response.json()) as Partial<ServerIdentity>;
+    if (typeof data.serverName !== 'string' || !data.serverName.trim()) {
+      throw new Error('Server did not return a valid Baker name.');
+    }
+    return { serverName: data.serverName.trim() };
+  } catch (error) {
+    throw explainFetchError(error, configUrl, timeoutMs);
   } finally {
     clearTimeout(timeout);
   }

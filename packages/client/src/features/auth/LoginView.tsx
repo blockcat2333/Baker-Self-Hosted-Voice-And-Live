@@ -7,6 +7,7 @@ import type { PublicServerConfig } from '@baker/protocol';
 import { useAuthStore } from './auth-store';
 
 export interface LoginViewProps {
+  allowRememberCredentials?: boolean;
   api: ApiClient;
   bootstrapError?: string | null;
   desktopUpdateAction?: ReactNode;
@@ -52,7 +53,13 @@ function clearRememberedCredentials() {
   }
 }
 
-export function LoginView({ api, publicConfig, bootstrapError, desktopUpdateAction }: LoginViewProps) {
+export function LoginView({
+  allowRememberCredentials = true,
+  api,
+  publicConfig,
+  bootstrapError,
+  desktopUpdateAction,
+}: LoginViewProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -66,6 +73,10 @@ export function LoginView({ api, publicConfig, bootstrapError, desktopUpdateActi
   const displayedError = localError ?? error ?? bootstrapError ?? null;
 
   useEffect(() => {
+    if (!allowRememberCredentials) {
+      clearRememberedCredentials();
+      return;
+    }
     const remembered = loadRememberedCredentials();
     if (!remembered) {
       return;
@@ -75,9 +86,13 @@ export function LoginView({ api, publicConfig, bootstrapError, desktopUpdateActi
     setPassword(remembered.password);
     setUsername(remembered.username);
     setRememberCredentials(true);
-  }, []);
+  }, [allowRememberCredentials]);
 
   function persistCredentialsAfterSuccess() {
+    if (!allowRememberCredentials) {
+      clearRememberedCredentials();
+      return;
+    }
     if (rememberCredentials) {
       saveRememberedCredentials({ email, password, username });
     } else {
@@ -200,14 +215,16 @@ export function LoginView({ api, publicConfig, bootstrapError, desktopUpdateActi
             </label>
           )}
 
-          <label className="login-remember-row">
-            <input
-              type="checkbox"
-              checked={rememberCredentials}
-              onChange={(event) => setRememberCredentials(event.target.checked)}
-            />
-            <span>{t('auth.remember_credentials')}</span>
-          </label>
+          {allowRememberCredentials ? (
+            <label className="login-remember-row">
+              <input
+                type="checkbox"
+                checked={rememberCredentials}
+                onChange={(event) => setRememberCredentials(event.target.checked)}
+              />
+              <span>{t('auth.remember_credentials')}</span>
+            </label>
+          ) : null}
 
           {displayedError ? <p className="login-error">{displayedError}</p> : null}
 

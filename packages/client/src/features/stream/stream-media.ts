@@ -39,7 +39,7 @@ type ElectronMediaTrackConstraints = MediaTrackConstraints & {
   mandatory: Record<string, number | string>;
 };
 
-export const DEFAULT_STREAM_CODEC_PREFERENCE: StreamCodecPreference = 'default';
+export const DEFAULT_STREAM_CODEC_PREFERENCE: StreamCodecPreference = 'h264';
 export const DEFAULT_STREAM_QUALITY: StreamQualitySettings = {
   bitrateKbps: 4000,
   frameRate: 30,
@@ -50,7 +50,19 @@ export const DEFAULT_CAMERA_SELECTION: CameraSelection = { kind: 'default' };
 export const STREAM_RESOLUTION_OPTIONS: StreamQualitySettings['resolution'][] = ['480p', '720p', '1080p', '1440p'];
 export const STREAM_FRAME_RATE_OPTIONS: StreamQualitySettings['frameRate'][] = [15, 30, 60];
 export const STREAM_BITRATE_OPTIONS: StreamQualitySettings['bitrateKbps'][] = [2000, 4000, 6000, 10000, 16000];
-export const STREAM_CODEC_OPTIONS: StreamCodecPreference[] = ['default', 'h264', 'vp8', 'vp9', 'av1'];
+export const STREAM_CODEC_OPTIONS: StreamCodecPreference[] = ['h264', 'vp8', 'vp9', 'av1'];
+
+export function getSupportedStreamCodecPreferences(): StreamCodecPreference[] {
+  if (typeof RTCRtpSender === 'undefined' || typeof RTCRtpSender.getCapabilities !== 'function') {
+    return typeof window === 'undefined' || Boolean((window as DesktopWindowLike).bakerDesktop)
+      ? [...STREAM_CODEC_OPTIONS]
+      : [];
+  }
+  const supported = new Set(
+    (RTCRtpSender.getCapabilities('video')?.codecs ?? []).map((codec) => codec.mimeType.toLowerCase()),
+  );
+  return STREAM_CODEC_OPTIONS.filter((codec) => supported.has(`video/${codec}`));
+}
 
 const dimensionsByResolution: Record<StreamQualitySettings['resolution'], { height: number; width: number }> = {
   '480p': { height: 480, width: 854 },
@@ -231,7 +243,7 @@ export function buildElectronScreenCaptureConstraints(
       maxFrameRate: quality.frameRate,
       maxHeight: dimensions.height,
       maxWidth: dimensions.width,
-      minFrameRate: Math.min(15, quality.frameRate),
+      minFrameRate: Math.min(30, quality.frameRate),
     },
   };
 

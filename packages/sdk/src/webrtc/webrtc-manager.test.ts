@@ -1,0 +1,110 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { summarizeVideoReceiveStats, WebRtcManager } from './webrtc-manager';
+
+function statsReport(records: Array<Record<string, unknown>>): RTCStatsReport {
+  const map = new Map(records.map((record) => [String(record.id), record]));
+  return map as unknown as RTCStatsReport;
+}
+
+describe('video receive stats', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('combines inbound RTP, track, and codec reports', () => {
+    const result = summarizeVideoReceiveStats([
+      statsReport([
+        {
+          bytesReceived: 800_000,
+          codecId: 'codec-1',
+          framesDecoded: 120,
+          id: 'inbound-1',
+          jitter: 0.012,
+          kind: 'video',
+          packetsLost: 3,
+          packetsReceived: 997,
+          timestamp: 2_000,
+          type: 'inbound-rtp',
+        },
+        {
+          frameHeight: 1080,
+          frameWidth: 1920,
+          framesDropped: 4,
+          framesPerSecond: 59.8,
+          id: 'track-1',
+          kind: 'video',
+          type: 'track',
+        },
+        { id: 'codec-1', mimeType: 'video/H264', type: 'codec' },
+      ]),
+    ]);
+
+    expect(result).toEqual({
+      bytesReceived: 800_000,
+      codec: 'H264',
+      frameHeight: 1080,
+      frameWidth: 1920,
+      framesDecoded: 120,
+      framesDropped: 4,
+      framesPerSecond: 59.8,
+      jitterMs: 12,
+      packetsLost: 3,
+      packetsReceived: 997,
+      timestampMs: 2_000,
+    });
+  });
+
+  it('applies the selected codec, bitrate, frame rate, and balanced degradation to a sender', async () => {
+    const setCodecPreferences = vi.fn();
+    const setParameters = vi.fn().mockResolvedValue(undefined);
+    const track = { id: 'video-1', kind: 'video' } as MediaStreamTrack;
+    const sender = {
+      getParameters: () => ({ encodings: [{}] }),
+      setParameters,
+      track,
+    } as unknown as RTCRtpSender;
+    const pc = {
+      addTrack: vi.fn(),
+      close: vi.fn(),
+      connectionState: 'new',
+      createOffer: vi.fn().mockResolvedValue({ sdp: 'offer', type: 'offer' }),
+      getReceivers: () => [],
+      getSenders: () => [sender],
+      getTransceivers: () => [{ sender, setCodecPreferences }],
+      setLocalDescription: vi.fn().mockResolvedValue(undefined),
+    } as unknown as RTCPeerConnection;
+    vi.stubGlobal('RTCRtpSender', {
+      getCapabilities: () => ({
+        codecs: [{ mimeType: 'video/VP8' }, { mimeType: 'video/H264' }],
+      }),
+    });
+    const manager = new WebRtcManager(
+      {
+        onLocalIceCandidate: vi.fn(),
+        onPeerConnectionStateChange: vi.fn(),
+        onRemoteTrack: vi.fn(),
+      },
+      () => pc,
+    );
+
+    await manager.createOffer(
+      'peer-1',
+      { getTracks: () => [track] } as unknown as MediaStream,
+      [],
+      {
+        degradationPreference: 'balanced',
+        maxVideoBitrateKbps: 6_000,
+        maxVideoFramerate: 60,
+        preferredVideoCodec: 'h264',
+      },
+    );
+
+    expect(setCodecPreferences).toHaveBeenCalledWith([
+      expect.objectContaining({ mimeType: 'video/H264' }),
+      expect.objectContaining({ mimeType: 'video/VP8' }),
+    ]);
+    expect(setParameters).toHaveBeenCalledWith(expect.objectContaining({
+      degradationPreference: 'balanced',
+      encodings: [expect.objectContaining({ maxBitrate: 6_000_000, maxFramerate: 60 })],
+    }));
+  });
+});

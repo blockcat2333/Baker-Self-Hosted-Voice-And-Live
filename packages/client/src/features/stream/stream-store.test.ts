@@ -14,6 +14,7 @@ const getPeerVideoReceiveSample = vi.fn();
 const sfuLoad = vi.fn();
 const sfuProduceTracks = vi.fn();
 const sfuGetVideoSendSample = vi.fn();
+const sfuGetVideoReceiveSample = vi.fn();
 const sfuClose = vi.fn();
 const getDisplayMedia = vi.fn();
 const getUserMedia = vi.fn();
@@ -79,6 +80,7 @@ vi.mock('@baker/sdk', () => {
       load = sfuLoad;
       produceTracks = sfuProduceTracks;
       getVideoSendSample = sfuGetVideoSendSample;
+      getVideoReceiveSample = sfuGetVideoReceiveSample;
       close = sfuClose;
     },
     WebRtcManager: MockWebRtcManager,
@@ -86,7 +88,7 @@ vi.mock('@baker/sdk', () => {
 });
 
 import { useAuthStore } from '../auth/auth-store';
-import { getOwnedStreamVideoStats, useStreamStore } from './stream-store';
+import { getOwnedStreamVideoStats, getWatchedStreamVideoStats, useStreamStore } from './stream-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
 const hostUserId = '22222222-2222-4222-8222-222222222222';
@@ -147,6 +149,8 @@ beforeEach(() => {
   sfuProduceTracks.mockResolvedValue(undefined);
   sfuGetVideoSendSample.mockReset();
   sfuGetVideoSendSample.mockResolvedValue(null);
+  sfuGetVideoReceiveSample.mockReset();
+  sfuGetVideoReceiveSample.mockResolvedValue(null);
   sfuClose.mockReset();
   getDisplayMedia.mockReset();
   getUserMedia.mockReset();
@@ -248,10 +252,10 @@ describe('stream store watch startup', () => {
       quality: { bitrateKbps: 10000, frameRate: 60, resolution: '1080p' },
       sourceType: 'screen',
     });
-    expect(localPreviewTrack.contentHint).toBe('detail');
+    expect(localPreviewTrack.contentHint).toBe('motion');
     expect(useStreamStore.getState().ownedStream).toMatchObject({
       channelId,
-      codecPreference: 'default',
+      codecPreference: 'h264',
       quality: { bitrateKbps: 10000, frameRate: 60, resolution: '1080p' },
       sessionId: hostSessionId,
       sourceType: 'screen',
@@ -302,7 +306,7 @@ describe('stream store watch startup', () => {
         maxFrameRate: 60,
         maxHeight: 1080,
         maxWidth: 1920,
-        minFrameRate: 15,
+        minFrameRate: 30,
       },
       width: {
         ideal: 1920,
@@ -539,7 +543,8 @@ describe('stream store watch startup', () => {
       {
         degradationPreference: 'balanced',
         maxVideoBitrateKbps: 10000,
-        preferredVideoCodec: 'default',
+        maxVideoFramerate: 60,
+        preferredVideoCodec: 'h264',
       },
     );
     expect(sendRawCommand).toHaveBeenCalledWith('media.signal.offer', {
@@ -966,7 +971,12 @@ describe('stream store watch startup', () => {
     const second = await getOwnedStreamVideoStats();
 
     expect(sfuLoad).toHaveBeenCalledOnce();
-    expect(sfuProduceTracks).toHaveBeenCalledWith([localPreviewTrack]);
+    expect(sfuProduceTracks).toHaveBeenCalledWith([localPreviewTrack], {
+      degradationPreference: 'balanced',
+      maxVideoBitrateKbps: 6000,
+      maxVideoFramerate: 60,
+      preferredVideoCodec: 'h264',
+    });
     expect(first).toMatchObject({
       activePeerCount: 1,
       bitrateKbps: null,
@@ -1038,9 +1048,66 @@ describe('stream store watch startup', () => {
       {
         degradationPreference: 'balanced',
         maxVideoBitrateKbps: 10000,
+        maxVideoFramerate: 60,
         preferredVideoCodec: 'h264',
       },
     );
+  });
+
+  it('derives SFU viewer codec, frame rate, bitrate, loss, jitter, and dropped frames', async () => {
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId,
+      hostSessionId,
+      hostUserId,
+      iceServers: [],
+      mediaMode: 'sfu',
+      sessionId: viewerSessionId,
+      sfu: { producers: [], routerRtpCapabilities: {} },
+      streamId,
+    });
+    await useStreamStore.getState().watchStream(channelId, streamId, sendCommandAwaitAck, vi.fn());
+    sfuGetVideoReceiveSample
+      .mockResolvedValueOnce({
+        bytesReceived: 1_000,
+        codec: 'H264',
+        frameHeight: 1080,
+        frameWidth: 1920,
+        framesDecoded: 100,
+        framesDropped: 2,
+        framesPerSecond: null,
+        jitterMs: 8,
+        packetsLost: 1,
+        packetsReceived: 999,
+        timestampMs: 1_000,
+      })
+      .mockResolvedValueOnce({
+        bytesReceived: 751_000,
+        codec: 'H264',
+        frameHeight: 1080,
+        frameWidth: 1920,
+        framesDecoded: 160,
+        framesDropped: 3,
+        framesPerSecond: null,
+        jitterMs: 9,
+        packetsLost: 2,
+        packetsReceived: 1_998,
+        timestampMs: 2_000,
+      });
+
+    const first = await getWatchedStreamVideoStats(streamId);
+    const second = await getWatchedStreamVideoStats(streamId);
+
+    expect(first).toMatchObject({ bitrateKbps: null, codec: 'H264', resolution: '1920x1080' });
+    expect(second).toEqual({
+      bitrateKbps: 6000,
+      codec: 'H264',
+      frameRate: 60,
+      framesDropped: 3,
+      jitterMs: 9,
+      packetsLost: 2,
+      packetsReceived: 1_998,
+      resolution: '1920x1080',
+    });
   });
 
   it('does not create an orphaned runtime when unwatch completes before the watch ACK arrives', async () => {

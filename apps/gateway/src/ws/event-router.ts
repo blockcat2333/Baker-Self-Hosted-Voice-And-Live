@@ -42,6 +42,9 @@ import {
   MediaSfuCreateTransportCommandDataSchema,
   MediaSfuProduceCommandDataSchema,
   MediaSfuResumeConsumerCommandDataSchema,
+  MediaSessionReconnectAckDataSchema,
+  MediaSessionReconnectCommandDataSchema,
+  MediaSessionRestartedEventDataSchema,
   MediaSignalCommandDataSchema,
   MusicListenAckDataSchema,
   MusicListenCommandDataSchema,
@@ -230,6 +233,9 @@ export async function routeGatewayMessage(
     case 'media.signal.restart_ice':
     case 'media.signal.end':
       return handleMediaSignalRelay(connection, reqId, data, runtime);
+
+    case 'media.session.reconnect':
+      return handleMediaSessionReconnect(connection, reqId, data, runtime);
 
     case 'media.sfu.create_transport':
       return handleSfuCreateTransport(connection, reqId, data, runtime);
@@ -1539,7 +1545,7 @@ function handleMediaSignalRelay(
   return createAckEnvelope(reqId, { relayed: true, targetUserId });
 }
 
-function validateSfuAccess(
+function validateMediaSessionAccess(
   connection: GatewayConnection,
   runtime: GatewayRuntime,
   descriptor: {
@@ -1550,10 +1556,6 @@ function validateSfuAccess(
   },
 ): boolean {
   const userId = connection.userId as string;
-
-  if (runtime.mediaMode !== 'sfu') {
-    return false;
-  }
 
   if (descriptor.mode === 'voice') {
     const participant = runtime.voiceRoom.getParticipant(descriptor.channelId, userId);
@@ -1571,7 +1573,9 @@ function validateSfuAccess(
     }
 
     if (descriptor.mode === 'music_publish') {
-      return publication.host.userId === userId && publication.host.sessionId === descriptor.sessionId;
+      return publication.host.userId === userId &&
+        publication.host.connectionId === connection.id &&
+        publication.host.sessionId === descriptor.sessionId;
     }
 
     const listener = publication.listeners.get(userId);
@@ -1584,11 +1588,110 @@ function validateSfuAccess(
   }
 
   if (descriptor.mode === 'stream_publish') {
-    return publication.host.userId === userId && publication.host.sessionId === descriptor.sessionId;
+    return publication.host.userId === userId &&
+      publication.host.connectionId === connection.id &&
+      publication.host.sessionId === descriptor.sessionId;
   }
 
   const viewer = publication.viewers.get(userId);
   return Boolean(viewer && viewer.connectionId === connection.id && viewer.sessionId === descriptor.sessionId);
+}
+
+function validateSfuAccess(
+  connection: GatewayConnection,
+  runtime: GatewayRuntime,
+  descriptor: {
+    channelId: string;
+    mode: 'music_listen' | 'music_publish' | 'stream_publish' | 'stream_watch' | 'voice';
+    sessionId: string;
+    streamId?: string;
+  },
+): boolean {
+  return runtime.mediaMode === 'sfu' && validateMediaSessionAccess(connection, runtime, descriptor);
+}
+
+function getMediaSessionAudienceConnectionIds(
+  runtime: GatewayRuntime,
+  descriptor: {
+    channelId: string;
+    mode: 'music_listen' | 'music_publish' | 'stream_publish' | 'stream_watch' | 'voice';
+    streamId?: string;
+  },
+): string[] {
+  if (descriptor.mode === 'voice') {
+    return runtime.voiceRoom.getParticipants(descriptor.channelId).map((participant) => participant.connectionId);
+  }
+  if (!descriptor.streamId) return [];
+  if (descriptor.mode === 'music_listen' || descriptor.mode === 'music_publish') {
+    return runtime.musicRoom.getAudienceConnectionIds(descriptor.channelId, descriptor.streamId);
+  }
+  return runtime.streamRoom.getAudienceConnectionIds(descriptor.channelId, descriptor.streamId);
+}
+
+async function handleMediaSessionReconnect(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = MediaSessionReconnectCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'media.session.reconnect requires a valid active media session descriptor.',
+      reqId,
+      retryable: false,
+    });
+  }
+  const session = parsed.data;
+  if (!validateMediaSessionAccess(connection, runtime, session)) {
+    return createErrorEnvelope({
+      code: 'FORBIDDEN',
+      message: 'Media reconnect is not allowed for this active session.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  try {
+    if (runtime.mediaMode === 'sfu') {
+      await runtime.closeSfuSession(session);
+    }
+    const mediaSession = await runtime.createMediaSession({
+      channelId: session.channelId,
+      mediaRegionId: mediaRegionIdForConnection(connection),
+      mode: session.mode,
+      sessionId: session.sessionId,
+      ...(session.streamId ? { streamId: session.streamId } : {}),
+      userId: connection.userId as string,
+    });
+
+    const eventData = MediaSessionRestartedEventDataSchema.parse({
+      session,
+      userId: connection.userId,
+    });
+    for (const connectionId of getMediaSessionAudienceConnectionIds(runtime, session)) {
+      if (connectionId === connection.id) continue;
+      const target = runtime.connections.getById(connectionId);
+      if (!target) continue;
+      target.socket.send(JSON.stringify(createEventEnvelope(target.nextSequence(), 'media.session.restarted', eventData)));
+    }
+
+    return createAckEnvelope(reqId, MediaSessionReconnectAckDataSchema.parse({
+      iceServers: mediaSession.iceServers,
+      mediaMode: runtime.mediaMode,
+      session,
+      ...(mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
+    }));
+  } catch (err) {
+    log.warn({ err, connectionId: connection.id, mode: session.mode }, 'Media session reconnect failed');
+    return createErrorEnvelope({
+      code: 'MEDIA_NEGOTIATION_TIMEOUT',
+      message: 'Failed to rebuild media session. Retrying is allowed.',
+      reqId,
+      retryable: true,
+    });
+  }
 }
 
 function createSfuForbidden(reqId: string): RouterReply {

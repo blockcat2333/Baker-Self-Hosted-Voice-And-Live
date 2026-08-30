@@ -1,5 +1,6 @@
 import type {
   ConnectionState,
+  Consumer,
   Device,
   Producer,
   Transport,
@@ -23,8 +24,11 @@ import {
 import {
   summarizeAggregateVideoSendStats,
   summarizeLocalOutboundAudioNetworkStats,
+  summarizeVideoReceiveStats,
   type AggregatePeerVideoSendSample,
   type LocalOutboundNetworkSample,
+  type PeerVideoReceiveSample,
+  type VideoCodecPreference,
 } from './webrtc-manager';
 
 interface SfuSessionDescriptor {
@@ -48,11 +52,19 @@ export interface SfuRemoteTrack {
   track: MediaStreamTrack;
 }
 
+export interface SfuProduceTracksOptions {
+  degradationPreference?: RTCDegradationPreference;
+  maxVideoBitrateKbps?: number;
+  maxVideoFramerate?: number;
+  preferredVideoCodec?: VideoCodecPreference;
+}
+
 export class SfuClientSession {
   private device: Device | null = null;
   private recvTransport: Transport | null = null;
   private sendTransport: Transport | null = null;
   private readonly producers = new Map<string, Producer>();
+  private readonly consumers = new Map<string, Consumer>();
   private readonly consumedProducerIds = new Set<string>();
 
   constructor(
@@ -70,15 +82,60 @@ export class SfuClientSession {
     this.device = device;
   }
 
-  async produceTracks(tracks: MediaStreamTrack[]): Promise<void> {
+  async produceTracks(tracks: MediaStreamTrack[], options: SfuProduceTracksOptions = {}): Promise<void> {
     if (tracks.length === 0) {
       return;
     }
 
     const transport = await this.ensureSendTransport();
     for (const track of tracks) {
-      const producer = await transport.produce({ track });
+      const isVideo = track.kind === 'video';
+      const preferredCodec = isVideo ? options.preferredVideoCodec : undefined;
+      const codec = preferredCodec && preferredCodec !== 'default'
+        ? this.requireDevice().rtpCapabilities.codecs?.find(
+          (candidate) => candidate.mimeType.toLowerCase() === `video/${preferredCodec}`,
+        )
+        : undefined;
+      if (preferredCodec && preferredCodec !== 'default' && !codec) {
+        throw new Error(`Selected video codec ${preferredCodec.toUpperCase()} is not supported by this SFU session.`);
+      }
+      const producer = await transport.produce({
+        track,
+        ...(codec ? { codec } : {}),
+        ...(isVideo && (options.maxVideoBitrateKbps || options.maxVideoFramerate)
+          ? {
+              encodings: [{
+                ...(options.maxVideoBitrateKbps
+                  ? { maxBitrate: Math.round(options.maxVideoBitrateKbps * 1000) }
+                  : {}),
+                ...(options.maxVideoFramerate
+                  ? { maxFramerate: Math.round(options.maxVideoFramerate) }
+                  : {}),
+              }],
+            }
+          : {}),
+        ...(isVideo && options.maxVideoBitrateKbps
+          ? {
+              codecOptions: {
+                videoGoogleMaxBitrate: options.maxVideoBitrateKbps,
+                videoGoogleStartBitrate: Math.min(options.maxVideoBitrateKbps, 4_000),
+              },
+            }
+          : {}),
+      });
+      if (isVideo && options.degradationPreference && producer.rtpSender) {
+        try {
+          const parameters = producer.rtpSender.getParameters();
+          await producer.rtpSender.setParameters({
+            ...parameters,
+            degradationPreference: options.degradationPreference,
+          });
+        } catch {
+          // Chromium may reject this before the sender has fully negotiated.
+        }
+      }
       this.producers.set(producer.id, producer);
+      producer.on('transportclose', () => this.producers.delete(producer.id));
     }
   }
 
@@ -129,6 +186,19 @@ export class SfuClientSession {
     return summarizeLocalOutboundAudioNetworkStats(reports);
   }
 
+  async getVideoReceiveSample(): Promise<PeerVideoReceiveSample | null> {
+    const reports: RTCStatsReport[] = [];
+    for (const consumer of this.consumers.values()) {
+      if (consumer.kind !== 'video' || consumer.closed) continue;
+      try {
+        reports.push(await consumer.getStats());
+      } catch {
+        continue;
+      }
+    }
+    return summarizeVideoReceiveStats(reports);
+  }
+
   async consumeProducer(producer: SfuProducer): Promise<SfuRemoteTrack | null> {
     if (this.consumedProducerIds.has(producer.id)) {
       return null;
@@ -150,6 +220,11 @@ export class SfuClientSession {
       rtpParameters: data.rtpParameters as Parameters<Transport['consume']>[0]['rtpParameters'],
     });
     this.consumedProducerIds.add(producer.id);
+    this.consumers.set(consumer.id, consumer);
+    consumer.on('transportclose', () => {
+      this.consumers.delete(consumer.id);
+      this.consumedProducerIds.delete(producer.id);
+    });
     await this.sendCommandAwaitAck('media.sfu.resume_consumer', {
       ...this.descriptor,
       consumerId: data.consumerId,
@@ -166,6 +241,10 @@ export class SfuClientSession {
       producer.close();
     }
     this.producers.clear();
+    for (const consumer of this.consumers.values()) {
+      consumer.close();
+    }
+    this.consumers.clear();
     this.consumedProducerIds.clear();
     this.recvTransport?.close();
     this.sendTransport?.close();

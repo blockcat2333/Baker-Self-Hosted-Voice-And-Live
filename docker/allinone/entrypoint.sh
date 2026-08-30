@@ -39,6 +39,10 @@ validate_turn_settings() {
   fi
 }
 
+configure_caddy() {
+  /opt/baker-allinone/configure-caddy.sh
+}
+
 start_temp_postgres() {
   postgres_start_log="$PGDATA/startup.log"
 
@@ -118,6 +122,7 @@ load_runtime_env
 apply_turn_runtime_overrides
 default_turn_urls_if_needed
 validate_turn_settings
+configure_caddy
 initialize_postgres_cluster
 run_database_migrations
 

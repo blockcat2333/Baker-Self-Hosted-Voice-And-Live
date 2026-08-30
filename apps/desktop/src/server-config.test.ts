@@ -5,7 +5,7 @@ import {
   isServerVersionGreaterThanClient,
   isVersionGreater,
 } from './versioning';
-import { normalizeServerInput, probeGateway, readServerHealth } from './server-config';
+import { normalizeServerInput, probeGateway, readServerHealth, readServerIdentity } from './server-config';
 
 const originalFetch = globalThis.fetch;
 
@@ -100,6 +100,17 @@ describe('desktop server config', () => {
     });
     expect(globalThis.fetch).toHaveBeenCalledWith('http://example.com/health', {
       signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('reads the public server name for the desktop rail', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      json: async () => ({ serverName: 'Control Room' }),
+      ok: true,
+    } as Response);
+
+    await expect(readServerIdentity('http://example.com')).resolves.toEqual({
+      serverName: 'Control Room',
     });
   });
 

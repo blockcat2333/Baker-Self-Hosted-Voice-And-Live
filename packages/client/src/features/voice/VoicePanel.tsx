@@ -269,6 +269,28 @@ function ScreenShareIcon({ className = 'voice-bottom-icon' }: SidebarIconProps) 
   );
 }
 
+function MusicPlaybackIcon({ className = 'sidebar-action-icon' }: SidebarIconProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        d="M9.7 17.3a2.6 2.6 0 1 1-1.6-2.4V6.8l6.7-1.4v8.9a2.6 2.6 0 1 1-1.6-2.4V8.3L8.1 9.4v7.9"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+      <path
+        d="M17.2 8.7a4.5 4.5 0 0 1 0 6.6M19.2 6.7a7.2 7.2 0 0 1 0 10.6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.6"
+      />
+    </svg>
+  );
+}
+
 function HangupIcon({ className = 'voice-bottom-icon' }: SidebarIconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -804,15 +826,34 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
   const stopSharing = useStreamStore((s) => s.stopSharing);
   const inputVolume = useVoiceStore((s) => s.inputVolume);
   const setInputVolume = useVoiceStore((s) => s.setInputVolume);
+  const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
+  const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
+  const listeningById = useMusicStore((s) => s.listeningById);
   const controls = useVoiceControls();
   const lastAudiblePlaybackVolumeRef = useRef(1);
-  const [openVolumeControl, setOpenVolumeControl] = useState<'input' | 'output' | null>(null);
+  const lastAudibleMusicVolumeRef = useRef(1);
+  const [openVolumeControl, setOpenVolumeControl] = useState<'input' | 'music' | 'output' | null>(null);
+  const hasRemoteMusic = Object.values(listeningById).some(
+    (entry) => entry.status === 'starting' || entry.status === 'listening',
+  );
 
   useEffect(() => {
     if (controls.playbackVolume > 0) {
       lastAudiblePlaybackVolumeRef.current = controls.playbackVolume;
     }
   }, [controls.playbackVolume]);
+
+  useEffect(() => {
+    if (musicPlaybackVolume > 0) {
+      lastAudibleMusicVolumeRef.current = musicPlaybackVolume;
+    }
+  }, [musicPlaybackVolume]);
+
+  useEffect(() => {
+    if (!hasRemoteMusic && openVolumeControl === 'music') {
+      setOpenVolumeControl(null);
+    }
+  }, [hasRemoteMusic, openVolumeControl]);
 
   useEffect(() => {
     if (!openVolumeControl) return;
@@ -841,6 +882,7 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
   if (!controls.channelId) return null;
 
   const isSpeakerMuted = controls.playbackVolume === 0;
+  const isMusicMuted = musicPlaybackVolume === 0;
   const latencyLabel = gatewayRttMs === null ? '--' : `${Math.max(0, Math.round(gatewayRttMs))}ms`;
 
   function handleSpeakerToggle() {
@@ -850,6 +892,15 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
       return;
     }
     controls.setPlaybackVolume(0);
+  }
+
+  function handleMusicPlaybackToggle() {
+    if (controls.isConnecting) return;
+    if (isMusicMuted) {
+      setMusicPlaybackVolume(lastAudibleMusicVolumeRef.current || 1);
+      return;
+    }
+    setMusicPlaybackVolume(0);
   }
 
   return (
@@ -990,6 +1041,63 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
             </div>
           ) : null}
         </div>
+        {hasRemoteMusic ? (
+          <div className="voice-bottom-split voice-bottom-split--music">
+            <Tooltip
+              label={isMusicMuted ? t('voice.shared_music_unmute') : t('voice.shared_music_mute')}
+            >
+              <button
+                type="button"
+                className={`voice-bottom-btn voice-bottom-btn--split-main${isMusicMuted ? ' voice-bottom-btn--danger' : ''}`}
+                onClick={handleMusicPlaybackToggle}
+                disabled={controls.isConnecting}
+                aria-label={isMusicMuted ? t('voice.shared_music_unmute') : t('voice.shared_music_mute')}
+                aria-pressed={isMusicMuted}
+              >
+                <MusicPlaybackIcon className="voice-bottom-icon" />
+                {isMusicMuted ? <SlashIcon /> : null}
+              </button>
+            </Tooltip>
+            <Tooltip label={t('voice.shared_music_playback')}>
+              <button
+                type="button"
+                className={`voice-bottom-chevron${openVolumeControl === 'music' ? ' active' : ''}`}
+                aria-label={t('voice.shared_music_playback')}
+                aria-expanded={openVolumeControl === 'music'}
+                aria-haspopup="dialog"
+                onClick={() => setOpenVolumeControl((current) => (current === 'music' ? null : 'music'))}
+              >
+                <ChevronUpIcon />
+              </button>
+            </Tooltip>
+            {openVolumeControl === 'music' ? (
+              <div
+                className="voice-bottom-volume-popover"
+                role="dialog"
+                aria-label={t('voice.shared_music_playback')}
+              >
+                <div className="voice-bottom-volume-header">
+                  <strong>{t('voice.shared_music_playback')}</strong>
+                  <span>{toVoiceVolumePercent(musicPlaybackVolume)}%</span>
+                </div>
+                <input
+                  className="voice-volume-slider"
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(musicPlaybackVolume * 100)}
+                  aria-label={t('voice.shared_music_playback')}
+                  onChange={(event) => setMusicPlaybackVolume(Number(event.target.value) / 100)}
+                />
+                <div className="voice-bottom-volume-scale" aria-hidden="true">
+                  <span>0%</span>
+                  <span>50%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <Tooltip
           label={
             controls.isDesktop

@@ -177,9 +177,9 @@ Migration state:
 - `packages/client/src/features/auth/AccountPanel.tsx`
   - signed-in account surface for viewing email and editing username, with truncation-safe identity layout for long IDs/emails
 - `packages/client/src/features/auth/auth-store.ts`
-  - auth session lifecycle plus authenticated username update wiring and bootstrap recovery (`me -> refresh -> me`); browser tokens now use `sessionStorage`, and logout can revoke the active server session
+  - async pluggable auth-session persistence plus authenticated username update wiring and bootstrap recovery (`me -> refresh -> me`); browser tokens use `sessionStorage`, desktop scopes sessions per server, and generation guards prevent stale server-switch responses from replacing the active session
 - `packages/client/src/features/voice/voice-store.ts`
-  - voice session lifecycle plus local mic gain, global playback volume, per-participant playback volume controls, reconnect hardening (`restart_ice` + auto rejoin after gateway reconnect), preserved mute intent across reconnect, gateway-ready join guard, local media-loss aggregation/self-report, and join/leave/mute/unmute sound cues
+  - voice session lifecycle plus local mic gain, global playback volume, per-participant playback volume controls, 50 ms hysteresis-based speaking detection, reconnect hardening (`restart_ice` + auto rejoin after gateway reconnect), preserved mute intent across reconnect, gateway-ready join guard, local media-loss aggregation/self-report, and join/leave/mute/unmute sound cues
 - `packages/client/src/features/preferences/client-preferences.ts`
   - local browser preference persistence for voice volume, music playback volume, selected camera, stream quality, and stream codec choices under `baker_client_preferences_v1`
 - `packages/client/src/features/voice/voice-sfx.ts`
@@ -191,7 +191,7 @@ Migration state:
 - `packages/client/src/features/stream/stream-media.test.ts`
   - helper coverage for stream playback-volume, stream capture constraint behavior, and quality-based capture presets
 - `packages/client/src/features/voice/VoicePanel.tsx`
-  - voice channel view, compact joined-voice bottom control bar, active-call input/playback volume controls, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
+  - voice channel view, compact joined-voice bottom control bar, active-call input/playback controls, conditional shared-music mute/volume split control, participant list, two-row participant metadata layout, and per-user network metric rendering (`GW RTT/GW Loss/Media Loss`)
 - `packages/client/src/features/chat/MobileTabBar.tsx`
   - phone-width bottom navigation for `Channels` / `Chat` / `Voice` / `More`, including active-voice notification state
 - `packages/client/src/features/chat/ChannelList.tsx`
@@ -213,11 +213,17 @@ Migration state:
 - `packages/client/src/features/chat/SettingsDialog.tsx`
   - shared settings dialog for audio device selection, language switching, desktop server switching, and authenticated sign-out; desktop hides server switching when no `onChangeServer` callback is supplied
 - `apps/desktop/src/DesktopApp.tsx`
-  - Electron renderer shell for server selection, saved-server boot, non-blocking GitHub desktop update prompts, selected-version download/install flow, and handoff into the shared client app
+  - Electron renderer shell for the Discord-style saved-server rail, guarded server switching, 30-second/focus reachability probes, single-layer server management, non-blocking GitHub desktop update prompts, and handoff into the shared client app
+- `apps/desktop/src/server-registry.ts`
+  - versioned multi-server registry parsing, legacy `server.json` migration, stable ordering, upsert, and adjacent fallback selection without storing credentials
+- `apps/desktop/src/desktop-session-persistence.ts`
+  - per-server auth persistence adapter that migrates legacy renderer sessions, removes remembered plaintext credentials, and delegates encrypted storage to Electron IPC
 - `apps/desktop/src/versioning.ts`
   - Baker release-version helpers that compare numeric server tags and lettered client labels according to the documented release rules
 - `apps/desktop/electron/main.ts`
-  - Electron main process for windows, desktop capture IPC, saved server config, logs, and GitHub release/update IPC; desktop update discovery filters for lettered client release labels
+  - Electron main process for windows, desktop capture IPC, server-registry CRUD, per-server `safeStorage` session vault, logs, and GitHub release/update IPC; desktop update discovery filters for lettered client release labels
+- `apps/desktop/electron/server-session-vault.ts`
+  - validates, encrypts, decrypts, and isolates desktop auth-session ciphertext by server ID, rejecting corrupt entries without plaintext fallback
 - `apps/desktop/electron/preload.ts`
   - context-bridge surface for desktop media, logs, saved server config, GitHub update version listing, selected-version update download, and install IPC
 - `apps/desktop/electron/desktop-media.ts`
@@ -335,8 +341,9 @@ Community and release metadata:
 - web client stream runtime now supports owned publish + watched-by-`streamId` state, with watched playback rendered into popup windows owned by the main client runtime
 - web client stream capture now requests camera audio and uses browser echo/noise/gain constraints for stream-audio hardening without forcing local-playback suppression
 - web client publish flow now supports selecting livestream resolution and frame rate before capture, and the requested quality is persisted as stream-session metadata
-- web client publish flow now supports fixed bitrate presets, `1440p`, best-effort codec selection, applies screen-share `contentHint='detail'`, and applies best-effort sender bitrate/degradation-preference hints during publish WebRTC negotiation
-- watched popup viewers now surface live WebRTC receiver stats (codec/resolution/fps/bitrate/loss/jitter/dropped frames) from the active watch runtime
+- web client publish flow now defaults to H.264, exposes only locally supported codecs, and applies the selected codec plus explicit bitrate, frame-rate, and balanced degradation settings to both P2P and SFU senders
+- 60 FPS screen capture uses dynamic-content hints and a post-capture frame-rate constraint; the UI separates target, actual capture, actual send, and receive statistics and warns when the source cannot meet the target
+- watched popup viewers now surface live P2P or SFU receiver stats (codec/resolution/fps/bitrate/loss/jitter/dropped frames) from the active consumer runtime
 - broadcasters now surface local sender diagnostics (target/send fps, bitrate, resolution, preferred-vs-negotiated codec, active peers, limitation reason) from the active publish runtime
 - web client voice runtime now supports local mic gain, app-level playback volume, and per-participant playback volume adjustments without protocol changes
 - web client voice panel latency now uses a unified local-to-server RTT metric sampled from gateway `ping`/`pong` and explicitly renders `0ms`
@@ -347,6 +354,13 @@ Community and release metadata:
 - web login hides registration when public registration is disabled, and the main client header shows the configured server name
 - late voice joiners now receive current stream room snapshots, and voice leave reconciles same-channel stream runtime on the server even if client cleanup did not happen first
 - desktop reuses the shared client shell; its settings/auth/server-switch flows were validated in the real Electron app, and its screen/window plus selective application-audio pickers now use the same dark/purple hierarchy with explicit preview/selection states
+- desktop server switching now uses a versioned multi-server rail and encrypted, per-server sessions; offline targets are probed before switch so current chat/media state is preserved on failure
+- remote shared music uses one persisted playback volume across all received music streams, while mute/restore is exposed from the joined-voice bottom bar
+- local speaking activation now updates within one 50 ms sample and drives both the main voice card and left channel roster with a five-sample release hysteresis
+- gateway liveness uses application-level pong tracking and reconnects after three missed responses with jittered 1/2/4/8/16/30-second backoff
+- voice, livestream publish/watch, and shared-music publish/listen retain their channel, capture/playback intent, mute, and volume through transport failure; P2P uses ICE restart before rebuild and SFU recreates transports/producers/consumers
+- the authenticated `media.session.reconnect` command recreates media resources under the same logical session and emits `media.session.restarted`; older servers use a compatibility re-entry path
+- after five failed recovery attempts the shared client plays one alert and shows a persistent retry/abandon dialog while 30-second background retries continue; successful recovery closes the incident automatically
 - channel `voiceQuality` is now persisted/admin-managed, but it is not yet applied to actual live voice media behavior
 
 Temporary compatibility layer:

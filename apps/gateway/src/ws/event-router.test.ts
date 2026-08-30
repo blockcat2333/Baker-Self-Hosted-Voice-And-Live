@@ -2103,4 +2103,67 @@ describe('routeGatewayMessage', () => {
     expect(reply.op).toBe('error');
     if (reply.op === 'error') expect(reply.code).toBe('STREAM_NOT_LIVE');
   });
+
+  it('rebuilds an authorized media session without removing the voice participant', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000401';
+    const userId = '00000000-0000-0000-0000-000000000402';
+    const peerUserId = '00000000-0000-0000-0000-000000000403';
+    const sessionId = '00000000-0000-0000-0000-000000000404';
+    const sharedConnections = new ConnectionManager();
+    const voiceRoom = new VoiceRoomManager(sharedConnections);
+    const hostSend = vi.fn();
+    const peerSend = vi.fn();
+    const host = sharedConnections.attach({ close() {}, send: hostSend });
+    const peer = sharedConnections.attach({ close() {}, send: peerSend });
+    sharedConnections.markAuthenticated(host.id, userId, '00000000-0000-0000-0000-000000000405', null, []);
+    sharedConnections.markAuthenticated(peer.id, peerUserId, '00000000-0000-0000-0000-000000000406', null, []);
+    voiceRoom.join(channelId, userId, host.id, sessionId);
+    voiceRoom.join(channelId, peerUserId, peer.id, '00000000-0000-0000-0000-000000000407');
+    peerSend.mockClear();
+
+    const closeSfuSession = vi.fn().mockResolvedValue(undefined);
+    const createMediaSession = vi.fn().mockResolvedValue({
+      iceServers: [{ urls: 'stun:reconnected.example.com' }],
+      sessionId,
+      sfu: { producers: [], routerRtpCapabilities: {} },
+    });
+    const reconnectRuntime = makeRuntime({
+      closeSfuSession,
+      connections: sharedConnections,
+      createMediaSession,
+      mediaMode: 'sfu',
+      presence: new PresenceManager(sharedConnections, null),
+      voiceRoom,
+    });
+
+    const reply = await routeGatewayMessage(
+      host,
+      JSON.stringify({
+        command: 'media.session.reconnect',
+        data: { channelId, mode: 'voice', sessionId },
+        op: 'command',
+        reqId: 'req-media-reconnect',
+        ts: ts(),
+        v: 1,
+      }),
+      reconnectRuntime,
+    );
+
+    expect(reply.op).toBe('ack');
+    expect(closeSfuSession).toHaveBeenCalledWith({ channelId, mode: 'voice', sessionId });
+    expect(createMediaSession).toHaveBeenCalledWith(expect.objectContaining({
+      channelId,
+      mode: 'voice',
+      sessionId,
+      userId,
+    }));
+    expect(voiceRoom.getParticipant(channelId, userId)).toMatchObject({ connectionId: host.id, sessionId });
+    expect(parseSentEnvelopes(peerSend)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'media.session.restarted',
+        op: 'event',
+        data: expect.objectContaining({ session: { channelId, mode: 'voice', sessionId }, userId }),
+      }),
+    ]));
+  });
 });

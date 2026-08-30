@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type {
   GatewayCommandName,
   IceServer,
+  MediaSessionRestartedEventData,
   MediaSignalRelayEventData,
   MediaSfuProducerEventData,
   MediaTransportMode,
@@ -12,12 +13,19 @@ import type {
   SfuProducer,
 } from '@baker/protocol';
 import {
+  MediaSessionReconnectAckDataSchema,
   MusicListenAckDataSchema,
   MusicStartAckDataSchema,
 } from '@baker/protocol';
 import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
+import {
+  isMediaReconnectUnsupported,
+  NonRetryableMediaRecoveryError,
+  resolveMediaRecovery,
+  startMediaRecovery,
+} from '../recovery/recovery-store';
 import { loadNumberPreference, saveNumberPreference } from '../preferences/client-preferences';
 import {
   canCaptureDesktopMusic,
@@ -27,7 +35,7 @@ import {
   resolveDesktopMusicCaptureAvailability,
 } from './music-media';
 
-export type PublishedMusicStatus = 'capturing' | 'live' | 'starting' | 'stopping';
+export type PublishedMusicStatus = 'capturing' | 'live' | 'reconnecting' | 'starting' | 'stopping';
 export type ListeningMusicStatus = 'listening' | 'reconnecting' | 'starting' | 'stopping';
 
 interface PublishedMusicState {
@@ -51,6 +59,7 @@ interface ListeningMusicState {
 }
 
 interface MusicState {
+  handleMediaSessionRestarted(event: MediaSessionRestartedEventData): void;
   error: string | null;
   isDesktopCaptureAvailable: boolean;
   playbackVolume: number;
@@ -75,6 +84,7 @@ interface MusicState {
   handleSfuProducerAdded(data: MediaSfuProducerEventData): void;
   handleSfuProducerRemoved(data: MediaSfuProducerEventData): void;
   handleGatewayWillReconnect(): void;
+  handleGatewayReconnected(): Promise<void>;
   handleGatewayDisconnected(): void;
   reset(): void;
 }
@@ -86,6 +96,7 @@ interface PublishedMusicRuntime {
   manager: WebRtcManager | null;
   mediaMode: MediaTransportMode;
   musicId: string;
+  sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>;
   sendRawCommand: (command: GatewayCommandName, data: unknown) => void;
   sessionId: string;
   sfuSession: SfuClientSession | null;
@@ -102,6 +113,7 @@ interface ListeningMusicRuntime {
   mediaMode: MediaTransportMode;
   musicId: string;
   remoteStream: MediaStream | null;
+  sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>;
   sendRawCommand: (command: GatewayCommandName, data: unknown) => void;
   sessionId: string;
   sfuSession: SfuClientSession | null;
@@ -115,6 +127,9 @@ const pendingListenSignals = new Map<string, MediaSignalRelayEventData[]>();
 const pendingListenIceCandidates = new Map<string, RTCIceCandidateInit[]>();
 const pendingPublishedIceCandidates = new Map<string, RTCIceCandidateInit[]>();
 const sfuMusicTracks = new Map<string, { musicId: string; track: MediaStreamTrack }>();
+const listeningConnectionIssueTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let publishedSfuRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+const publishedPeerRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function getMyUserId(): string | null {
   return useAuthStore.getState().user?.id ?? null;
@@ -329,8 +344,24 @@ function createPublishedManager(): WebRtcManager {
         type: 'ice_candidate',
       });
     },
-    onPeerConnectionStateChange() {
-      // Music room snapshots drive listener reconciliation.
+    onPeerConnectionStateChange(userId, state) {
+      const previous = publishedPeerRecoveryTimers.get(userId);
+      if (previous) {
+        clearTimeout(previous);
+        publishedPeerRecoveryTimers.delete(userId);
+      }
+      if ((state === 'disconnected' || state === 'failed') && publishedRuntime?.manager) {
+        void publishedRuntime.manager.restartIce(userId).then((offer) => {
+          if (offer) sendPublishedSignal(userId, { sdp: offer.sdp ?? '', type: 'offer' });
+        }).catch(() => {
+          // The room snapshot may remove this listener while ICE is restarting.
+        });
+        const timer = setTimeout(() => {
+          publishedPeerRecoveryTimers.delete(userId);
+          beginPublishedMusicRecovery(`Shared music transport to listener ${userId} ${state}.`);
+        }, state === 'failed' ? 2_000 : 5_000);
+        publishedPeerRecoveryTimers.set(userId, timer);
+      }
     },
     onRemoteTrack() {
       // Publishers do not render remote music.
@@ -368,6 +399,22 @@ function createListenManager(musicId: string): WebRtcManager {
           },
         };
       });
+      const pendingTimer = listeningConnectionIssueTimers.get(musicId);
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        listeningConnectionIssueTimers.delete(musicId);
+      }
+      if (state === 'disconnected' || state === 'failed') {
+        sendListenSignal(musicId, fromUserId, { type: 'restart_ice' });
+        const timer = setTimeout(() => {
+          listeningConnectionIssueTimers.delete(musicId);
+          const current = useMusicStore.getState().listeningById[musicId];
+          if (current?.connectionState === state) {
+            beginListeningMusicRecovery(musicId, 'Shared music connection was interrupted.');
+          }
+        }, state === 'failed' ? 2_000 : 5_000);
+        listeningConnectionIssueTimers.set(musicId, timer);
+      }
     },
     onRemoteTrack(_fromUserId, track, streams) {
       const runtime = listeningRuntimes.get(musicId);
@@ -423,11 +470,18 @@ function removeListeningState(musicId: string) {
   });
 }
 
-function teardownPublishedRuntime() {
+function teardownPublishedRuntime(cancelRecovery = true) {
   if (!publishedRuntime) {
     return;
   }
 
+  if (cancelRecovery) resolveMediaRecovery(publishedRecoveryId(publishedRuntime.musicId));
+  for (const timer of publishedPeerRecoveryTimers.values()) clearTimeout(timer);
+  publishedPeerRecoveryTimers.clear();
+  if (publishedSfuRecoveryTimer) {
+    clearTimeout(publishedSfuRecoveryTimer);
+    publishedSfuRecoveryTimer = null;
+  }
   publishedRuntime.manager?.closeAll();
   publishedRuntime.sfuSession?.close();
   stopTracks(publishedRuntime.localStream);
@@ -435,7 +489,13 @@ function teardownPublishedRuntime() {
   publishedRuntime = null;
 }
 
-function teardownListeningRuntime(musicId: string) {
+function teardownListeningRuntime(musicId: string, cancelRecovery = true) {
+  if (cancelRecovery) resolveMediaRecovery(listeningRecoveryId(musicId));
+  const issueTimer = listeningConnectionIssueTimers.get(musicId);
+  if (issueTimer) {
+    clearTimeout(issueTimer);
+    listeningConnectionIssueTimers.delete(musicId);
+  }
   const runtime = listeningRuntimes.get(musicId);
   for (const key of [...pendingListenIceCandidates.keys()]) {
     if (key.startsWith(`${musicId}:`)) {
@@ -468,6 +528,256 @@ function teardownAllRuntimes() {
   pendingListenSignals.clear();
   pendingListenIceCandidates.clear();
   pendingPublishedIceCandidates.clear();
+}
+
+function handlePublishedSfuTransportState(state: RTCPeerConnectionState) {
+  if (publishedSfuRecoveryTimer) {
+    clearTimeout(publishedSfuRecoveryTimer);
+    publishedSfuRecoveryTimer = null;
+  }
+  if (state !== 'disconnected' && state !== 'failed') return;
+  publishedSfuRecoveryTimer = setTimeout(() => {
+    publishedSfuRecoveryTimer = null;
+    beginPublishedMusicRecovery(`Shared music SFU transport ${state}.`);
+  }, state === 'failed' ? 2_000 : 5_000);
+}
+
+function handleListeningSfuTransportState(musicId: string, state: RTCPeerConnectionState) {
+  updateListeningState(musicId, (current) => ({ ...current, connectionState: state }));
+  const previous = listeningConnectionIssueTimers.get(musicId);
+  if (previous) clearTimeout(previous);
+  if (state !== 'disconnected' && state !== 'failed') {
+    listeningConnectionIssueTimers.delete(musicId);
+    return;
+  }
+  const timer = setTimeout(() => {
+    listeningConnectionIssueTimers.delete(musicId);
+    beginListeningMusicRecovery(musicId, `Shared music SFU transport ${state}.`);
+  }, state === 'failed' ? 2_000 : 5_000);
+  listeningConnectionIssueTimers.set(musicId, timer);
+}
+
+function publishedRecoveryId(musicId: string) {
+  return `music_publish:${musicId}`;
+}
+
+function listeningRecoveryId(musicId: string) {
+  return `music_listen:${musicId}`;
+}
+
+function suspendPublishedTransport() {
+  if (!publishedRuntime) return;
+  publishedRuntime.manager?.closeAll();
+  publishedRuntime.sfuSession?.close();
+  for (const timer of publishedPeerRecoveryTimers.values()) clearTimeout(timer);
+  publishedPeerRecoveryTimers.clear();
+  publishedRuntime.manager = null;
+  publishedRuntime.sfuSession = null;
+  pendingPublishedIceCandidates.clear();
+  if (publishedSfuRecoveryTimer) {
+    clearTimeout(publishedSfuRecoveryTimer);
+    publishedSfuRecoveryTimer = null;
+  }
+}
+
+function suspendListeningTransport(musicId: string) {
+  const runtime = listeningRuntimes.get(musicId);
+  if (!runtime) return;
+  runtime.manager?.closeAll();
+  runtime.sfuSession?.close();
+  runtime.manager = null;
+  runtime.sfuSession = null;
+  runtime.hasRemoteAudio = false;
+  detachRemoteAudioElement(musicId);
+  stopTracks(runtime.remoteStream);
+  runtime.remoteStream = runtime.mediaMode === 'sfu' ? new MediaStream() : null;
+  updateListeningState(musicId, (state) => ({
+    ...state,
+    connectionState: null,
+    remoteStream: runtime.remoteStream,
+    status: 'reconnecting',
+  }));
+}
+
+async function attemptPublishedMusicRecovery() {
+  const runtime = publishedRuntime;
+  if (!runtime) throw new NonRetryableMediaRecoveryError('Shared music has stopped.');
+  if (runtime.localStream.getAudioTracks().every((track) => track.readyState === 'ended')) {
+    useMusicStore.setState({ error: 'Shared audio capture ended.', publishedMusic: null });
+    throw new NonRetryableMediaRecoveryError('Shared audio capture ended.');
+  }
+  let reconnect: ReturnType<typeof MediaSessionReconnectAckDataSchema.parse>;
+  try {
+    const raw = await runtime.sendCommandAwaitAck('media.session.reconnect', {
+      channelId: runtime.channelId,
+      mode: 'music_publish',
+      sessionId: runtime.sessionId,
+      streamId: runtime.musicId,
+    });
+    reconnect = MediaSessionReconnectAckDataSchema.parse(raw);
+  } catch (error) {
+    if (!isMediaReconnectUnsupported(error)) throw error;
+    await runtime.sendCommandAwaitAck('music.stop', {
+      channelId: runtime.channelId,
+      musicId: runtime.musicId,
+    }).catch(() => undefined);
+    const fallback = MusicStartAckDataSchema.parse(await runtime.sendCommandAwaitAck('music.start', {
+      channelId: runtime.channelId,
+    }));
+    reconnect = MediaSessionReconnectAckDataSchema.parse({
+      iceServers: fallback.iceServers,
+      mediaMode: fallback.mediaMode,
+      session: {
+        channelId: runtime.channelId,
+        mode: 'music_publish',
+        sessionId: fallback.sessionId,
+        streamId: fallback.musicId,
+      },
+      sfu: fallback.sfu,
+    });
+  }
+  suspendPublishedTransport();
+  runtime.iceServers = reconnect.iceServers;
+  runtime.mediaMode = reconnect.mediaMode;
+  runtime.sessionId = reconnect.session.sessionId;
+  runtime.musicId = reconnect.session.streamId ?? runtime.musicId;
+  if (runtime.mediaMode === 'sfu') {
+    if (!reconnect.sfu) throw new Error('SFU music recovery is missing router data.');
+    const session = new SfuClientSession(
+      {
+        channelId: runtime.channelId,
+        mode: 'music_publish',
+        sessionId: runtime.sessionId,
+        streamId: runtime.musicId,
+      },
+      runtime.sendCommandAwaitAck,
+      { onTransportConnectionStateChange: (_direction, state) => handlePublishedSfuTransportState(state) },
+    );
+    await session.load(reconnect.sfu);
+    await session.produceTracks(runtime.localStream.getAudioTracks());
+    runtime.sfuSession = session;
+  } else {
+    runtime.manager = createPublishedManager();
+    for (const listener of useMusicStore.getState().publishedMusic?.listeners ?? []) {
+      const offer = await runtime.manager.createOffer(listener.userId, runtime.localStream, runtime.iceServers);
+      sendPublishedSignal(listener.userId, { sdp: offer.sdp ?? '', type: 'offer' });
+    }
+  }
+  useMusicStore.setState((state) => ({
+    error: null,
+    publishedMusic: state.publishedMusic
+      ? {
+          ...state.publishedMusic,
+          localStream: runtime.localStream,
+          musicId: runtime.musicId,
+          sessionId: runtime.sessionId,
+          status: 'live',
+        }
+      : null,
+  }));
+}
+
+function beginPublishedMusicRecovery(reason: string) {
+  const runtime = publishedRuntime;
+  if (!runtime) return;
+  useMusicStore.setState((state) => ({
+    publishedMusic: state.publishedMusic ? { ...state.publishedMusic, status: 'reconnecting' } : null,
+  }));
+  startMediaRecovery({
+    abandon: () => {
+      teardownPublishedRuntime();
+      useMusicStore.setState({ publishedMusic: null });
+    },
+    attempt: attemptPublishedMusicRecovery,
+    id: publishedRecoveryId(runtime.musicId),
+    kind: 'music_publish',
+    reason,
+  });
+}
+
+async function attemptListeningMusicRecovery(musicId: string) {
+  const runtime = listeningRuntimes.get(musicId);
+  if (!runtime) throw new NonRetryableMediaRecoveryError('Shared music is no longer available.');
+  let fallbackListen: ReturnType<typeof MusicListenAckDataSchema.parse> | null = null;
+  let reconnect: ReturnType<typeof MediaSessionReconnectAckDataSchema.parse>;
+  try {
+    const raw = await runtime.sendCommandAwaitAck('media.session.reconnect', {
+      channelId: runtime.channelId,
+      mode: 'music_listen',
+      sessionId: runtime.sessionId,
+      streamId: runtime.musicId,
+    });
+    reconnect = MediaSessionReconnectAckDataSchema.parse(raw);
+  } catch (error) {
+    if (!isMediaReconnectUnsupported(error)) throw error;
+    await runtime.sendCommandAwaitAck('music.unlisten', {
+      channelId: runtime.channelId,
+      musicId: runtime.musicId,
+    }).catch(() => undefined);
+    fallbackListen = MusicListenAckDataSchema.parse(await runtime.sendCommandAwaitAck('music.listen', {
+      channelId: runtime.channelId,
+      musicId: runtime.musicId,
+    }));
+    reconnect = MediaSessionReconnectAckDataSchema.parse({
+      iceServers: fallbackListen.iceServers,
+      mediaMode: fallbackListen.mediaMode,
+      session: {
+        channelId: runtime.channelId,
+        mode: 'music_listen',
+        sessionId: fallbackListen.sessionId,
+        streamId: fallbackListen.musicId,
+      },
+      sfu: fallbackListen.sfu,
+    });
+  }
+  suspendListeningTransport(musicId);
+  runtime.iceServers = reconnect.iceServers;
+  runtime.mediaMode = reconnect.mediaMode;
+  runtime.sessionId = reconnect.session.sessionId;
+  if (fallbackListen) {
+    runtime.hostSessionId = fallbackListen.hostSessionId;
+    runtime.hostUserId = fallbackListen.hostUserId;
+  }
+  if (runtime.mediaMode === 'sfu') {
+    if (!reconnect.sfu) throw new Error('SFU music playback recovery is missing router data.');
+    const session = new SfuClientSession(
+      {
+        channelId: runtime.channelId,
+        mode: 'music_listen',
+        sessionId: runtime.sessionId,
+        streamId: runtime.musicId,
+      },
+      runtime.sendCommandAwaitAck,
+      { onTransportConnectionStateChange: (_direction, state) => handleListeningSfuTransportState(musicId, state) },
+    );
+    await session.load(reconnect.sfu);
+    runtime.sfuSession = session;
+    await consumeSfuMusicProducers(musicId, reconnect.sfu.producers);
+  } else {
+    runtime.manager = createListenManager(musicId);
+  }
+  updateListeningState(musicId, (state) => ({
+    ...state,
+    connectionState: null,
+    remoteStream: runtime.remoteStream,
+    sessionId: runtime.sessionId,
+    status: 'listening',
+  }));
+}
+
+function beginListeningMusicRecovery(musicId: string, reason: string) {
+  if (!listeningRuntimes.has(musicId)) return;
+  updateListeningState(musicId, (state) => ({ ...state, status: 'reconnecting' }));
+  startMediaRecovery({
+    abandon: () => {
+      teardownListeningRuntime(musicId);
+      removeListeningState(musicId);
+    },
+    attempt: () => attemptListeningMusicRecovery(musicId),
+    id: listeningRecoveryId(musicId),
+    kind: 'music_listen',
+    reason,
+  });
 }
 
 async function consumeSfuMusicProducers(musicId: string, producers: SfuProducer[]) {
@@ -620,7 +930,7 @@ async function listenToMusic(
   } catch (err) {
     removeListeningState(publication.musicId);
     useMusicStore.setState({ error: err instanceof Error ? err.message : 'Failed to listen to shared music.' });
-    return;
+    throw err;
   }
 
   const manager = ackData.mediaMode === 'p2p' ? createListenManager(ackData.musicId) : null;
@@ -635,6 +945,7 @@ async function listenToMusic(
     mediaMode: ackData.mediaMode,
     musicId: ackData.musicId,
     remoteStream,
+    sendCommandAwaitAck,
     sendRawCommand,
     sessionId: ackData.sessionId,
     sfuSession: null,
@@ -653,6 +964,7 @@ async function listenToMusic(
             streamId: ackData.musicId,
           },
           sendCommandAwaitAck,
+          { onTransportConnectionStateChange: (_direction, state) => handleListeningSfuTransportState(ackData.musicId, state) },
         );
         await sfuSession.load(ackData.sfu);
         runtime.sfuSession = sfuSession;
@@ -661,7 +973,7 @@ async function listenToMusic(
         teardownListeningRuntime(ackData.musicId);
         removeListeningState(ackData.musicId);
         useMusicStore.setState({ error: err instanceof Error ? err.message : 'Failed to listen to SFU music.' });
-        return;
+        throw err;
       }
     }
   }
@@ -769,6 +1081,27 @@ function reconcileListeningMusic(channelId: string, publicationsById: Record<str
 }
 
 export const useMusicStore = create<MusicState>((set, get) => ({
+  handleMediaSessionRestarted(event) {
+    const musicId = event.session.streamId;
+    if (!musicId) return;
+    if (event.session.mode === 'music_publish') {
+      if (listeningRuntimes.has(musicId)) {
+        beginListeningMusicRecovery(musicId, 'The shared music session was refreshed.');
+      }
+      return;
+    }
+    if (
+      event.session.mode === 'music_listen' &&
+      publishedRuntime?.musicId === musicId &&
+      publishedRuntime.mediaMode === 'p2p' &&
+      publishedRuntime.manager
+    ) {
+      void publishedRuntime.manager
+        .createOffer(event.userId, publishedRuntime.localStream, publishedRuntime.iceServers)
+        .then((offer) => sendPublishedSignal(event.userId, { sdp: offer.sdp ?? '', type: 'offer' }))
+        .catch((error) => console.warn('[music] failed to restore listener', event.userId, error));
+    }
+  },
   ...emptyState(),
 
   refreshDesktopCaptureAvailability() {
@@ -851,11 +1184,28 @@ export const useMusicStore = create<MusicState>((set, get) => ({
       manager: ackData.mediaMode === 'p2p' ? createPublishedManager() : null,
       mediaMode: ackData.mediaMode,
       musicId: ackData.musicId,
+      sendCommandAwaitAck,
       sendRawCommand,
       sessionId: ackData.sessionId,
       sfuSession: null,
       userId,
     };
+    localStream.getAudioTracks()[0]?.addEventListener?.(
+      'ended',
+      () => {
+        const runtime = publishedRuntime;
+        if (!runtime || runtime.localStream !== localStream || get().publishedMusic?.status === 'stopping') return;
+        void runtime.sendCommandAwaitAck('music.stop', {
+          channelId: runtime.channelId,
+          musicId: runtime.musicId,
+        }).catch(() => {
+          // Capture has already ended locally.
+        });
+        teardownPublishedRuntime();
+        set({ error: 'Shared audio capture ended.', publishedMusic: null });
+      },
+      { once: true },
+    );
 
     if (ackData.mediaMode === 'sfu') {
       try {
@@ -868,6 +1218,7 @@ export const useMusicStore = create<MusicState>((set, get) => ({
             streamId: ackData.musicId,
           },
           sendCommandAwaitAck,
+          { onTransportConnectionStateChange: (_direction, state) => handlePublishedSfuTransportState(state) },
         );
         await sfuSession.load(ackData.sfu);
         await sfuSession.produceTracks(localStream.getAudioTracks());
@@ -1042,13 +1393,99 @@ export const useMusicStore = create<MusicState>((set, get) => ({
   },
 
   handleGatewayWillReconnect() {
-    teardownAllRuntimes();
-    set({
+    suspendPublishedTransport();
+    for (const musicId of listeningRuntimes.keys()) suspendListeningTransport(musicId);
+    set((state) => ({
       error: null,
-      listeningById: {},
-      publishedMusic: null,
-      roomStateByChannel: {},
-    });
+      listeningById: Object.fromEntries(
+        Object.entries(state.listeningById).map(([musicId, listening]) => [
+          musicId,
+          { ...listening, connectionState: null, remoteStream: null, status: 'reconnecting' as const },
+        ]),
+      ),
+      publishedMusic: state.publishedMusic
+        ? { ...state.publishedMusic, listeners: [], status: 'reconnecting' }
+        : null,
+    }));
+  },
+
+  async handleGatewayReconnected() {
+    const runtime = publishedRuntime;
+    if (runtime) {
+      try {
+        const raw = await runtime.sendCommandAwaitAck('music.start', { channelId: runtime.channelId });
+        const ack = MusicStartAckDataSchema.parse(raw);
+        runtime.iceServers = ack.iceServers;
+        runtime.mediaMode = ack.mediaMode;
+        runtime.musicId = ack.musicId;
+        runtime.sessionId = ack.sessionId;
+        runtime.manager = ack.mediaMode === 'p2p' ? createPublishedManager() : null;
+        if (ack.mediaMode === 'sfu') {
+          if (!ack.sfu) throw new Error('SFU music recovery is missing router data.');
+          const session = new SfuClientSession(
+            {
+              channelId: runtime.channelId,
+              mode: 'music_publish',
+              sessionId: runtime.sessionId,
+              streamId: runtime.musicId,
+            },
+            runtime.sendCommandAwaitAck,
+            { onTransportConnectionStateChange: (_direction, state) => handlePublishedSfuTransportState(state) },
+          );
+          await session.load(ack.sfu);
+          await session.produceTracks(runtime.localStream.getAudioTracks());
+          runtime.sfuSession = session;
+        }
+        set((state) => ({
+          publishedMusic: state.publishedMusic
+            ? {
+                ...state.publishedMusic,
+                localStream: runtime.localStream,
+                musicId: runtime.musicId,
+                sessionId: runtime.sessionId,
+                status: 'live',
+              }
+            : null,
+        }));
+      } catch (error) {
+        startMediaRecovery({
+          abandon: () => {
+            teardownPublishedRuntime();
+            set({ publishedMusic: null });
+          },
+          attempt: () => get().handleGatewayReconnected(),
+          id: publishedRecoveryId(runtime.musicId),
+          kind: 'music_publish',
+          reason: error instanceof Error ? error.message : 'Failed to restore shared music.',
+        });
+        throw error;
+      }
+    }
+
+    for (const [musicId, listening] of Object.entries(get().listeningById)) {
+      if (listening.status === 'stopping') continue;
+      const listeningRuntime = listeningRuntimes.get(musicId);
+      if (!listeningRuntime) continue;
+      const listenCommand = listeningRuntime.sendCommandAwaitAck;
+      const listenRawCommand = listeningRuntime.sendRawCommand;
+      startMediaRecovery({
+        abandon: () => {
+          teardownListeningRuntime(musicId);
+          removeListeningState(musicId);
+        },
+        attempt: async () => {
+          const publication = Object.values(get().roomStateByChannel[listening.channelId] ?? {})
+            .find((candidate) => candidate.hostUserId === listening.hostUserId);
+          if (!publication) throw new Error('Waiting for the shared music publisher to reconnect.');
+          teardownListeningRuntime(musicId, false);
+          removeListeningState(musicId);
+          await listenToMusic(publication, listenCommand, listenRawCommand);
+        },
+        id: listeningRecoveryId(musicId),
+        kind: 'music_listen',
+        reason: 'Restoring shared music playback.',
+      });
+    }
   },
 
   handleGatewayDisconnected() {

@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import type {
   GatewayCommandName,
   IceServer,
+  MediaSessionRestartedEventData,
   MediaSfuProducerEventData,
   MediaSignalRelayEventData,
   MediaTransportMode,
@@ -14,12 +15,19 @@ import type {
   StreamViewer,
 } from '@baker/protocol';
 import {
+  MediaSessionReconnectAckDataSchema,
   StreamStartAckDataSchema,
   StreamWatchAckDataSchema,
 } from '@baker/protocol';
 import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
+import {
+  isMediaReconnectUnsupported,
+  NonRetryableMediaRecoveryError,
+  resolveMediaRecovery,
+  startMediaRecovery,
+} from '../recovery/recovery-store';
 import {
   loadSelectedCameraKeyPreference,
   saveSelectedCameraKeyPreference,
@@ -32,13 +40,14 @@ import {
   DEFAULT_STREAM_CODEC_PREFERENCE,
   DEFAULT_STREAM_PLAYBACK_VOLUME,
   getCameraSelectionFromOptions,
+  getSupportedStreamCodecPreferences,
   listCameraOptions,
   type CameraOption,
   type CameraSelection,
   type StreamCodecPreference,
 } from './stream-media';
 
-export type OwnedPublishStatus = 'capturing' | 'starting' | 'live' | 'stopping';
+export type OwnedPublishStatus = 'capturing' | 'starting' | 'reconnecting' | 'live' | 'stopping';
 export type WatchedStreamStatus = 'starting' | 'reconnecting' | 'watching' | 'stopping' | 'ended';
 
 export interface OwnedPublishState {
@@ -90,6 +99,7 @@ export interface OwnedStreamVideoStats {
 }
 
 interface StreamState {
+  handleMediaSessionRestarted(event: MediaSessionRestartedEventData): void;
   cameraOptions: CameraOption[];
   selectedCameraKey: string | null;
   isRefreshingCameras: boolean;
@@ -154,6 +164,7 @@ interface OwnedPublishRuntime {
   manager: WebRtcManager | null;
   mediaMode: MediaTransportMode;
   quality: StreamQualitySettings;
+  sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>;
   sendRawCommand: (command: GatewayCommandName, data: unknown) => void;
   sessionId: string;
   sfuSession: SfuClientSession | null;
@@ -171,6 +182,7 @@ interface WatchedStreamRuntime {
   manager: WebRtcManager | null;
   mediaMode: MediaTransportMode;
   remoteStream: MediaStream | null;
+  sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>;
   sendRawCommand: (command: GatewayCommandName, data: unknown) => void;
   sessionId: string;
   sfuSession: SfuClientSession | null;
@@ -198,6 +210,8 @@ const lastWatchedVideoStatsSamples = new Map<string, {
 const WATCHED_CONNECTING_ISSUE_DELAY_MS = 10_000;
 const WATCHED_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
 const WATCHED_FAILED_ISSUE_DELAY_MS = 2_000;
+let ownedSfuRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+const ownedPeerRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const lastOwnedVideoStatsSample: {
   bytesSent: number | null;
   framesEncoded: number | null;
@@ -207,6 +221,17 @@ const lastOwnedVideoStatsSample: {
   framesEncoded: null,
   timestampMs: null,
 };
+const streamIdRemapListeners = new Set<(previousStreamId: string, nextStreamId: string) => void>();
+
+export function subscribeToStreamIdRemaps(listener: (previousStreamId: string, nextStreamId: string) => void) {
+  streamIdRemapListeners.add(listener);
+  return () => streamIdRemapListeners.delete(listener);
+}
+
+function emitStreamIdRemap(previousStreamId: string, nextStreamId: string) {
+  if (previousStreamId === nextStreamId) return;
+  for (const listener of streamIdRemapListeners) listener(previousStreamId, nextStreamId);
+}
 
 function watchedIceQueueKey(streamId: string, hostUserId: string) {
   return `${streamId}:${hostUserId}`;
@@ -250,10 +275,22 @@ function isEncoderLikelyLimited(
   return actualFrameRate < Math.max(targetFrameRate * 0.85, targetFrameRate - 10);
 }
 
-function applyCaptureTrackPreferences(sourceType: StreamSourceType, stream: MediaStream) {
+async function applyCaptureTrackPreferences(
+  sourceType: StreamSourceType,
+  stream: MediaStream,
+  quality: StreamQualitySettings,
+) {
   for (const track of stream.getVideoTracks()) {
     if (sourceType === 'screen' && 'contentHint' in track) {
-      track.contentHint = 'detail';
+      track.contentHint = quality.frameRate === 60 ? 'motion' : 'detail';
+    }
+    if (typeof track.applyConstraints === 'function') {
+      await track.applyConstraints({
+        frameRate: { ideal: quality.frameRate, max: quality.frameRate },
+      }).catch(() => {
+        // Fixed-refresh sources may not accept the requested target. The UI
+        // reports the actual track setting instead of discarding the capture.
+      });
     }
   }
 }
@@ -476,6 +513,7 @@ function scheduleWatchedConnectionIssue(
       ...current,
       connectionError: 'connection_error',
     }));
+    beginWatchedMediaRecovery(streamId, 'connection_error');
   }, delayMs);
 
   pendingWatchedConnectionIssueTimers.set(streamId, timer);
@@ -663,6 +701,314 @@ function teardownAllRuntimes() {
   clearAllWatchedConnectionIssueTimers();
 }
 
+function handleOwnedSfuTransportState(state: RTCPeerConnectionState) {
+  if (ownedSfuRecoveryTimer) {
+    clearTimeout(ownedSfuRecoveryTimer);
+    ownedSfuRecoveryTimer = null;
+  }
+  if (state !== 'disconnected' && state !== 'failed') return;
+  ownedSfuRecoveryTimer = setTimeout(() => {
+    ownedSfuRecoveryTimer = null;
+    beginOwnedMediaRecovery(`SFU publishing transport ${state}.`);
+  }, state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS);
+}
+
+function handleWatchedSfuTransportState(streamId: string, state: RTCPeerConnectionState) {
+  updateWatchedStreamState(streamId, (watched) => ({ ...watched, connectionState: state }));
+  clearWatchedConnectionIssueTimer(streamId);
+  if (state === 'disconnected' || state === 'failed') {
+    scheduleWatchedConnectionIssue(
+      streamId,
+      state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS,
+      [state],
+    );
+  }
+}
+
+function ownedRecoveryId(streamId: string) {
+  return `stream_publish:${streamId}`;
+}
+
+function watchedRecoveryId(streamId: string) {
+  return `stream_watch:${streamId}`;
+}
+
+function suspendOwnedTransport() {
+  if (!ownedRuntime) return;
+  ownedRuntime.manager?.closeAll();
+  ownedRuntime.sfuSession?.close();
+  for (const timer of ownedPeerRecoveryTimers.values()) clearTimeout(timer);
+  ownedPeerRecoveryTimers.clear();
+  if (ownedSfuRecoveryTimer) {
+    clearTimeout(ownedSfuRecoveryTimer);
+    ownedSfuRecoveryTimer = null;
+  }
+  ownedRuntime.manager = null;
+  ownedRuntime.sfuSession = null;
+  pendingOwnedIceCandidates.clear();
+  for (const timer of ownedPeerRecoveryTimers.values()) clearTimeout(timer);
+  ownedPeerRecoveryTimers.clear();
+  if (ownedSfuRecoveryTimer) {
+    clearTimeout(ownedSfuRecoveryTimer);
+    ownedSfuRecoveryTimer = null;
+  }
+  lastOwnedVideoStatsSample.bytesSent = null;
+  lastOwnedVideoStatsSample.framesEncoded = null;
+  lastOwnedVideoStatsSample.timestampMs = null;
+}
+
+function suspendWatchedTransport(streamId: string) {
+  const runtime = watchedRuntimes.get(streamId);
+  if (!runtime) return;
+  runtime.manager?.closeAll();
+  runtime.sfuSession?.close();
+  runtime.manager = null;
+  runtime.sfuSession = null;
+  runtime.hasRemoteMedia = false;
+  for (const track of runtime.remoteStream?.getTracks() ?? []) track.stop();
+  runtime.remoteStream = runtime.mediaMode === 'sfu' ? new MediaStream() : null;
+  lastWatchedVideoStatsSamples.delete(streamId);
+  updateWatchedStreamState(streamId, (watched) => ({
+    ...watched,
+    connectionState: null,
+    remoteStream: runtime.remoteStream,
+    status: 'reconnecting',
+  }));
+}
+
+async function attemptOwnedMediaRecovery() {
+  const runtime = ownedRuntime;
+  if (!runtime) throw new NonRetryableMediaRecoveryError('The live stream is no longer active.');
+  const videoTrack = runtime.localStream.getVideoTracks()[0];
+  if (!videoTrack || videoTrack.readyState === 'ended') {
+    useStreamStore.setState({
+      error: 'Screen capture ended. Select a sharing source again.',
+      ownedStream: null,
+    });
+    throw new NonRetryableMediaRecoveryError('Screen capture ended. Select a sharing source again.');
+  }
+
+  let reconnect: ReturnType<typeof MediaSessionReconnectAckDataSchema.parse>;
+  try {
+    const raw = await runtime.sendCommandAwaitAck('media.session.reconnect', {
+      channelId: runtime.channelId,
+      mode: 'stream_publish',
+      sessionId: runtime.sessionId,
+      streamId: runtime.streamId,
+    });
+    reconnect = MediaSessionReconnectAckDataSchema.parse(raw);
+  } catch (error) {
+    if (!isMediaReconnectUnsupported(error)) throw error;
+    const previousStreamId = runtime.streamId;
+    await runtime.sendCommandAwaitAck('stream.stop', {
+      channelId: runtime.channelId,
+      streamId: previousStreamId,
+    }).catch(() => undefined);
+    const fallback = StreamStartAckDataSchema.parse(await runtime.sendCommandAwaitAck('stream.start', {
+      channelId: runtime.channelId,
+      quality: runtime.quality,
+      sourceType: runtime.sourceType,
+    }));
+    const nextStreamId = fallback.streamId ?? fallback.sessionId;
+    reconnect = MediaSessionReconnectAckDataSchema.parse({
+      iceServers: fallback.iceServers,
+      mediaMode: fallback.mediaMode,
+      session: {
+        channelId: runtime.channelId,
+        mode: 'stream_publish',
+        sessionId: fallback.sessionId,
+        streamId: nextStreamId,
+      },
+      sfu: fallback.sfu,
+    });
+    if (previousStreamId !== nextStreamId) emitStreamIdRemap(previousStreamId, nextStreamId);
+  }
+  suspendOwnedTransport();
+  runtime.iceServers = reconnect.iceServers;
+  runtime.mediaMode = reconnect.mediaMode;
+  runtime.sessionId = reconnect.session.sessionId;
+  runtime.streamId = reconnect.session.streamId ?? runtime.streamId;
+
+  if (reconnect.mediaMode === 'sfu') {
+    if (!reconnect.sfu) throw new Error('SFU stream recovery is missing router data.');
+    const session = new SfuClientSession(
+      {
+        channelId: runtime.channelId,
+        mode: 'stream_publish',
+        sessionId: runtime.sessionId,
+        streamId: runtime.streamId,
+      },
+      runtime.sendCommandAwaitAck,
+      { onTransportConnectionStateChange: (_direction, state) => handleOwnedSfuTransportState(state) },
+    );
+    await session.load(reconnect.sfu);
+    await session.produceTracks(runtime.localStream.getTracks(), {
+      degradationPreference: 'balanced',
+      maxVideoBitrateKbps: runtime.quality.bitrateKbps,
+      maxVideoFramerate: runtime.quality.frameRate,
+      preferredVideoCodec: runtime.codecPreference,
+    });
+    runtime.sfuSession = session;
+  } else {
+    runtime.manager = createOwnedManager();
+    for (const viewer of useStreamStore.getState().ownedStream?.viewers ?? []) {
+      const offer = await runtime.manager.createOffer(viewer.userId, runtime.localStream, runtime.iceServers, {
+        degradationPreference: 'balanced',
+        maxVideoBitrateKbps: runtime.quality.bitrateKbps,
+        maxVideoFramerate: runtime.quality.frameRate,
+        preferredVideoCodec: runtime.codecPreference,
+      });
+      sendOwnedSignal(viewer.userId, { type: 'offer', sdp: offer.sdp ?? '' });
+    }
+  }
+
+  useStreamStore.setState((state) => ({
+    error: null,
+    ownedStream: state.ownedStream
+      ? {
+          ...state.ownedStream,
+          localPreviewStream: runtime.localStream,
+          sessionId: runtime.sessionId,
+          status: 'live',
+          streamId: runtime.streamId,
+        }
+      : null,
+  }));
+}
+
+function beginOwnedMediaRecovery(reason: string) {
+  const runtime = ownedRuntime;
+  if (!runtime) return;
+  useStreamStore.setState((state) => ({
+    ownedStream: state.ownedStream ? { ...state.ownedStream, status: 'reconnecting' } : null,
+  }));
+  startMediaRecovery({
+    abandon: () => {
+      const id = ownedRuntime?.streamId;
+      teardownOwnedRuntime();
+      useStreamStore.setState({ ownedStream: null });
+      if (id) resolveMediaRecovery(ownedRecoveryId(id));
+    },
+    attempt: attemptOwnedMediaRecovery,
+    id: ownedRecoveryId(runtime.streamId),
+    kind: 'stream_publish',
+    reason,
+  });
+}
+
+async function attemptWatchedMediaRecovery(streamId: string) {
+  const runtime = watchedRuntimes.get(streamId);
+  if (!runtime) throw new NonRetryableMediaRecoveryError('The watched live stream has ended.');
+  let fallbackWatch: ReturnType<typeof StreamWatchAckDataSchema.parse> | null = null;
+  let reconnect: ReturnType<typeof MediaSessionReconnectAckDataSchema.parse>;
+  try {
+    const raw = await runtime.sendCommandAwaitAck('media.session.reconnect', {
+      channelId: runtime.channelId,
+      mode: 'stream_watch',
+      sessionId: runtime.sessionId,
+      streamId: runtime.streamId,
+    });
+    reconnect = MediaSessionReconnectAckDataSchema.parse(raw);
+  } catch (error) {
+    if (!isMediaReconnectUnsupported(error)) throw error;
+    await runtime.sendCommandAwaitAck('stream.unwatch', {
+      channelId: runtime.channelId,
+      streamId: runtime.streamId,
+    }).catch(() => undefined);
+    fallbackWatch = StreamWatchAckDataSchema.parse(await runtime.sendCommandAwaitAck('stream.watch', {
+      channelId: runtime.channelId,
+      streamId: runtime.streamId,
+    }));
+    reconnect = MediaSessionReconnectAckDataSchema.parse({
+      iceServers: fallbackWatch.iceServers,
+      mediaMode: fallbackWatch.mediaMode,
+      session: {
+        channelId: runtime.channelId,
+        mode: 'stream_watch',
+        sessionId: fallbackWatch.sessionId,
+        streamId: fallbackWatch.streamId ?? runtime.streamId,
+      },
+      sfu: fallbackWatch.sfu,
+    });
+  }
+  suspendWatchedTransport(streamId);
+  runtime.iceServers = reconnect.iceServers;
+  runtime.mediaMode = reconnect.mediaMode;
+  runtime.sessionId = reconnect.session.sessionId;
+  if (fallbackWatch) {
+    runtime.hostSessionId = fallbackWatch.hostSessionId;
+    runtime.hostUserId = fallbackWatch.hostUserId;
+  }
+  if (reconnect.mediaMode === 'sfu') {
+    if (!reconnect.sfu) throw new Error('SFU playback recovery is missing router data.');
+    const session = new SfuClientSession(
+      {
+        channelId: runtime.channelId,
+        mode: 'stream_watch',
+        sessionId: runtime.sessionId,
+        streamId: runtime.streamId,
+      },
+      runtime.sendCommandAwaitAck,
+      { onTransportConnectionStateChange: (_direction, state) => handleWatchedSfuTransportState(streamId, state) },
+    );
+    await session.load(reconnect.sfu);
+    runtime.sfuSession = session;
+    await consumeSfuStreamProducers(streamId, reconnect.sfu.producers);
+  } else {
+    runtime.manager = createWatchedManager(streamId);
+  }
+  updateWatchedStreamState(streamId, (watched) => ({
+    ...watched,
+    connectionError: null,
+    remoteStream: runtime.remoteStream,
+    sessionId: runtime.sessionId,
+    status: 'watching',
+  }));
+}
+
+function beginWatchedMediaRecovery(streamId: string, reason: string) {
+  const runtime = watchedRuntimes.get(streamId);
+  if (!runtime) return;
+  updateWatchedStreamState(streamId, (watched) => ({ ...watched, connectionError: reason, status: 'reconnecting' }));
+  startMediaRecovery({
+    abandon: () => {
+      teardownWatchedRuntime(streamId);
+      removeWatchedStreamState(streamId);
+    },
+    attempt: () => attemptWatchedMediaRecovery(streamId),
+    id: watchedRecoveryId(streamId),
+    kind: 'stream_watch',
+    reason,
+  });
+}
+
+function beginWatchedGatewayRecovery(
+  entry: WatchedStreamState,
+  sendCommandAwaitAck: (command: GatewayCommandName, data: unknown) => Promise<unknown>,
+  sendRawCommand: (command: GatewayCommandName, data: unknown) => void,
+  reason: string,
+) {
+  startMediaRecovery({
+    abandon: () => {
+      teardownWatchedRuntime(entry.streamId);
+      removeWatchedStreamState(entry.streamId);
+    },
+    attempt: async () => {
+      const replacement = Object.values(useStreamStore.getState().roomStateByChannel[entry.channelId] ?? {})
+        .find((publication) => publication.hostUserId === entry.hostUserId);
+      const targetStreamId = replacement?.streamId ?? entry.streamId;
+      teardownWatchedRuntime(entry.streamId);
+      removeWatchedStreamState(entry.streamId);
+      await useStreamStore.getState().watchStream(entry.channelId, targetStreamId, sendCommandAwaitAck, sendRawCommand);
+      useStreamStore.getState().setPlaybackVolume(targetStreamId, entry.playbackVolume);
+      emitStreamIdRemap(entry.streamId, targetStreamId);
+    },
+    id: watchedRecoveryId(entry.streamId),
+    kind: 'stream_watch',
+    reason,
+  });
+}
+
 function queuePendingWatchedSignal(streamId: string, data: MediaSignalRelayEventData) {
   const existing = pendingWatchedSignals.get(streamId) ?? [];
   existing.push(data);
@@ -730,8 +1076,23 @@ function createOwnedManager(): WebRtcManager {
     onRemoteTrack() {
       // Publishers do not render remote media in the stream store.
     },
-    onPeerConnectionStateChange() {
-      // Authoritative room snapshots drive viewer reconciliation.
+    onPeerConnectionStateChange(userId, state) {
+      const previous = ownedPeerRecoveryTimers.get(userId);
+      if (previous) {
+        clearTimeout(previous);
+        ownedPeerRecoveryTimers.delete(userId);
+      }
+      if (state !== 'disconnected' && state !== 'failed') return;
+      const runtime = ownedRuntime;
+      if (!runtime?.manager) return;
+      void runtime.manager.restartIce(userId).then((offer) => {
+        if (offer) sendOwnedSignal(userId, { type: 'offer', sdp: offer.sdp ?? '' });
+      }).catch(() => undefined);
+      const timer = setTimeout(() => {
+        ownedPeerRecoveryTimers.delete(userId);
+        beginOwnedMediaRecovery(`Live transport to viewer ${userId} ${state}.`);
+      }, state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS);
+      ownedPeerRecoveryTimers.set(userId, timer);
     },
   });
 }
@@ -914,7 +1275,7 @@ async function captureStream(
         buildCameraCaptureConstraints(quality, cameraSelection, includeAudio),
       );
 
-  applyCaptureTrackPreferences(sourceType, stream);
+  await applyCaptureTrackPreferences(sourceType, stream, quality);
   return stream;
 }
 
@@ -952,6 +1313,7 @@ function reconcileOwnedPublication(channelId: string, streamsById: Record<string
         .createOffer(viewer.userId, ownedRuntime.localStream, ownedRuntime.iceServers, {
           degradationPreference: 'balanced',
           maxVideoBitrateKbps: ownedRuntime.quality.bitrateKbps,
+          maxVideoFramerate: ownedRuntime.quality.frameRate,
           preferredVideoCodec: ownedRuntime.codecPreference,
         })
         .then((offer) => {
@@ -1159,8 +1521,9 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
     return null;
   }
 
-  if (!runtime.manager) return null;
-  const sample = await runtime.manager.getPeerVideoReceiveSample(runtime.hostUserId);
+  const sample = runtime.manager
+    ? await runtime.manager.getPeerVideoReceiveSample(runtime.hostUserId)
+    : await (runtime.sfuSession?.getVideoReceiveSample() ?? null);
   if (!sample) {
     return null;
   }
@@ -1292,6 +1655,32 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
 }
 
 export const useStreamStore = create<StreamState>((set, get) => ({
+  handleMediaSessionRestarted(event) {
+    const streamId = event.session.streamId;
+    if (!streamId) return;
+    if (event.session.mode === 'stream_publish') {
+      if (watchedRuntimes.has(streamId)) {
+        beginWatchedMediaRecovery(streamId, 'The broadcaster refreshed the live media session.');
+      }
+      return;
+    }
+    if (
+      event.session.mode === 'stream_watch' &&
+      ownedRuntime?.streamId === streamId &&
+      ownedRuntime.mediaMode === 'p2p' &&
+      ownedRuntime.manager
+    ) {
+      void ownedRuntime.manager
+        .createOffer(event.userId, ownedRuntime.localStream, ownedRuntime.iceServers, {
+          degradationPreference: 'balanced',
+          maxVideoBitrateKbps: ownedRuntime.quality.bitrateKbps,
+          maxVideoFramerate: ownedRuntime.quality.frameRate,
+          preferredVideoCodec: ownedRuntime.codecPreference,
+        })
+        .then((offer) => sendOwnedSignal(event.userId, { type: 'offer', sdp: offer.sdp ?? '' }))
+        .catch((error) => beginOwnedMediaRecovery(error instanceof Error ? error.message : 'Offer recovery failed.'));
+    }
+  },
   ...emptyState(),
 
   async refreshCameraOptions() {
@@ -1333,6 +1722,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     }
 
     const runtime = ownedRuntime;
+    resolveMediaRecovery(ownedRecoveryId(runtime.streamId));
     set({ isSwitchingCamera: true });
 
     let captured: MediaStream | null = null;
@@ -1394,7 +1784,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     sendRawCommand,
     codecPreference = DEFAULT_STREAM_CODEC_PREFERENCE,
   ) {
+    if (codecPreference === 'default') codecPreference = DEFAULT_STREAM_CODEC_PREFERENCE;
     if (ownedRuntime) {
+      return;
+    }
+
+    if (codecPreference !== 'default' && !getSupportedStreamCodecPreferences().includes(codecPreference)) {
+      set({ error: `Selected video codec ${codecPreference.toUpperCase()} is not supported by this browser.` });
       return;
     }
 
@@ -1481,6 +1877,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       manager: ackData.mediaMode === 'p2p' ? createOwnedManager() : null,
       mediaMode: ackData.mediaMode,
       quality,
+      sendCommandAwaitAck,
       sendRawCommand,
       sessionId: ackData.sessionId,
       sfuSession: null,
@@ -1488,6 +1885,23 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       streamId,
       userId,
     };
+    captured.getVideoTracks()[0]?.addEventListener?.(
+      'ended',
+      () => {
+        const runtime = ownedRuntime;
+        if (!runtime || runtime.localStream !== captured || get().ownedStream?.status === 'stopping') return;
+        resolveMediaRecovery(ownedRecoveryId(runtime.streamId));
+        void runtime.sendCommandAwaitAck('stream.stop', {
+          channelId: runtime.channelId,
+          streamId: runtime.streamId,
+        }).catch(() => {
+          // The capture permission has already ended locally.
+        });
+        teardownOwnedRuntime();
+        set({ error: 'Screen capture ended. Select a sharing source again.', ownedStream: null });
+      },
+      { once: true },
+    );
 
     if (ackData.mediaMode === 'sfu') {
       try {
@@ -1500,9 +1914,15 @@ export const useStreamStore = create<StreamState>((set, get) => ({
             streamId,
           },
           sendCommandAwaitAck,
+          { onTransportConnectionStateChange: (_direction, state) => handleOwnedSfuTransportState(state) },
         );
         await sfuSession.load(ackData.sfu);
-        await sfuSession.produceTracks(captured.getTracks());
+        await sfuSession.produceTracks(captured.getTracks(), {
+          degradationPreference: 'balanced',
+          maxVideoBitrateKbps: quality.bitrateKbps,
+          maxVideoFramerate: quality.frameRate,
+          preferredVideoCodec: codecPreference,
+        });
         if (ownedRuntime) {
           ownedRuntime.sfuSession = sfuSession;
         }
@@ -1643,6 +2063,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       manager,
       mediaMode: ackData.mediaMode,
       remoteStream,
+      sendCommandAwaitAck,
       sendRawCommand,
       sessionId: ackData.sessionId,
       sfuSession: null,
@@ -1663,6 +2084,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               streamId: resolvedStreamId,
             },
             sendCommandAwaitAck,
+            { onTransportConnectionStateChange: (_direction, state) => handleWatchedSfuTransportState(resolvedStreamId, state) },
           );
           await sfuSession.load(ackData.sfu);
           runtime.sfuSession = sfuSession;
@@ -1723,6 +2145,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     }
 
     cancelledWatchRequests.add(streamId);
+    resolveMediaRecovery(watchedRecoveryId(streamId));
 
     if (watchedState) {
       updateWatchedStreamState(streamId, (watched) => ({
@@ -1798,6 +2221,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (producer.source !== 'stream' || !producer.streamId) {
       return;
     }
+    lastWatchedVideoStatsSamples.delete(producer.streamId);
     void consumeSfuStreamProducers(producer.streamId, [producer]);
   },
 
@@ -1905,11 +2329,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       : null;
     const canReuseOwned = Boolean(owned?.localStream.getTracks().some((track) => track.readyState === 'live'));
 
-    if (ownedRuntime) {
-      ownedRuntime.manager?.closeAll();
-      ownedRuntime.sfuSession?.close();
-      ownedRuntime = null;
-    }
+    if (ownedRuntime) suspendOwnedTransport();
     for (const streamId of [...watchedRuntimes.keys()]) {
       teardownWatchedRuntime(streamId);
     }
@@ -1957,9 +2377,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         });
         ackData = StreamStartAckDataSchema.parse(raw);
       } catch (err) {
-        set({ error: err instanceof Error ? err.message : 'Failed to restart stream.', ownedStream: null });
-        stopTracks(owned.localStream.getTracks());
-        return;
+        const recoveryError = err instanceof Error ? err : new Error('Failed to restart stream.');
+        set((state) => ({
+          error: null,
+          ownedStream: state.ownedStream ? { ...state.ownedStream, status: 'reconnecting' } : null,
+        }));
+        throw recoveryError;
       }
 
       const streamId = ackData.streamId ?? ackData.sessionId;
@@ -1978,6 +2401,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         manager: ackData.mediaMode === 'p2p' ? createOwnedManager() : null,
         mediaMode: ackData.mediaMode,
         quality: owned.quality,
+        sendCommandAwaitAck,
         sendRawCommand,
         sessionId: ackData.sessionId,
         sfuSession: null,
@@ -1997,16 +2421,26 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               streamId,
             },
             sendCommandAwaitAck,
+            { onTransportConnectionStateChange: (_direction, state) => handleOwnedSfuTransportState(state) },
           );
           await sfuSession.load(ackData.sfu);
-          await sfuSession.produceTracks(owned.localStream.getTracks());
+          await sfuSession.produceTracks(owned.localStream.getTracks(), {
+            degradationPreference: 'balanced',
+            maxVideoBitrateKbps: owned.quality.bitrateKbps,
+            maxVideoFramerate: owned.quality.frameRate,
+            preferredVideoCodec: owned.codecPreference,
+          });
           if (ownedRuntime) {
             ownedRuntime.sfuSession = sfuSession;
           }
         } catch (err) {
-          teardownOwnedRuntime();
-          set({ error: err instanceof Error ? err.message : 'Failed to restart SFU stream.', ownedStream: null });
-          return;
+          const recoveryError = err instanceof Error ? err : new Error('Failed to restart SFU stream.');
+          suspendOwnedTransport();
+          set((state) => ({
+            error: null,
+            ownedStream: state.ownedStream ? { ...state.ownedStream, status: 'reconnecting' } : null,
+          }));
+          throw recoveryError;
         }
       }
 
@@ -2031,8 +2465,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       try {
         await get().watchStream(entry.channelId, entry.streamId, sendCommandAwaitAck, sendRawCommand);
         get().setPlaybackVolume(entry.streamId, desiredVolume);
-      } catch {
-        // Best effort after an admin-triggered media mode switch.
+      } catch (error) {
+        beginWatchedGatewayRecovery(
+          entry,
+          sendCommandAwaitAck,
+          sendRawCommand,
+          error instanceof Error ? error.message : 'Failed to restore live playback.',
+        );
       }
     }
   },
@@ -2044,7 +2483,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       return;
     }
 
-    teardownAllRuntimes();
+    suspendOwnedTransport();
+    for (const streamId of watchedRuntimes.keys()) suspendWatchedTransport(streamId);
 
     set((state) => {
       const nextWatched: Record<string, WatchedStreamState> = {};
@@ -2064,7 +2504,9 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       }
 
       return {
-        ownedStream: null,
+        ownedStream: state.ownedStream
+          ? { ...state.ownedStream, status: 'reconnecting', viewers: [] }
+          : null,
         watchedStreamsById: nextWatched,
         error: null,
       };
@@ -2072,27 +2514,31 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   },
 
   async handleGatewayReconnected(sendCommandAwaitAck, sendRawCommand) {
-    const entries = Object.values(get().watchedStreamsById).filter((w) => w.status !== 'ended');
-    if (entries.length === 0) return;
-
-    for (const entry of entries) {
-      const desiredVolume = entry.playbackVolume;
-      const { channelId, streamId } = entry;
-
-      // Force a full re-watch so the gateway can issue a fresh session + ICE servers.
-      teardownWatchedRuntime(streamId);
-      removeWatchedStreamState(streamId);
-
-      try {
-        await get().watchStream(channelId, streamId, sendCommandAwaitAck, sendRawCommand);
-        get().setPlaybackVolume(streamId, desiredVolume);
-      } catch {
-        // Best-effort: leave it removed; the UI will show the stream as no longer watched.
+    const hasMedia = Boolean(ownedRuntime) || Object.values(get().watchedStreamsById).some((entry) => entry.status !== 'ended');
+    if (!hasMedia) return;
+    try {
+      await get().handleMediaModeUpdated(sendCommandAwaitAck, sendRawCommand);
+    } catch (error) {
+      const runtime = ownedRuntime;
+      if (runtime) {
+        startMediaRecovery({
+          abandon: () => {
+            teardownOwnedRuntime();
+            set({ ownedStream: null });
+          },
+          attempt: () => get().handleGatewayReconnected(sendCommandAwaitAck, sendRawCommand),
+          id: ownedRecoveryId(runtime.streamId),
+          kind: 'stream_publish',
+          reason: error instanceof Error ? error.message : 'Failed to restore the live stream.',
+        });
       }
+      throw error;
     }
   },
 
   handleGatewayDisconnected() {
+    if (ownedRuntime) resolveMediaRecovery(ownedRecoveryId(ownedRuntime.streamId));
+    for (const streamId of watchedRuntimes.keys()) resolveMediaRecovery(watchedRecoveryId(streamId));
     teardownAllRuntimes();
     set(emptyState());
   },

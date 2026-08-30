@@ -6,8 +6,14 @@ import { createApiClient } from '@baker/sdk';
 
 import { i18n } from '../i18n';
 import { LoginView } from '../features/auth/LoginView';
-import { useAuthStore } from '../features/auth/auth-store';
+import {
+  createBrowserAuthSessionPersistence,
+  type AuthSessionPersistence,
+  useAuthStore,
+} from '../features/auth/auth-store';
 import { ChatShell } from '../features/chat/ChatShell';
+import type { ServerSwitcherModel } from '../features/chat/ServerList';
+import { ServerList } from '../features/chat/ServerList';
 import { useGatewayStore } from '../features/gateway/gateway-store';
 import type { PlatformApi } from '../platform/platform-api';
 
@@ -15,34 +21,48 @@ import { deriveDefaultApiBaseUrl, deriveDefaultGatewayUrl } from './derive-defau
 
 export interface AppRootProps {
   apiBaseUrl?: string;
+  authSessionPersistence?: AuthSessionPersistence;
+  authSessionScope?: string;
   desktopUpdateAction?: ReactNode;
   gatewayUrl?: string;
   mediaBaseUrl?: string;
   onChangeServer?: () => void;
   platformApi: PlatformApi;
+  serverSwitcher?: ServerSwitcherModel;
   versionWarning?: string | null;
 }
 
 export function AppRoot(props: AppRootProps) {
+  const content = <AppRootContent {...props} />;
   return (
     <I18nextProvider i18n={i18n}>
-      <AppRootContent {...props} />
+      {props.serverSwitcher ? (
+        <div className="desktop-server-app-shell">
+          <ServerList model={props.serverSwitcher} />
+          <div className="desktop-server-app-content">{content}</div>
+        </div>
+      ) : (
+        content
+      )}
     </I18nextProvider>
   );
 }
 
 function AppRootContent({
   apiBaseUrl,
+  authSessionPersistence,
+  authSessionScope = 'web',
   desktopUpdateAction,
   gatewayUrl,
   onChangeServer,
-  platformApi: _platformApi,
+  platformApi,
+  serverSwitcher,
   versionWarning,
 }: AppRootProps) {
   const { t } = useTranslation();
   const accessToken = useAuthStore((s) => s.accessToken);
   const isBootstrapping = useAuthStore((s) => s.isBootstrapping);
-  const rehydrate = useAuthStore((s) => s.rehydrate);
+  const activateSessionPersistence = useAuthStore((s) => s.activateSessionPersistence);
   const bootstrapSession = useAuthStore((s) => s.bootstrapSession);
   const connect = useGatewayStore((s) => s.connect);
   const disconnect = useGatewayStore((s) => s.disconnect);
@@ -50,6 +70,9 @@ function AppRootContent({
 
   const [publicConfig, setPublicConfig] = useState<PublicServerConfig | null>(null);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const browserSessionPersistence = useMemo(() => createBrowserAuthSessionPersistence(), []);
+  const resolvedSessionPersistence = authSessionPersistence ?? browserSessionPersistence;
 
   const resolvedApiBaseUrl = useMemo(() => {
     const trimmedProp = apiBaseUrl?.trim();
@@ -78,12 +101,25 @@ function AppRootContent({
   );
 
   useEffect(() => {
-    rehydrate();
-  }, [rehydrate]);
+    let cancelled = false;
+    setSessionReady(false);
 
-  useEffect(() => {
-    void bootstrapSession(api);
-  }, [api, bootstrapSession]);
+    void (async () => {
+      try {
+        await activateSessionPersistence(authSessionScope, resolvedSessionPersistence);
+        if (cancelled || useAuthStore.getState().sessionScope !== authSessionScope) return;
+        await bootstrapSession(api);
+      } finally {
+        if (!cancelled && useAuthStore.getState().sessionScope === authSessionScope) {
+          setSessionReady(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activateSessionPersistence, api, authSessionScope, bootstrapSession, resolvedSessionPersistence]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +154,7 @@ function AppRootContent({
   }, [api]);
 
   useEffect(() => {
-    if (accessToken && !isBootstrapping) {
+    if (sessionReady && accessToken && !isBootstrapping) {
       if (gatewayStatus === 'disconnected' || gatewayStatus === 'error') {
         connect(api, resolvedGatewayUrl);
       }
@@ -127,9 +163,9 @@ function AppRootContent({
     }
     // api is stable (memoized); gatewayStatus intentionally omitted to avoid reconnect loops.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, api, isBootstrapping, resolvedGatewayUrl]);
+  }, [accessToken, api, isBootstrapping, resolvedGatewayUrl, sessionReady]);
 
-  if (!publicConfig) {
+  if (!publicConfig || !sessionReady) {
     return (
       <div className="login-shell">
         <div className="login-card">
@@ -157,6 +193,7 @@ function AppRootContent({
   if (!accessToken) {
     return (
       <LoginView
+        allowRememberCredentials={platformApi.name === 'web'}
         api={api}
         bootstrapError={bootstrapError}
         desktopUpdateAction={desktopUpdateAction}
@@ -179,6 +216,7 @@ function AppRootContent({
     <ChatShell
       api={api}
       gatewayUrl={resolvedGatewayUrl}
+      hideGuildList={Boolean(serverSwitcher)}
       onChangeServer={onChangeServer}
       serverName={publicConfig.serverName}
       versionWarning={versionWarning}

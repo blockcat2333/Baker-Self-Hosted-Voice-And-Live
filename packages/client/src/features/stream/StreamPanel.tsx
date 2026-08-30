@@ -24,6 +24,7 @@ import {
   type CameraOption,
   DEFAULT_STREAM_CODEC_PREFERENCE,
   DEFAULT_STREAM_QUALITY,
+  getSupportedStreamCodecPreferences,
   STREAM_BITRATE_OPTIONS,
   STREAM_CODEC_OPTIONS,
   STREAM_FRAME_RATE_OPTIONS,
@@ -317,6 +318,10 @@ function LiveDetailPanel() {
       : t('stream.live_detail_none');
 
   const activeStats = statsState.stats;
+  const captureFrameRate = ownedStream?.localPreviewStream?.getVideoTracks()[0]?.getSettings().frameRate ?? null;
+  const captureBelowTarget = Boolean(
+    ownedStream && captureFrameRate !== null && captureFrameRate < ownedStream.quality.frameRate * 0.85,
+  );
   const watchedPacketLossPct =
     statsState.kind === 'watched' &&
     statsState.stats?.packetsLost !== null &&
@@ -406,10 +411,18 @@ function LiveDetailPanel() {
             <dd>{ownedStream?.viewers.length ?? watchedStream?.viewers.length ?? 0}</dd>
           </div>
         {ownedStream ? (
-          <div className={'stream-live-detail-row'}>
-            <dt>{t('stream.live_detail_target_quality')}</dt>
-            <dd>{`${ownedStream.quality.resolution} / ${ownedStream.quality.frameRate} fps / ${ownedStream.quality.bitrateKbps} kbps`}</dd>
-          </div>
+          <>
+            <div className={'stream-live-detail-row'}>
+              <dt>{t('stream.live_detail_target_quality')}</dt>
+              <dd>{`${ownedStream.quality.resolution} / ${ownedStream.quality.frameRate} fps / ${ownedStream.quality.bitrateKbps} kbps`}</dd>
+            </div>
+            <div className={'stream-live-detail-row'}>
+              <dt>{t('stream.live_detail_capture_frame_rate')}</dt>
+              <dd className={captureBelowTarget ? 'stream-live-detail-warning' : undefined}>
+                {formatNullableValue(captureFrameRate, 'fps')}
+              </dd>
+            </div>
+          </>
         ) : watchedStream ? (
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.popup_stream_volume')}</dt>
@@ -481,6 +494,7 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
     () => loadStringOptionPreference('streamCodecPreference', DEFAULT_STREAM_CODEC_PREFERENCE, STREAM_CODEC_OPTIONS),
   );
   const [selectedShareSource, setSelectedShareSource] = useState<'camera' | 'screen'>('screen');
+  const supportedCodecPreferences = useMemo(() => getSupportedStreamCodecPreferences(), []);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const voiceStatus = useVoiceStore((s) => s.status);
   const ownedStream = useStreamStore((s) => s.ownedStream);
@@ -722,8 +736,15 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                     }
                   >
                     {STREAM_CODEC_OPTIONS.map((codecPreference) => (
-                      <option key={codecPreference} value={codecPreference}>
+                      <option
+                        key={codecPreference}
+                        value={codecPreference}
+                        disabled={!supportedCodecPreferences.includes(codecPreference)}
+                      >
                         {codecPreferenceLabel(t, codecPreference)}
+                        {!supportedCodecPreferences.includes(codecPreference)
+                          ? ` (${t('stream.codec_unsupported')})`
+                          : ''}
                       </option>
                     ))}
                   </select>

@@ -5,6 +5,7 @@ import { GatewayClient } from '@baker/sdk';
 import type { GatewayCommandName, VoiceParticipant } from '@baker/protocol';
 import {
   MediaSignalRelayEventDataSchema,
+  MediaSessionRestartedEventDataSchema,
   MediaModeUpdatedEventDataSchema,
   MediaSfuProducerEventDataSchema,
   MessageCreatedEventDataSchema,
@@ -21,6 +22,10 @@ import {
 import { useAuthStore } from '../auth/auth-store';
 import { useChatStore } from '../chat/chat-store';
 import { useMusicStore } from '../music/music-store';
+import {
+  resolveMediaRecovery,
+  setPassiveMediaRecovery,
+} from '../recovery/recovery-store';
 import { closeAllStreamPopups } from '../stream/stream-popup-controller';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
@@ -73,13 +78,17 @@ let savedApi: ApiClient | null = null;
 let savedUrl: string | null = null;
 let pingTimerId: ReturnType<typeof setInterval> | null = null;
 let lastPingSentAtMs: number | null = null;
+let missedLatencyPongs = 0;
 let handshakeTimerId: ReturnType<typeof setTimeout> | null = null;
+let gatewayRecoveryAbandoned = false;
 
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 const RECONNECT_FACTOR = 2;
 const LATENCY_PING_INTERVAL_MS = 5_000;
 const HANDSHAKE_TIMEOUT_MS = 8_000;
+const MAX_MISSED_LATENCY_PONGS = 3;
+const GATEWAY_RECOVERY_ID = 'gateway:connection';
 
 // ── Pending ack registry ──────────────────────────────────────────────────────
 
@@ -89,6 +98,14 @@ type PendingAck = {
   timer: ReturnType<typeof setTimeout>;
 };
 const pendingAcks = new Map<string, PendingAck>();
+
+function rejectPendingAcks(reason: string) {
+  for (const pending of pendingAcks.values()) {
+    clearTimeout(pending.timer);
+    pending.reject(new Error(reason));
+  }
+  pendingAcks.clear();
+}
 
 // ── Module-level send helpers (exported for use by voice-store via components) ─
 
@@ -148,10 +165,18 @@ function clearLatencyProbe() {
     pingTimerId = null;
   }
   lastPingSentAtMs = null;
+  missedLatencyPongs = 0;
 }
 
 function sendLatencyPing() {
   if (!client) return;
+  if (lastPingSentAtMs !== null) {
+    missedLatencyPongs += 1;
+    if (missedLatencyPongs >= MAX_MISSED_LATENCY_PONGS) {
+      client.close();
+      return;
+    }
+  }
   lastPingSentAtMs = Date.now();
   client.ping();
 }
@@ -170,7 +195,29 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
   function scheduleReconnect() {
     const { reconnectAttempt } = get();
     const delay = reconnectDelay(reconnectAttempt);
-    set({ status: 'reconnecting', reconnectAttempt: reconnectAttempt + 1 });
+    const nextAttempt = reconnectAttempt + 1;
+    const retryAt = Date.now() + delay;
+    set({ status: 'reconnecting', reconnectAttempt: nextAttempt });
+    if (!gatewayRecoveryAbandoned) {
+      setPassiveMediaRecovery({
+        abandon: () => {
+          gatewayRecoveryAbandoned = true;
+          resolveMediaRecovery(GATEWAY_RECOVERY_ID);
+        },
+        attempt: nextAttempt,
+        id: GATEWAY_RECOVERY_ID,
+        kind: 'gateway',
+        lastError: get().error ?? 'Gateway connection was interrupted.',
+        nextRetryAt: retryAt,
+        retry: () => {
+          cancelReconnect();
+          if (savedApi && savedUrl) {
+            client = null;
+            get().connect(savedApi, savedUrl);
+          }
+        },
+      });
+    }
     reconnectTimerId = setTimeout(() => {
       reconnectTimerId = null;
       if (savedApi && savedUrl) {
@@ -208,6 +255,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       }
       clearLatencyProbe();
       clearHandshakeTimeout();
+      rejectPendingAcks('Gateway connection closed before the command completed.');
       useVoiceStore.getState().handleGatewayWillReconnect();
       useMusicStore.getState().handleGatewayWillReconnect();
       useStreamStore.getState().handleGatewayWillReconnect();
@@ -238,6 +286,7 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           set({ gatewayRttMs: rtt });
           lastPingSentAtMs = null;
         }
+        missedLatencyPongs = 0;
         return;
       }
 
@@ -432,6 +481,20 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
             void useStreamStore.getState().handleMediaModeUpdated(sendCommandAwaitAck, sendRawCommand);
           }
         }
+
+        if (envelope.event === 'media.session.restarted') {
+          const result = MediaSessionRestartedEventDataSchema.safeParse(envelope.data);
+          if (result.success) {
+            const mode = result.data.session.mode;
+            if (mode === 'voice') {
+              useVoiceStore.getState().handleMediaSessionRestarted?.(result.data);
+            } else if (mode === 'music_publish' || mode === 'music_listen') {
+              useMusicStore.getState().handleMediaSessionRestarted?.(result.data);
+            } else {
+              useStreamStore.getState().handleMediaSessionRestarted?.(result.data);
+            }
+          }
+        }
       }
 
       // ── Auth ack (no reqId tracking) ───────────────────────────────────────
@@ -440,12 +503,21 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
           clearHandshakeTimeout();
           ensureLatencyProbe();
           set({ status: 'ready', reconnectAttempt: 0, error: null });
+          gatewayRecoveryAbandoned = false;
+          resolveMediaRecovery(GATEWAY_RECOVERY_ID);
           const { activeChannelId } = useChatStore.getState();
           if (activeChannelId) {
             get().subscribeChannel(activeChannelId);
           }
-          void useVoiceStore.getState().handleGatewayReconnected();
-          void useStreamStore.getState().handleGatewayReconnected(sendCommandAwaitAck, sendRawCommand);
+          void Promise.resolve(useVoiceStore.getState().handleGatewayReconnected()).catch(() => {
+            // The voice store owns its persistent recovery loop and user-facing incident.
+          });
+          void Promise.resolve(useMusicStore.getState().handleGatewayReconnected()).catch(() => {
+            // The music store owns its persistent recovery loop and user-facing incident.
+          });
+          void Promise.resolve(useStreamStore.getState().handleGatewayReconnected(sendCommandAwaitAck, sendRawCommand)).catch(() => {
+            // The stream store owns its persistent recovery loop and user-facing incident.
+          });
         }
       }
 
@@ -513,14 +585,17 @@ export const useGatewayStore = create<GatewayState>((set, get) => {
       cancelReconnect();
       clearLatencyProbe();
       clearHandshakeTimeout();
+      rejectPendingAcks('Gateway disconnected before the command completed.');
       savedApi = null;
       savedUrl = null;
+      gatewayRecoveryAbandoned = false;
       client?.close();
       client = null;
       closeAllStreamPopups();
       useVoiceStore.getState().handleGatewayDisconnected();
       useMusicStore.getState().reset();
       useStreamStore.getState().reset();
+      resolveMediaRecovery(GATEWAY_RECOVERY_ID);
       set({
         status: 'disconnected',
         reconnectAttempt: 0,

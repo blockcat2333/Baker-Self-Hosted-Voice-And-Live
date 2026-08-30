@@ -17,6 +17,7 @@ import type {
   GatewayCommandName,
   IceServer,
   MediaSignalRelayEventData,
+  MediaSessionRestartedEventData,
   MediaSfuProducerEventData,
   MediaTransportMode,
   SfuProducer,
@@ -25,11 +26,16 @@ import type {
   VoiceSpeakingUpdatedEventData,
   VoiceStateUpdatedEventData,
 } from '@baker/protocol';
-import { VoiceJoinAckDataSchema } from '@baker/protocol';
+import { MediaSessionReconnectAckDataSchema, VoiceJoinAckDataSchema } from '@baker/protocol';
 import { SfuClientSession, WebRtcManager } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
+import {
+  isMediaReconnectUnsupported,
+  resolveMediaRecovery,
+  startMediaRecovery,
+} from '../recovery/recovery-store';
 import {
   applyPreferredAudioOutputDevice,
   buildPreferredAudioInputConstraints,
@@ -51,9 +57,11 @@ import {
 } from './voice-audio';
 import { playVoiceSfx } from './voice-sfx';
 
-const SPEAKING_POLL_MS = 100;
-const SPEAKING_TRANSITION_TICKS = 2;
-const SPEAKING_THRESHOLD = 0.02;
+const SPEAKING_POLL_MS = 50;
+const SPEAKING_ATTACK_TICKS = 1;
+const SPEAKING_RELEASE_TICKS = 5;
+const SPEAKING_START_THRESHOLD = 0.01;
+const SPEAKING_STOP_THRESHOLD = 0.006;
 
 let localCaptureStream: MediaStream | null = null;
 let localSendStream: MediaStream | null = null;
@@ -129,12 +137,16 @@ const VOICE_CONNECTING_ISSUE_DELAY_MS = 10_000;
 const VOICE_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
 const VOICE_FAILED_ISSUE_DELAY_MS = 2_000;
 
+function voiceRecoveryId(channelId: string) {
+  return `voice:${channelId}`;
+}
+
 export type VoiceStatus = 'idle' | 'requesting_mic' | 'joining' | 'reconnecting' | 'active' | 'leaving' | 'error';
 
 function getMicUnavailableReason(): string | null {
   if (typeof navigator === 'undefined') return 'not_connected';
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-    // Non-secure context (HTTP on mobile) or very old browser
+    // Non-secure remote HTTP context or very old browser.
     return 'insecure_context';
   }
   return null;
@@ -179,6 +191,7 @@ export interface VoiceState {
   handleSfuProducerAdded(data: MediaSfuProducerEventData): void;
   handleSfuProducerRemoved(data: MediaSfuProducerEventData): void;
   handleMediaModeUpdated(): Promise<void>;
+  handleMediaSessionRestarted(event: MediaSessionRestartedEventData): void;
   /** Called before the gateway store starts a reconnect loop (keep local media, rejoin later). */
   handleGatewayWillReconnect(): void;
   /** Called after the gateway reconnects/authenticates (attempt to rejoin the previous voice channel). */
@@ -431,40 +444,88 @@ function shouldFailSfuVoiceMediaSession() {
   return getRemoteVoiceParticipants(participants).length > 0 && peersWithRemoteAudio.size === 0;
 }
 
+async function attemptVoiceMediaRecovery() {
+  const state = useVoiceStore.getState();
+  const channelId = state.channelId ?? savedChannelId;
+  const sessionId = savedMySessionId;
+  const sendCommandAwaitAck = savedSendCommandAwaitAck;
+  if (!channelId || !sessionId || !sendCommandAwaitAck || !localSendStream) {
+    throw new Error('Voice recovery state is incomplete.');
+  }
+  if (localSendStream.getAudioTracks().every((track) => track.readyState === 'ended')) {
+    throw new Error('The microphone track has ended. Rejoin the voice channel to select it again.');
+  }
+
+  const participants = useVoiceStore.getState().participants;
+  let ackData: ReturnType<typeof VoiceJoinAckDataSchema.parse>;
+  try {
+    const raw = await sendCommandAwaitAck('media.session.reconnect', {
+      channelId,
+      mode: 'voice',
+      sessionId,
+    });
+    const reconnect = MediaSessionReconnectAckDataSchema.parse(raw);
+    ackData = VoiceJoinAckDataSchema.parse({
+      channelId,
+      iceServers: reconnect.iceServers,
+      mediaMode: reconnect.mediaMode,
+      participants,
+      sessionId: reconnect.session.sessionId,
+      sfu: reconnect.sfu,
+    });
+  } catch (error) {
+    if (!isMediaReconnectUnsupported(error)) throw error;
+    await sendCommandAwaitAck('voice.leave', { channelId }).catch(() => undefined);
+    ackData = VoiceJoinAckDataSchema.parse(await sendCommandAwaitAck('voice.join', { channelId }));
+  }
+
+  teardownPeersForReconnect();
+  savedChannelId = channelId;
+  savedMySessionId = ackData.sessionId;
+  savedMyUserId = useAuthStore.getState().user?.id ?? savedMyUserId;
+  savedIceServers = ackData.iceServers;
+  savedMediaMode = ackData.mediaMode;
+
+  if (ackData.mediaMode === 'sfu') {
+    await setupSfuVoiceSession(ackData, sendCommandAwaitAck);
+  } else {
+    webrtcManager = createManager();
+    await createP2pOffersForParticipants(ackData.participants, savedMyUserId, localSendStream, ackData.iceServers);
+  }
+
+  startSpeakingDetection();
+  startNetworkStatsPolling();
+  applyLocalMuteToTracks(state.isMuted);
+  syncRemoteAudioElementVolumes();
+  useVoiceStore.setState({
+    status: 'active',
+    channelId,
+    connectionIssue: null,
+    error: null,
+    participants: ackData.participants,
+  });
+}
+
 function failVoiceMediaConnection(error = 'connection_error') {
   const { channelId, status } = useVoiceStore.getState();
   if (status !== 'active') {
     return;
   }
 
-  const leaveChannelId = channelId ?? savedChannelId;
-  const sendCommandAwaitAck = savedSendCommandAwaitAck;
-
-  if (webrtcManager) {
-    for (const peerId of webrtcManager.getPeerIds()) {
-      sendSignal(peerId, { type: 'end' });
-    }
-  }
-
-  teardown();
-
-  if (leaveChannelId && sendCommandAwaitAck) {
-    void sendCommandAwaitAck('voice.leave', { channelId: leaveChannelId }).catch(() => {
-      // Best-effort: local media has already been cleaned up.
-    });
-  }
-
+  const recoveryChannelId = channelId ?? savedChannelId;
+  if (!recoveryChannelId) return;
+  teardownPeersForReconnect();
   useVoiceStore.setState({
-    status: 'error',
-    channelId: null,
-    error,
-    isMuted: false,
-    connectionIssue: null,
-    localMediaSelfLossPct: null,
-    localMediaSelfUpdatedAt: null,
-    participants: [],
-    speakingUserIds: new Set(),
-    peerNetwork: {},
+    status: 'reconnecting',
+    error: null,
+    connectionIssue: error,
+  });
+  startMediaRecovery({
+    abandon: () => useVoiceStore.getState().handleGatewayDisconnected(),
+    attempt: attemptVoiceMediaRecovery,
+    id: voiceRecoveryId(recoveryChannelId),
+    kind: 'voice',
+    reason: error,
   });
 }
 
@@ -814,13 +875,16 @@ function startSpeakingDetection() {
     let sumSq = 0;
     for (const v of buf) sumSq += v * v;
     const rms = Math.sqrt(sumSq / buf.length);
-    const speakingNow = rms > SPEAKING_THRESHOLD;
+    const speakingNow = isSpeakingLocal
+      ? rms > SPEAKING_STOP_THRESHOLD
+      : rms >= SPEAKING_START_THRESHOLD;
 
     if (speakingNow === isSpeakingLocal) {
       speakingTicks = 0;
     } else {
       speakingTicks += 1;
-      if (speakingTicks >= SPEAKING_TRANSITION_TICKS) {
+      const transitionTicks = speakingNow ? SPEAKING_ATTACK_TICKS : SPEAKING_RELEASE_TICKS;
+      if (speakingTicks >= transitionTicks) {
         isSpeakingLocal = speakingNow;
         speakingTicks = 0;
         savedSendRawCommand('voice.speaking.updated', {
@@ -908,11 +972,8 @@ function teardownPeersForReconnect() {
   }
   remoteAudioElements.clear();
 
-  // Keep local streams and mic processing so a reconnect does not prompt again.
-  savedMySessionId = null;
-  savedMyUserId = null;
-  savedIceServers = [];
-  savedMediaMode = 'p2p';
+  // Keep the logical descriptor, local streams and mic processing so a media
+  // reconnect can rebuild transports without asking for microphone access.
   peersWithRemoteAudio.clear();
   clearAllVoiceConnectionIssueTimers();
 }
@@ -1156,7 +1217,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
     set({ status: 'requesting_mic', channelId, connectionIssue: null, error: null });
 
-    // Guard: navigator.mediaDevices is undefined in non-secure (HTTP) contexts on mobile.
+    // Guard: navigator.mediaDevices is undefined in non-secure remote HTTP contexts.
     const unavailableReason = getMicUnavailableReason();
     if (unavailableReason) {
       set({
@@ -1277,9 +1338,10 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
   async leaveVoiceChannel(sendCommandAwaitAck) {
     const { channelId, status } = get();
-    if (status !== 'active' || !channelId) return;
+    if ((status !== 'active' && status !== 'reconnecting') || !channelId) return;
 
     set({ status: 'leaving' });
+    resolveMediaRecovery(voiceRecoveryId(channelId));
 
     if (webrtcManager) {
       for (const peerId of webrtcManager.getPeerIds()) {
@@ -1656,6 +1718,26 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     await get().handleGatewayReconnected();
   },
 
+  handleMediaSessionRestarted(event) {
+    if (event.session.mode !== 'voice' || event.session.channelId !== get().channelId) return;
+    if (event.userId === savedMyUserId || savedMediaMode !== 'p2p' || !webrtcManager || !localSendStream) return;
+    webrtcManager.closePeer(event.userId);
+    peersWithRemoteAudio.delete(event.userId);
+    const remoteAudio = remoteAudioElements.get(event.userId);
+    if (remoteAudio) {
+      detachRemoteAudioGain(event.userId);
+      detachRemoteAudio(remoteAudio);
+      remoteAudioElements.delete(event.userId);
+    }
+    if (savedMyUserId && savedMyUserId < event.userId) {
+      void webrtcManager.createOffer(event.userId, localSendStream, savedIceServers).then((offer) => {
+        sendSignal(event.userId, { type: 'offer', sdp: offer.sdp ?? '' });
+      }).catch((error) => {
+        console.warn('[voice] failed to renegotiate restarted peer', event.userId, error);
+      });
+    }
+  },
+
   handleGatewayWillReconnect() {
     const { status, channelId } = get();
     if (status === 'idle' || status === 'error') return;
@@ -1676,6 +1758,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       });
       return;
     }
+
+    resolveMediaRecovery(voiceRecoveryId(channelId));
 
     // Preserve local mic streams so reconnect does not prompt again; drop peers/signaling state.
     teardownPeersForReconnect();
@@ -1704,13 +1788,20 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       const raw = await savedSendCommandAwaitAck('voice.join', { channelId });
       ackData = VoiceJoinAckDataSchema.parse(raw);
     } catch (err) {
+      const recoveryError = err instanceof Error ? err : new Error('Failed to rejoin voice channel.');
       set({
-        status: 'error',
-        error: err instanceof Error ? err.message : 'not_connected',
-        connectionIssue: null,
-        channelId: null,
+        status: 'reconnecting',
+        error: null,
+        connectionIssue: recoveryError.message,
       });
-      return;
+      startMediaRecovery({
+        abandon: () => get().handleGatewayDisconnected(),
+        attempt: () => get().handleGatewayReconnected(),
+        id: voiceRecoveryId(channelId),
+        kind: 'voice',
+        reason: recoveryError.message,
+      });
+      throw recoveryError;
     }
 
     savedChannelId = channelId;
@@ -1727,13 +1818,20 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       try {
         await setupSfuVoiceSession(ackData, savedSendCommandAwaitAck);
       } catch (err) {
+        const recoveryError = err instanceof Error ? err : new Error('Failed to rejoin SFU voice channel.');
         set({
-          status: 'error',
-          error: err instanceof Error ? err.message : 'Failed to rejoin SFU voice channel.',
-          connectionIssue: null,
-          channelId: null,
+          status: 'reconnecting',
+          error: null,
+          connectionIssue: recoveryError.message,
         });
-        return;
+        startMediaRecovery({
+          abandon: () => get().handleGatewayDisconnected(),
+          attempt: () => get().handleGatewayReconnected(),
+          id: voiceRecoveryId(channelId),
+          kind: 'voice',
+          reason: recoveryError.message,
+        });
+        throw recoveryError;
       }
     } else {
       webrtcManager = createManager();
@@ -1780,6 +1878,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   },
 
   handleGatewayDisconnected() {
+    const recoveryChannelId = get().channelId ?? savedChannelId;
+    if (recoveryChannelId) resolveMediaRecovery(voiceRecoveryId(recoveryChannelId));
     if (get().status === 'idle') return;
     teardown();
     set({

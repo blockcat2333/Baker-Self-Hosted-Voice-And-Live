@@ -186,6 +186,7 @@ import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
 import { useAudioDeviceStore } from '../media/audio-device-store';
 import { CLIENT_PREFERENCES_STORAGE_KEY } from '../preferences/client-preferences';
+import { resetMediaRecoveryStore } from '../recovery/recovery-store';
 import { useVoiceStore } from './voice-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
@@ -334,6 +335,10 @@ afterEach(async () => {
       .getState()
       .leaveVoiceChannel(async () => ({ channelId }));
   }
+  if (useVoiceStore.getState().status !== 'idle') {
+    useVoiceStore.getState().handleGatewayDisconnected();
+  }
+  resetMediaRecoveryStore();
   vi.runOnlyPendingTimers();
   vi.useRealTimers();
   globalThis.Audio = OriginalAudio;
@@ -515,6 +520,68 @@ describe('voice channel switch', () => {
 });
 
 describe('voice mute behavior', () => {
+  it('lights the local speaker within one 50ms detection interval', async () => {
+    const sendRawCommand = vi.fn();
+
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [{ isMuted: false, sessionId, userId }],
+        sessionId,
+      }),
+      sendRawCommand,
+    );
+
+    analyserAmplitude = 0.012;
+    vi.advanceTimersByTime(49);
+    expect(useVoiceStore.getState().speakingUserIds.has(userId)).toBe(false);
+
+    vi.advanceTimersByTime(1);
+    expect(useVoiceStore.getState().speakingUserIds.has(userId)).toBe(true);
+    expect(sendRawCommand).toHaveBeenCalledWith('voice.speaking.updated', {
+      channelId,
+      isMuted: false,
+      isSpeaking: true,
+    });
+  });
+
+  it('uses hysteresis to ignore low noise and delay the speaking release', async () => {
+    const sendRawCommand = vi.fn();
+
+    await useVoiceStore.getState().joinVoiceChannel(
+      channelId,
+      async () => ({
+        channelId,
+        iceServers: [],
+        participants: [{ isMuted: false, sessionId, userId }],
+        sessionId,
+      }),
+      sendRawCommand,
+    );
+
+    analyserAmplitude = 0.008;
+    vi.advanceTimersByTime(300);
+    expect(useVoiceStore.getState().speakingUserIds.has(userId)).toBe(false);
+
+    analyserAmplitude = 0.012;
+    vi.advanceTimersByTime(50);
+    expect(useVoiceStore.getState().speakingUserIds.has(userId)).toBe(true);
+
+    analyserAmplitude = 0.005;
+    vi.advanceTimersByTime(200);
+    expect(useVoiceStore.getState().speakingUserIds.has(userId)).toBe(true);
+
+    vi.advanceTimersByTime(50);
+    expect(useVoiceStore.getState().speakingUserIds.has(userId)).toBe(false);
+
+    const speakingCalls = sendRawCommand.mock.calls.filter(
+      ([command]) => command === 'voice.speaking.updated',
+    );
+    expect(speakingCalls).toHaveLength(2);
+  });
+
   it('stops reporting local speaking while muted', async () => {
     const sendRawCommand = vi.fn();
 
@@ -775,7 +842,7 @@ describe('voice media network stats', () => {
 });
 
 describe('voice connection issues', () => {
-  it('leaves voice and shows an error when the only peer stays failed', async () => {
+  it('keeps the channel and starts media recovery when the only peer stays failed', async () => {
     const sendRawCommand = vi.fn();
     const peerId = '77777777-7777-4777-8777-777777777777';
     const sendCommandAwaitAck = vi.fn(async (command: string) => {
@@ -807,17 +874,18 @@ describe('voice connection issues', () => {
     latestCallbacks!.onPeerConnectionStateChange(peerId, 'failed');
     await vi.advanceTimersByTimeAsync(2_000);
 
-    expect(useVoiceStore.getState().status).toBe('error');
-    expect(useVoiceStore.getState().error).toBe('connection_error');
-    expect(useVoiceStore.getState().channelId).toBeNull();
-    expect(useVoiceStore.getState().connectionIssue).toBeNull();
-    expect(captureTrack.stop).toHaveBeenCalledOnce();
+    expect(useVoiceStore.getState().status).toBe('reconnecting');
+    expect(useVoiceStore.getState().error).toBeNull();
+    expect(useVoiceStore.getState().channelId).toBe(channelId);
+    expect(useVoiceStore.getState().connectionIssue).toBe('connection_error');
+    expect(captureTrack.stop).not.toHaveBeenCalled();
     expect(closeAll).toHaveBeenCalledOnce();
-    expect(sendRawCommand).toHaveBeenCalledWith(
-      'media.signal.end',
-      expect.objectContaining({ targetUserId: peerId }),
-    );
-    expect(sendCommandAwaitAck).toHaveBeenCalledWith('voice.leave', { channelId });
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('media.session.reconnect', {
+      channelId,
+      mode: 'voice',
+      sessionId,
+    });
+    expect(sendCommandAwaitAck).not.toHaveBeenCalledWith('voice.leave', { channelId });
   });
 
   it('keeps voice active when another remote audio path is available', async () => {
@@ -854,7 +922,7 @@ describe('voice connection issues', () => {
     expect(sendCommandAwaitAck).not.toHaveBeenCalledWith('voice.leave', expect.anything());
   });
 
-  it('leaves voice and shows an error when the SFU transport stays failed', async () => {
+  it('keeps the channel and starts media recovery when the SFU transport stays failed', async () => {
     const sendRawCommand = vi.fn();
     const peerId = '77777777-7777-4777-8777-777777777777';
     const sendCommandAwaitAck = vi.fn(async (command: string) => {
@@ -884,11 +952,16 @@ describe('voice connection issues', () => {
     latestSfuCallbacks!.onTransportConnectionStateChange!('send', 'failed');
     await vi.advanceTimersByTimeAsync(2_000);
 
-    expect(useVoiceStore.getState().status).toBe('error');
-    expect(useVoiceStore.getState().error).toBe('connection_error');
-    expect(useVoiceStore.getState().channelId).toBeNull();
-    expect(useVoiceStore.getState().connectionIssue).toBeNull();
+    expect(useVoiceStore.getState().status).toBe('reconnecting');
+    expect(useVoiceStore.getState().error).toBeNull();
+    expect(useVoiceStore.getState().channelId).toBe(channelId);
+    expect(useVoiceStore.getState().connectionIssue).toBe('connection_error');
     expect(sfuClose).toHaveBeenCalledOnce();
-    expect(sendCommandAwaitAck).toHaveBeenCalledWith('voice.leave', { channelId });
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('media.session.reconnect', {
+      channelId,
+      mode: 'voice',
+      sessionId,
+    });
+    expect(sendCommandAwaitAck).not.toHaveBeenCalledWith('voice.leave', { channelId });
   });
 });

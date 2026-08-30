@@ -93,6 +93,7 @@ installer. See `LICENSES/THIRD_PARTY_NOTICES.md`.
 
 ## Release notes
 
+- [Baker Lite 1.1.4a](docs/releases/1.1.4a.md)
 - [Baker Lite 1.1.3a](docs/releases/1.1.3a.md)
 - [Baker Lite 1.1.1a](docs/releases/1.1.1a.md)
 - [Baker Lite 1.1.1](docs/releases/1.1.1.md)

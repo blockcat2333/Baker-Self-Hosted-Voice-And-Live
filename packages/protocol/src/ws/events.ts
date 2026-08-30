@@ -23,6 +23,7 @@ export const GatewayEventNameSchema = z.enum([
   /** Single relay event for all media.signal.* types; signal.type discriminates. */
   'media.signal',
   'media.mode.updated',
+  'media.session.restarted',
   'media.sfu.producer.added',
   'media.sfu.producer.removed',
   'music.state.updated',
@@ -49,6 +50,7 @@ export const GatewayCommandNameSchema = z.enum([
   'media.signal.ice_candidate',
   'media.signal.offer',
   'media.signal.restart_ice',
+  'media.session.reconnect',
   'media.sfu.close',
   'media.sfu.connect_transport',
   'media.sfu.consume',

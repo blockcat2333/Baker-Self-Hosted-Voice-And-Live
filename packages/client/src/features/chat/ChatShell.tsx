@@ -1,14 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ApiClient } from '@baker/sdk';
 
 import { AccountPanel } from '../auth/AccountPanel';
 import { useGatewayStore } from '../gateway/gateway-store';
+import {
+  abandonAllMediaRecovery,
+  retryMediaRecoveryNow,
+  useMediaRecoveryStore,
+} from '../recovery/recovery-store';
 import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
+import { playVoiceSfx } from '../voice/voice-sfx';
 import { VoiceBottomControlBar, VoiceChannelView, VoicePanel, VoiceSidebarVolumeControls } from '../voice/VoicePanel';
 import { loadBooleanPreference, saveClientPreferencesPatch } from '../preferences/client-preferences';
 import { syncGatewayChannelSubscription } from './channel-sync';
@@ -27,6 +33,7 @@ import { Tooltip } from './Tooltip';
 export interface ChatShellProps {
   api: ApiClient;
   gatewayUrl: string;
+  hideGuildList?: boolean;
   onChangeServer?: () => void;
   serverName: string;
   versionWarning?: string | null;
@@ -53,7 +60,7 @@ function SettingsIcon() {
   );
 }
 
-export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, versionWarning }: ChatShellProps) {
+export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServer, serverName, versionWarning }: ChatShellProps) {
   const { t } = useTranslation();
   const activeGuildId = useChatStore((s) => s.activeGuildId);
   const guilds = useChatStore((s) => s.guilds);
@@ -75,6 +82,11 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
   const voiceChannelId = useVoiceStore((s) => s.channelId);
   const ownedStream = useStreamStore((s) => s.ownedStream);
   const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
+  const recoveryIncidentMap = useMediaRecoveryStore((s) => s.incidents);
+  const recoveryIncidents = useMemo(
+    () => Object.values(recoveryIncidentMap).filter((incident) => incident.escalated),
+    [recoveryIncidentMap],
+  );
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -92,6 +104,18 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
     kind: 'text',
   });
   const previousActiveChannelIdRef = useRef<string | null>(null);
+  const recoveryAlertPlayedRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    const activeIds = new Set(recoveryIncidents.map((incident) => incident.id));
+    const hasNewEscalation = recoveryIncidents.some(
+      (incident) => !recoveryAlertPlayedRef.current.has(incident.id),
+    );
+    if (hasNewEscalation) {
+      playVoiceSfx('recovery_failed');
+    }
+    recoveryAlertPlayedRef.current = activeIds;
+  }, [recoveryIncidents]);
 
   // Load guilds once on mount
   useEffect(() => {
@@ -233,7 +257,7 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
 
   return (
     <div className="chat-shell" data-mobile-tab={mobileTab}>
-      <GuildList />
+      {hideGuildList ? null : <GuildList />}
 
       <div className="sidebar" data-on-mobile="channels voice more">
         <div className="sidebar-section sidebar-section--channels" data-on-mobile="channels">
@@ -483,6 +507,52 @@ export function ChatShell({ api, gatewayUrl, onChangeServer, serverName, version
           x={serverMenu.x}
           y={serverMenu.y}
         />
+      ) : null}
+
+      {recoveryIncidents.length > 0 ? (
+        <div className="media-recovery-backdrop" role="presentation">
+          <section
+            aria-labelledby="media-recovery-title"
+            aria-modal="true"
+            className="media-recovery-dialog"
+            role="alertdialog"
+          >
+            <header>
+              <div>
+                <span className="media-recovery-eyebrow">{t('recovery.eyebrow')}</span>
+                <h2 id="media-recovery-title">{t('recovery.title')}</h2>
+              </div>
+              <span className="media-recovery-live-dot" aria-hidden="true" />
+            </header>
+            <p>{t('recovery.description')}</p>
+            <ul className="media-recovery-list">
+              {recoveryIncidents.map((incident) => (
+                <li key={incident.id}>
+                  <div>
+                    <strong>{t(`recovery.kind_${incident.kind}`)}</strong>
+                    <span>{incident.lastError ?? t('recovery.unknown_error')}</span>
+                  </div>
+                  <small>
+                    {t('recovery.attempt', { count: incident.attempt })}
+                    {incident.nextRetryAt
+                      ? ` · ${t('recovery.retrying_soon', {
+                          seconds: String(Math.max(1, Math.ceil((incident.nextRetryAt - Date.now()) / 1_000))),
+                        })}`
+                      : ''}
+                  </small>
+                </li>
+              ))}
+            </ul>
+            <div className="media-recovery-actions">
+              <button type="button" className="secondary" onClick={abandonAllMediaRecovery}>
+                {t('recovery.abandon')}
+              </button>
+              <button type="button" className="primary" onClick={retryMediaRecoveryNow}>
+                {t('recovery.retry_now')}
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </div>
   );

@@ -9,6 +9,18 @@ const ACCESS_TOKEN_KEY = 'baker_access_token';
 const REFRESH_TOKEN_KEY = 'baker_refresh_token';
 const USER_KEY = 'baker_auth_user';
 
+export interface AuthSessionSnapshot {
+  accessToken: string;
+  refreshToken: string;
+  user: AuthUser | null;
+}
+
+export interface AuthSessionPersistence {
+  clear(): Promise<void>;
+  load(): Promise<AuthSessionSnapshot | null>;
+  save(session: AuthSessionSnapshot): Promise<void>;
+}
+
 function getSessionStorage() {
   if (typeof window === 'undefined') {
     return null;
@@ -31,7 +43,7 @@ function clearLegacyLocalStorageTokens() {
   }
 }
 
-function loadStoredSession(): { accessToken: string; refreshToken: string; user: AuthUser | null } | null {
+function loadStoredSession(): AuthSessionSnapshot | null {
   try {
     clearLegacyLocalStorageTokens();
     const storage = getSessionStorage();
@@ -47,7 +59,7 @@ function loadStoredSession(): { accessToken: string; refreshToken: string; user:
   return null;
 }
 
-function saveSession(accessToken: string, refreshToken: string, user: AuthUser) {
+function saveBrowserSession(accessToken: string, refreshToken: string, user: AuthUser) {
   try {
     clearLegacyLocalStorageTokens();
     const storage = getSessionStorage();
@@ -60,7 +72,7 @@ function saveSession(accessToken: string, refreshToken: string, user: AuthUser) 
   }
 }
 
-function clearTokens() {
+function clearBrowserSession() {
   try {
     clearLegacyLocalStorageTokens();
     const storage = getSessionStorage();
@@ -73,6 +85,42 @@ function clearTokens() {
   }
 }
 
+export function createBrowserAuthSessionPersistence(): AuthSessionPersistence {
+  return {
+    async clear() {
+      clearBrowserSession();
+    },
+    async load() {
+      return loadStoredSession();
+    },
+    async save(session) {
+      if (session.user) {
+        saveBrowserSession(session.accessToken, session.refreshToken, session.user);
+      }
+    },
+  };
+}
+
+let activeSessionPersistence: AuthSessionPersistence = createBrowserAuthSessionPersistence();
+let activeSessionScope = 'web';
+let activeSessionGeneration = 0;
+
+async function saveActiveSession(accessToken: string, refreshToken: string, user: AuthUser) {
+  try {
+    await activeSessionPersistence.save({ accessToken, refreshToken, user });
+  } catch {
+    // Persistence failures must not discard a valid in-memory login.
+  }
+}
+
+async function clearActiveSession(persistence = activeSessionPersistence) {
+  try {
+    await persistence.clear();
+  } catch {
+    // Local logout still succeeds if the persistence layer is unavailable.
+  }
+}
+
 interface AuthState {
   user: AuthUser | null;
   accessToken: string | null;
@@ -81,6 +129,10 @@ interface AuthState {
   isLoading: boolean;
   isBootstrapping: boolean;
 
+  sessionScope: string;
+
+  activateSessionPersistence(scope: string, persistence: AuthSessionPersistence): Promise<void>;
+  clearRuntimeSession(): void;
   login(api: ApiClient, email: string, password: string): Promise<void>;
   register(api: ApiClient, email: string, password: string, username: string): Promise<void>;
   updateUsername(api: ApiClient, username: string): Promise<void>;
@@ -88,8 +140,8 @@ interface AuthState {
   logout(api?: ApiClient): Promise<void>;
   /** Attempt a silent token refresh. Returns new accessToken or null on failure. */
   refreshTokens(api: ApiClient): Promise<string | null>;
-  /** Rehydrate from sessionStorage on app mount. */
-  rehydrate(): void;
+  /** Rehydrate from the active persistence adapter on app mount. */
+  rehydrate(): Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -99,19 +151,56 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   error: null,
   isLoading: false,
   isBootstrapping: false,
+  sessionScope: activeSessionScope,
 
-  rehydrate() {
-    const stored = loadStoredSession();
-    if (stored) {
-      set({
-        accessToken: stored.accessToken,
-        refreshToken: stored.refreshToken,
-        user: stored.user,
-      });
+  async activateSessionPersistence(scope, persistence) {
+    const generation = ++activeSessionGeneration;
+    activeSessionScope = scope;
+    activeSessionPersistence = persistence;
+    set({
+      accessToken: null,
+      error: null,
+      isBootstrapping: true,
+      isLoading: false,
+      refreshToken: null,
+      sessionScope: scope,
+      user: null,
+    });
+
+    let stored: AuthSessionSnapshot | null = null;
+    try {
+      stored = await persistence.load();
+    } catch {
+      stored = null;
     }
+
+    if (generation !== activeSessionGeneration || scope !== activeSessionScope) return;
+    set({
+      accessToken: stored?.accessToken ?? null,
+      isBootstrapping: false,
+      refreshToken: stored?.refreshToken ?? null,
+      user: stored?.user ?? null,
+    });
+  },
+
+  clearRuntimeSession() {
+    activeSessionGeneration += 1;
+    set({
+      accessToken: null,
+      error: null,
+      isBootstrapping: false,
+      isLoading: false,
+      refreshToken: null,
+      user: null,
+    });
+  },
+
+  async rehydrate() {
+    await get().activateSessionPersistence(activeSessionScope, activeSessionPersistence);
   },
 
   async bootstrapSession(api) {
+    const generation = activeSessionGeneration;
     const { accessToken, refreshToken } = get();
     if (!accessToken || !refreshToken) {
       set({ isBootstrapping: false });
@@ -122,10 +211,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const user = await api.me();
-      saveSession(accessToken, refreshToken, user);
+      if (generation !== activeSessionGeneration) return;
+      await saveActiveSession(accessToken, refreshToken, user);
+      if (generation !== activeSessionGeneration) return;
       set({ error: null, isBootstrapping: false, user });
       return;
     } catch (err) {
+      if (generation !== activeSessionGeneration) return;
       if (!(err instanceof ApiError) || err.status !== 401) {
         set({ isBootstrapping: false });
         return;
@@ -133,6 +225,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     const newAccessToken = await get().refreshTokens(api);
+    if (generation !== activeSessionGeneration) return;
     if (!newAccessToken) {
       set({ isBootstrapping: false });
       return;
@@ -140,13 +233,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const refreshedUser = await api.me();
+      if (generation !== activeSessionGeneration) return;
       const currentRefreshToken = get().refreshToken;
       if (currentRefreshToken) {
-        saveSession(newAccessToken, currentRefreshToken, refreshedUser);
+        await saveActiveSession(newAccessToken, currentRefreshToken, refreshedUser);
       }
+      if (generation !== activeSessionGeneration) return;
       set({ error: null, isBootstrapping: false, user: refreshedUser });
     } catch {
-      clearTokens();
+      if (generation !== activeSessionGeneration) return;
+      await clearActiveSession();
+      if (generation !== activeSessionGeneration) return;
       set({
         accessToken: null,
         error: null,
@@ -158,10 +255,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async login(api, email, password) {
+    const generation = activeSessionGeneration;
     set({ isLoading: true, error: null });
     try {
       const session = await api.login({ email, password });
-      saveSession(session.tokens.accessToken, session.tokens.refreshToken, session.user);
+      if (generation !== activeSessionGeneration) return;
+      await saveActiveSession(session.tokens.accessToken, session.tokens.refreshToken, session.user);
+      if (generation !== activeSessionGeneration) return;
       set({
         user: session.user,
         accessToken: session.tokens.accessToken,
@@ -171,16 +271,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
     } catch (err) {
+      if (generation !== activeSessionGeneration) return;
       set({ isLoading: false, error: err instanceof Error ? err.message : 'Login failed.' });
       throw err;
     }
   },
 
   async register(api, email, password, username) {
+    const generation = activeSessionGeneration;
     set({ isLoading: true, error: null });
     try {
       const session = await api.register({ email, password, username });
-      saveSession(session.tokens.accessToken, session.tokens.refreshToken, session.user);
+      if (generation !== activeSessionGeneration) return;
+      await saveActiveSession(session.tokens.accessToken, session.tokens.refreshToken, session.user);
+      if (generation !== activeSessionGeneration) return;
       set({
         user: session.user,
         accessToken: session.tokens.accessToken,
@@ -190,12 +294,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
     } catch (err) {
+      if (generation !== activeSessionGeneration) return;
       set({ isLoading: false, error: err instanceof Error ? err.message : 'Registration failed.' });
       throw err;
     }
   },
 
   async updateUsername(api, username) {
+    const generation = activeSessionGeneration;
     const { accessToken, refreshToken } = get();
     if (!accessToken || !refreshToken) {
       throw new Error('You must be signed in to update your username.');
@@ -204,13 +310,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const user = await api.updateMe({ username });
-      saveSession(accessToken, refreshToken, user);
+      if (generation !== activeSessionGeneration) return;
+      await saveActiveSession(accessToken, refreshToken, user);
+      if (generation !== activeSessionGeneration) return;
       set({
         user,
         isLoading: false,
         error: null,
       });
     } catch (err) {
+      if (generation !== activeSessionGeneration) return;
       set({ isLoading: false, error: err instanceof Error ? err.message : 'Profile update failed.' });
       throw err;
     }
@@ -218,6 +327,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async logout(api) {
     const { accessToken } = get();
+    const generation = activeSessionGeneration;
+    const persistence = activeSessionPersistence;
     if (api && accessToken) {
       try {
         await api.logout();
@@ -225,7 +336,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         // Best effort: local logout should still complete if the server is unavailable.
       }
     }
-    clearTokens();
+    await clearActiveSession(persistence);
+    if (generation !== activeSessionGeneration) return;
     set({ user: null, accessToken: null, refreshToken: null, error: null, isBootstrapping: false });
     // Clear cached chat data so a subsequent login doesn't see stale state.
     // Gateway disconnect is handled by AppRoot's useEffect reacting to accessToken -> null.
@@ -235,9 +347,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   async refreshTokens(api) {
     const { refreshToken } = get();
     if (!refreshToken) return null;
+    const generation = activeSessionGeneration;
     try {
       const session = await api.refresh({ refreshToken });
-      saveSession(session.tokens.accessToken, session.tokens.refreshToken, session.user);
+      if (generation !== activeSessionGeneration) return null;
+      await saveActiveSession(session.tokens.accessToken, session.tokens.refreshToken, session.user);
+      if (generation !== activeSessionGeneration) return null;
       set({
         user: session.user,
         accessToken: session.tokens.accessToken,
@@ -246,7 +361,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return session.tokens.accessToken;
     } catch {
       // Refresh failed -> force logout
-      clearTokens();
+      if (generation !== activeSessionGeneration) return null;
+      await clearActiveSession();
+      if (generation !== activeSessionGeneration) return null;
       set({ user: null, accessToken: null, refreshToken: null });
       return null;
     }

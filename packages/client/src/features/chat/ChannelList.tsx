@@ -32,6 +32,7 @@ export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
   const setActiveChannel = useChatStore((s) => s.setActiveChannel);
   const joinVoiceChannel = useVoiceStore((s) => s.joinVoiceChannel);
   const voiceChannelId = useVoiceStore((s) => s.channelId);
+  const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
   const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
   const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
   const clearParticipantPlaybackVolume = useVoiceStore((s) => s.clearParticipantPlaybackVolume);
@@ -267,7 +268,7 @@ export function ChannelList({ onAfterPick }: ChannelListProps = {}) {
               return (
                 <div
                   key={participant.sessionId}
-                  className={`channel-voice-member${participant.isMuted ? ' channel-voice-member--muted' : ''}`}
+                  className={`channel-voice-member${participant.isMuted ? ' channel-voice-member--muted' : ''}${!participant.isMuted && speakingUserIds.has(participant.userId) ? ' channel-voice-member--speaking' : ''}`}
                 >
                   <button
                     type="button"

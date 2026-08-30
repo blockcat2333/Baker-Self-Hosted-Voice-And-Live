@@ -199,7 +199,7 @@ describe('stream-media helpers', () => {
           maxFrameRate: 60,
           maxHeight: 1080,
           maxWidth: 1920,
-          minFrameRate: 15,
+          minFrameRate: 30,
         },
         width: {
           ideal: 1920,

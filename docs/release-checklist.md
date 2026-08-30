@@ -20,6 +20,8 @@ Use this path for a new server image line such as `X.Y.Z`.
 - [ ] Set `apps/desktop/package.json` version to semver form `X.Y.Z-a`, and set installer `artifactName` to the public desktop label `X.Y.Za`.
 - [ ] Update `README.md` and `README.zh-CN.md` release lines and Docker examples.
 - [ ] Update `docs/beginner-deployment.md` and `docs/beginner-deployment.zh-CN.md` pinned Docker examples.
+- [ ] Add or update detailed English and Chinese usage documentation for every operator-facing feature. Cover prerequisites, complete configuration, security boundaries, verification, upgrade, rollback, and troubleshooting.
+- [ ] Add a versioned release note describing behavior changes, compatibility, artifacts, operator impact, migration steps, rollback, and links to the usage documentation.
 - [ ] Run `pnpm release:check`, `pnpm typecheck`, `pnpm lint`, and `pnpm test`.
 - [ ] Create the server GitHub Release tag as `vX.Y.Z`.
 - [ ] Confirm the Docker workflow publishes `blockcat233/baker:X.Y.Z` and `blockcat233/baker:latest`.
@@ -34,6 +36,7 @@ Use this path for a server beta image line such as `X.Y.Zbeta` or `X.Y.Zbeta2`.
 - [ ] Set `packages/shared/src/version.ts` to the public label `X.Y.Zbeta` or `X.Y.ZbetaN`.
 - [ ] Keep the existing desktop package version unless desktop assets are intentionally shipping with the beta.
 - [ ] Update `README.md`, `README.zh-CN.md`, `docs/beginner-deployment.md`, and `docs/beginner-deployment.zh-CN.md` to pin `blockcat233/baker:X.Y.ZbetaN`.
+- [ ] Add versioned beta notes and detailed usage documentation for every externally testable behavior. Clearly mark unstable contracts and the supported rollback path.
 - [ ] Run `pnpm release:check`, typecheck, lint, tests, production builds, and Docker all-in-one smoke tests.
 - [ ] Create the server beta GitHub Release tag as `vX.Y.ZbetaN` and mark it as a prerelease.
 - [ ] Confirm Docker Hub publishes `blockcat233/baker:X.Y.ZbetaN`; update `latest` only when this beta is intended to be the rolling image.
@@ -45,6 +48,7 @@ Use this path for a desktop/client-only label such as `X.Y.Zb`.
 - [ ] Keep the root package, non-desktop workspace packages, and `packages/shared/src/version.ts` on the current numeric server version `X.Y.Z`.
 - [ ] Increment only `apps/desktop/package.json` to semver form `X.Y.Z-b`, and installer `artifactName` to the next public client label `X.Y.Zb`.
 - [ ] Update README release lines if the public desktop label changes.
+- [ ] Add versioned client release notes with compatibility, install/update behavior, user-visible changes, known limitations, and rollback/recovery instructions.
 - [ ] Run `pnpm release:check`, `pnpm --filter @baker/desktop typecheck`, and `pnpm --filter @baker/desktop test`.
 - [ ] Create the desktop GitHub Release tag as `vX.Y.Zb`.
 - [ ] Confirm the Docker workflow skips the desktop tag and does not publish `blockcat233/baker:X.Y.Zb`.

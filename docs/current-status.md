@@ -48,6 +48,16 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-08-30 Baker 1.1.4 Realtime Recovery And Desktop Multi-Server
+
+- advanced the stable server release line to `1.1.4` and matching Windows client labels to `1.1.4a`
+- added authenticated in-place media-session recovery while preserving voice, stream, and music intent
+- added a unified bounded recovery coordinator, visible escalation, immediate retry, and explicit abandon
+- detected Gateway handshake timeouts and half-open sockets and guarded stale asynchronous recovery results
+- expanded SFU codecs, applied sender quality preferences, added receiver statistics, and stabilized speaking detection
+- added race-safe Electron multi-server management with target health probing and per-server encrypted sessions
+- documented mixed-version behavior, upgrade and rollback, validation, security boundaries, and incident response in English and Chinese
+
 ### 2026-08-30 Baker 1.1.3 Aliyun DNS-01 HTTPS
 
 - advanced the stable server release line to `1.1.3` and matching Windows client labels to `1.1.3a`

@@ -2,6 +2,29 @@
 
 ## 2026-08-30
 
+### Baker 1.1.4 realtime recovery and desktop multi-server management
+
+What changed:
+
+- introduced authenticated `media.session.reconnect` and `media.session.restarted` signaling
+- retained logical voice membership and stream/music publication intent while rebuilding failed P2P or SFU transports
+- added unified exponential-backoff recovery, Gateway half-open detection, and stale-operation guards
+- added H.264-first multi-codec SFU negotiation, sender quality controls, receiver statistics, and steadier speaking detection
+- added Electron multi-server registry, availability probing, race-safe switching, and per-server `safeStorage` sessions
+- added detailed English and Chinese operator documentation covering compatibility, upgrades, validation, incidents, rollback, and security
+
+Why:
+
+- temporary WebSocket or media transport loss previously forced full rejoin flows and could leave stale or duplicate client state
+- SFU publishers and viewers needed equivalent quality controls and diagnostics to the P2P path
+- users connecting through separate regional Baker entrypoints needed first-class server selection without sharing sessions across instances
+
+Validation:
+
+- release consistency, formatting, type checking, lint, unit/integration tests, and production builds
+- Electron installer and Baker Lite native media installer packaging
+- GitHub Actions all-in-one image publishing with fixed and rolling tags
+
 ### Baker 1.1.3 Aliyun DNS-01 HTTPS entrypoint
 
 What changed:

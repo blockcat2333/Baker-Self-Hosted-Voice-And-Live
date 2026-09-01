@@ -134,11 +134,15 @@ Requirements:
 - Each profile's `turnUrls` and `sfuAnnouncedIp` must be reachable from users in that region.
 - SFU RTC ports must use same-number forwarding. If the Hong Kong profile says `23335-23340`, frp should map `23335-23340 -> Baker:23335-23340`.
 
+If `turnUrls` is omitted, the profile inherits the global TURN configuration. If it is set to an empty array, TURN is disabled for that profile and users have no relay fallback when direct SFU connectivity fails.
+
 Do not use mappings such as `23335 -> 50000` for SFU. Browsers connect to the candidate port returned by Baker, so mismatched port numbers break media negotiation.
 
 The regional web entry is independent from those media mappings. It must serve trusted HTTPS and proxy WebSocket upgrades. If the relay exposes only a nonstandard web port, use DNS-01 for automatic certificate renewal; HTTP-01 and TLS-ALPN-01 still require public `80/443` challenge reachability.
 
 For an Aliyun-hosted DNS zone, the all-in-one image includes an optional DNS-01 HTTPS listener. Publish `3443:3443/tcp` and set `BAKER_HTTPS_ENABLED=true`, `BAKER_HTTPS_HOST=<public hostname>`, `BAKER_HTTPS_PORT=3443`, `ALIYUN_ACCESS_KEY_ID`, and `ALIYUN_ACCESS_KEY_SECRET`. Point the FRP TCP proxy at the Docker host's port `3443`; for example, public `23333 -> 192.168.233.2:3443`. Keep the `/var/lib/baker` volume because Caddy stores its renewable certificate state under `/var/lib/baker/caddy`. Use a dedicated, least-privilege RAM access key rather than a root-account key.
+
+The container must also be able to reach each recursive DNS resolver that Caddy uses for propagation checks. If the ACME log reports `connection refused` or a timeout for an inherited resolver after the TXT record is created, recreate only the Baker container with a reachable Docker `--dns <resolver-ip>` (or Compose `dns:`) setting. Do not change host-wide DNS for this repair. Verify that the selected resolver answers public TXT queries so the same path remains valid for renewal.
 
 You can edit the profile JSON from **Deployment Settings -> Media Region Profiles JSON** in the admin panel. Save the settings, then click **Apply And Restart Container** so the all-in-one container publishes the new ports.
 

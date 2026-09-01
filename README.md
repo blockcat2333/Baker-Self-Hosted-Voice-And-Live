@@ -246,6 +246,8 @@ MEDIA_REGION_PROFILES='[
 
 Profile fields inherit the legacy global values when omitted: `STUN_URLS`, `TURN_URLS`, `TURN_USERNAME`, `TURN_PASSWORD`, `SFU_ANNOUNCED_IP`, `SFU_RTC_MIN_PORT`, `SFU_RTC_MAX_PORT`, and `SFU_ENABLE_TCP`.
 
+Omit `turnUrls` to inherit the global TURN endpoints. An explicit empty array (`"turnUrls": []`) disables TURN for that profile; use it only when SFU direct connectivity without a relay fallback is intentional.
+
 For SFU media, the announced address and candidate port must both be reachable by the browser. If you use frp or another TCP/UDP forwarder, map the remote RTC ports to the same local port numbers, or change Baker's profile port range to match the remote ports. A remote `23335 -> local 50000` mapping will not work for SFU candidates because the browser would still receive port `50000`.
 
 Operational notes:
@@ -276,6 +278,8 @@ The all-in-one image can terminate HTTPS itself when an FRP relay exposes only a
 Configure the FRP TCP proxy so the public HTTPS port forwards unchanged TLS traffic to the Docker host's port `3443`. For example, `hkserver.evergarden.space:23333 -> 192.168.233.2:3443` keeps the public URL at `https://hkserver.evergarden.space:23333/`. TURN and SFU mappings remain separate and unchanged.
 
 Caddy creates and renews the certificate through Aliyun DNS-01. Its ACME account, certificate, and private-key data are stored under `/var/lib/baker/caddy`, so the existing `/var/lib/baker` volume must remain mounted across upgrades. Use a dedicated RAM user with only the DNS-record permissions needed for the managed zone; do not use an Alibaba Cloud root-account access key. The access key values stay in the container environment and are not written into the generated Caddyfile.
+
+DNS-01 also requires every recursive resolver visible inside the container to be reachable over DNS. If Caddy logs show that the TXT record was created but propagation checks fail against one inherited resolver with `connection refused` or a timeout, configure a reachable resolver for this container (for example Docker `--dns <resolver-ip>` or Compose `dns:`) and recreate it. This is a container-level setting; changing the NAS or host-wide DNS is unnecessary. Confirm the selected resolver can answer public TXT queries before relying on automatic renewal.
 
 ## Deployment Notes
 

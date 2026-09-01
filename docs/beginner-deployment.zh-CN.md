@@ -133,11 +133,15 @@ docker run -d \
 - 每个 profile 的 `turnUrls` 和 `sfuAnnouncedIp` 必须是该区域用户能访问的地址。
 - SFU RTC 端口必须做同端口映射。例如香港 profile 写 `23335-23340`，frp 就应该映射 `23335-23340 -> Baker:23335-23340`。
 
+省略 `turnUrls` 时，该 profile 会继承全局 TURN 配置；明确写成空数组时，则会禁用该区域的 TURN。后者意味着 SFU 直连失败时没有中继后备，只应在确实需要时使用。
+
 不要把 `23335 -> 50000` 这类不等端口映射用于 SFU。浏览器会按 Baker 返回的 candidate 端口连接，端口号不一致时媒体连接会失败。
 
 区域 Web 入口与这些媒体映射相互独立。Web 入口必须提供可信 HTTPS 并代理 WebSocket Upgrade。如果中继节点只能开放非标准 Web 端口，证书自动续签应使用 DNS-01；HTTP-01 和 TLS-ALPN-01 仍需要公网可达的 `80/443` 验证端口。
 
 如果域名使用阿里云 DNS，all-in-one 镜像内置了可选的 DNS-01 HTTPS 监听器。发布 `3443:3443/tcp`，并设置 `BAKER_HTTPS_ENABLED=true`、`BAKER_HTTPS_HOST=<公网域名>`、`BAKER_HTTPS_PORT=3443`、`ALIYUN_ACCESS_KEY_ID` 和 `ALIYUN_ACCESS_KEY_SECRET`。FRP TCP 代理指向 Docker 宿主机 `3443`，例如公网 `23333 -> 192.168.233.2:3443`。Caddy 的可续签证书状态保存在 `/var/lib/baker/caddy`，因此必须持续挂载 `/var/lib/baker` 数据卷。请使用最小权限的专用 RAM AccessKey，不要使用主账号 AccessKey。
+
+容器还必须能访问 Caddy 用于传播检查的每一个递归 DNS。如果 TXT 已创建，但 ACME 日志对某个继承来的解析器报 `connection refused` 或超时，请只给 Baker 容器设置可达的 Docker `--dns <解析器地址>`（Compose 使用 `dns:`）并重建容器，不需要修改 NAS 或宿主机的全局 DNS。应先确认该解析器能查询公网 TXT 记录，保证后续自动续签仍走同一条可用路径。
 
 双区域 profile 可以在管理后台“部署设置 -> 媒体区域 Profiles JSON”里保存。保存后需要点击“应用并重启容器”，让 all-in-one 容器重新发布新增端口。
 

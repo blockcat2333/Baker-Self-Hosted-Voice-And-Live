@@ -249,6 +249,7 @@ describe('stream store watch startup', () => {
     });
     expect(sendCommandAwaitAck).toHaveBeenCalledWith('stream.start', {
       channelId,
+      codec: 'h264',
       quality: { bitrateKbps: 10000, frameRate: 60, resolution: '1080p' },
       sourceType: 'screen',
     });
@@ -989,6 +990,7 @@ describe('stream store watch startup', () => {
       activePeerCount: 1,
       bitrateKbps: 6000,
       codec: 'H264',
+      encoderAcceleration: 'unknown',
       encoderLimited: false,
       frameRate: 60,
       qualityLimitationReason: 'none',
@@ -1097,15 +1099,27 @@ describe('stream store watch startup', () => {
     const first = await getWatchedStreamVideoStats(streamId);
     const second = await getWatchedStreamVideoStats(streamId);
 
-    expect(first).toMatchObject({ bitrateKbps: null, codec: 'H264', resolution: '1920x1080' });
+    expect(first).toMatchObject({
+      bitrateKbps: null,
+      codec: 'H264',
+      resolution: '1920x1080',
+    });
     expect(second).toEqual({
+      averageDecodeTimeMs: null,
       bitrateKbps: 6000,
       codec: 'H264',
+      decoderAcceleration: 'unknown',
       frameRate: 60,
-      framesDropped: 3,
+      framesDropped: 1,
+      framesReceived: null,
+      freezeCount: null,
+      freezeDurationMs: null,
       jitterMs: 9,
-      packetsLost: 2,
-      packetsReceived: 1_998,
+      jitterBufferDelayMs: null,
+      nackCount: null,
+      packetsLost: 1,
+      packetsReceived: 999,
+      pliCount: null,
       resolution: '1920x1080',
     });
   });
@@ -1157,5 +1171,42 @@ describe('stream store watch startup', () => {
     // At least one stream.unwatch was dispatched (from unwatchStream or the
     // cancel path inside watchStream).
     expect(unwatchCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('rolls back stream.start when strict SFU codec production fails', async () => {
+    sfuProduceTracks.mockRejectedValueOnce(
+      new Error('Selected video codec AV1 was not used (actual: H264).'),
+    );
+    const sendCommandAwaitAck = vi.fn((command: string) => {
+      if (command === 'stream.start') {
+        return Promise.resolve({
+          channelId,
+          iceServers: [],
+          mediaMode: 'sfu',
+          sessionId: hostSessionId,
+          sfu: { producers: [], routerRtpCapabilities: {} },
+          streamId,
+        });
+      }
+      return Promise.resolve({ channelId, streamId });
+    });
+
+    await useStreamStore
+      .getState()
+      .startSharing(
+        channelId,
+        { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+        'screen',
+        sendCommandAwaitAck,
+        vi.fn(),
+        'av1',
+      );
+
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('stream.stop', {
+      channelId,
+      streamId,
+    });
+    expect(useStreamStore.getState().ownedStream).toBeNull();
+    expect(useStreamStore.getState().error).toMatch(/actual: H264/);
   });
 });

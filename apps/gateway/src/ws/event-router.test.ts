@@ -628,10 +628,12 @@ describe('routeGatewayMessage', () => {
     );
 
     expect(reply.op).toBe('ack');
-    expect(createMediaSession).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createMediaSession).toHaveBeenCalledWith(
+      expect.objectContaining({
       mediaRegionId: 'hongkong',
       mode: 'voice',
-    }));
+      }),
+    );
   });
 
   it('includes sfu session info in voice.join ack when media mode is sfu', async () => {
@@ -1702,10 +1704,17 @@ describe('routeGatewayMessage', () => {
     const musicRoom = new MusicRoomManager(sharedConnections);
     const hostSend = vi.fn();
     const listenerSend = vi.fn();
-    const createMediaSession = vi.fn(async (descriptor: Parameters<GatewayRuntime['createMediaSession']>[0]) => ({
+    const createMediaSession = vi.fn(
+      async (
+        descriptor: Parameters<GatewayRuntime['createMediaSession']>[0],
+      ) => ({
       iceServers: [{ urls: 'stun:stun.example.com' }],
-      sessionId: descriptor.mode === 'music_publish' ? hostMusicSessionId : listenerMusicSessionId,
-    }));
+        sessionId:
+          descriptor.mode === 'music_publish'
+            ? hostMusicSessionId
+            : listenerMusicSessionId,
+      }),
+    );
     const musicRuntime = makeRuntime({
       connections: sharedConnections,
       createMediaSession,
@@ -1751,15 +1760,21 @@ describe('routeGatewayMessage', () => {
 
     expect(startReply.op).toBe('ack');
     if (startReply.op !== 'ack') throw new Error('music.start should ack');
-    const startData = startReply.data as { mediaMode: string; musicId: string; sessionId: string };
+    const startData = startReply.data as {
+      mediaMode: string;
+      musicId: string;
+      sessionId: string;
+    };
     expect(startData.mediaMode).toBe('p2p');
     expect(startData.sessionId).toBe(hostMusicSessionId);
-    expect(createMediaSession).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createMediaSession).toHaveBeenCalledWith(
+      expect.objectContaining({
       channelId,
       mode: 'music_publish',
       streamId: startData.musicId,
       userId: hostUserId,
-    }));
+      }),
+    );
 
     const listenReply = await routeGatewayMessage(
       listenerConn,
@@ -1863,25 +1878,38 @@ describe('routeGatewayMessage', () => {
     const sharedConnections = new ConnectionManager();
     const voiceRoom = new VoiceRoomManager(sharedConnections);
     const musicRoom = new MusicRoomManager(sharedConnections);
-    const createMediaSession = vi.fn(async (descriptor: Parameters<GatewayRuntime['createMediaSession']>[0]) => ({
+    const createMediaSession = vi.fn(
+      async (
+        descriptor: Parameters<GatewayRuntime['createMediaSession']>[0],
+      ) => ({
       iceServers: [],
-      sessionId: descriptor.mode === 'music_publish' ? hostMusicSessionId : listenerMusicSessionId,
+        sessionId:
+          descriptor.mode === 'music_publish'
+            ? hostMusicSessionId
+            : listenerMusicSessionId,
       sfu: {
-        producers: descriptor.mode === 'music_listen'
-          ? [{
+          producers:
+            descriptor.mode === 'music_listen'
+              ? [
+                  {
             channelId,
             id: 'music-producer-audio',
             kind: 'audio' as const,
             sessionId: hostMusicSessionId,
             source: 'music' as const,
-            ...(descriptor.streamId ? { streamId: descriptor.streamId } : {}),
+                    ...(descriptor.streamId
+                      ? { streamId: descriptor.streamId }
+                      : {}),
             userId: hostUserId,
-          }]
+                  },
+                ]
           : [],
         routerRtpCapabilities: { codecs: [] },
       },
-    }));
-    const createSfuTransport = vi.fn(async (data: Parameters<GatewayRuntime['createSfuTransport']>[0]) => ({
+      }),
+    );
+    const createSfuTransport = vi.fn(
+      async (data: Parameters<GatewayRuntime['createSfuTransport']>[0]) => ({
       direction: data.direction,
       transportOptions: {
         dtlsParameters: {},
@@ -1889,19 +1917,25 @@ describe('routeGatewayMessage', () => {
         iceParameters: {},
         id: `transport-${data.direction}`,
       },
-    }));
-    const produceSfu = vi.fn(async (data: Parameters<GatewayRuntime['produceSfu']>[0]) => ({
+      }),
+    );
+    const produceSfu = vi.fn(
+      async (data: Parameters<GatewayRuntime['produceSfu']>[0]) => ({
       producer: {
         channelId: data.channelId,
         id: 'music-producer-audio',
         kind: data.kind,
         sessionId: data.sessionId,
-        source: data.mode === 'music_publish' || data.mode === 'music_listen' ? 'music' as const : 'stream' as const,
+          source:
+            data.mode === 'music_publish' || data.mode === 'music_listen'
+              ? ('music' as const)
+              : ('stream' as const),
         ...(data.streamId ? { streamId: data.streamId } : {}),
         userId: data.userId,
       },
       producerId: 'music-producer-audio',
-    }));
+      }),
+    );
     const musicRuntime = makeRuntime({
       connections: sharedConnections,
       createMediaSession,
@@ -2219,20 +2253,123 @@ describe('routeGatewayMessage', () => {
     );
 
     expect(reply.op).toBe('ack');
-    expect(closeSfuSession).toHaveBeenCalledWith({ channelId, mode: 'voice', sessionId });
-    expect(createMediaSession).toHaveBeenCalledWith(expect.objectContaining({
+    expect(closeSfuSession).toHaveBeenCalledWith({
+      channelId,
+      mode: 'voice',
+      sessionId,
+    });
+    expect(createMediaSession).toHaveBeenCalledWith(
+      expect.objectContaining({
       channelId,
       mode: 'voice',
       sessionId,
       userId,
-    }));
-    expect(voiceRoom.getParticipant(channelId, userId)).toMatchObject({ connectionId: host.id, sessionId });
-    expect(parseSentEnvelopes(peerSend)).toEqual(expect.arrayContaining([
+      }),
+    );
+    expect(voiceRoom.getParticipant(channelId, userId)).toMatchObject({
+      connectionId: host.id,
+      sessionId,
+    });
+    expect(parseSentEnvelopes(peerSend)).toEqual(
+      expect.arrayContaining([
       expect.objectContaining({
         event: 'media.session.restarted',
         op: 'event',
-        data: expect.objectContaining({ session: { channelId, mode: 'voice', sessionId }, userId }),
+          data: expect.objectContaining({
+            session: { channelId, mode: 'voice', sessionId },
+            userId,
+          }),
       }),
-    ]));
+      ]),
+    );
+  });
+
+  it('authorizes stream diagnostics report/get only for the active audience', async () => {
+    const connections = new ConnectionManager();
+    const streamRoom = new StreamRoomManager(connections);
+    const socket = { close: vi.fn(), send: vi.fn() };
+    const host = connections.attach(socket);
+    host.userId = '00000000-0000-4000-8000-000000000701';
+    const channelId = '00000000-0000-4000-8000-000000000702';
+    const streamId = '00000000-0000-4000-8000-000000000703';
+    const sessionId = '00000000-0000-4000-8000-000000000704';
+    streamRoom.start(
+      channelId,
+      streamId,
+      host.userId,
+      host.id,
+      sessionId,
+      'screen',
+    );
+    const diagnosticsRuntime = makeRuntime({
+      connections,
+      mediaMode: 'p2p',
+      streamRoom,
+    });
+    const report = await routeGatewayMessage(
+      host,
+      JSON.stringify({
+        command: 'stream.diagnostics.report',
+        data: {
+          channelId,
+          streamId,
+          sessionId,
+          sampledAt: Date.now(),
+          publisher: {
+            actualCodec: 'av1',
+            bitrateKbps: 4000,
+            captureFrameRate: 30,
+            encodedFrameRate: 30,
+            encoderAcceleration: 'hardware',
+            packetsLost: 0,
+            packetsSent: 100,
+            qualityLimitationReason: 'none',
+            requestedCodec: 'av1',
+            roundTripTimeMs: 20,
+            targetBitrateKbps: 4000,
+            targetFrameRate: 30,
+          },
+        },
+        op: 'command',
+        reqId: 'diag-report',
+        ts: ts(),
+        v: 1,
+      }),
+      diagnosticsRuntime,
+    );
+    expect(report.op).toBe('ack');
+
+    const getReply = await routeGatewayMessage(
+      host,
+      JSON.stringify({
+        command: 'stream.diagnostics.get',
+        data: { channelId, streamId },
+        op: 'command',
+        reqId: 'diag-get',
+        ts: ts(),
+        v: 1,
+      }),
+      diagnosticsRuntime,
+    );
+    expect(getReply).toMatchObject({
+      op: 'ack',
+      data: { mediaMode: 'p2p', publisher: { actualCodec: 'av1' }, sfu: null },
+    });
+
+    const outsider = connections.attach({ close: vi.fn(), send: vi.fn() });
+    outsider.userId = '00000000-0000-4000-8000-000000000705';
+    const forbidden = await routeGatewayMessage(
+      outsider,
+      JSON.stringify({
+        command: 'stream.diagnostics.get',
+        data: { channelId, streamId },
+        op: 'command',
+        reqId: 'diag-forbidden',
+        ts: ts(),
+        v: 1,
+      }),
+      diagnosticsRuntime,
+    );
+    expect(forbidden).toMatchObject({ code: 'FORBIDDEN', op: 'error' });
   });
 });

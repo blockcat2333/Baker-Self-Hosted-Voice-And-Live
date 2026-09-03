@@ -52,6 +52,10 @@ export class NoopMediaAdapter implements MediaAdapter {
     throw new Error('SFU mode is not available in the noop media adapter.');
   }
 
+  async getStreamDiagnostics(): Promise<never> {
+    throw new Error('SFU mode is not available in the noop media adapter.');
+  }
+
   async produceSfu(): Promise<never> {
     throw new Error('SFU mode is not available in the noop media adapter.');
   }

@@ -25,16 +25,60 @@ beforeEach(() => {
   }));
   mocks.createWebRtcTransport.mockReset();
   mocks.createWebRtcTransport.mockImplementation(async () => ({
+    close: vi.fn(),
+    connect: vi.fn(),
+    consume: vi.fn(async ({ producerId }) => ({
+      close: vi.fn(),
+      getStats: vi.fn().mockResolvedValue([
+        {
+          bitrate: 3_000_000,
+          byteCount: 3000,
+          jitter: 0.004,
+          packetCount: 300,
+          packetsLost: 2,
+          type: 'outbound-rtp',
+        },
+      ]),
+      id: `consumer-${transportSequence}`,
+      kind: 'video',
+      on: vi.fn(),
+      paused: false,
+      producerId,
+      producerPaused: false,
+      resume: vi.fn(),
+      rtpParameters: {},
+      score: { producerScore: 9, producerScores: [9], score: 8 },
+      type: 'simple',
+    })),
     dtlsParameters: {},
     iceCandidates: [],
     iceParameters: {},
     id: `transport-${++transportSequence}`,
     on: vi.fn(),
+    produce: vi.fn(async ({ kind }) => ({
+      close: vi.fn(),
+      getStats: vi.fn().mockResolvedValue([
+        {
+          bitrate: 3_500_000,
+          byteCount: 3500,
+          packetCount: 350,
+          packetsLost: 1,
+          type: 'inbound-rtp',
+        },
+      ]),
+      id: `producer-${transportSequence}`,
+      kind,
+      observer: { on: vi.fn() },
+      on: vi.fn(),
+      paused: false,
+      score: [{ encodingIdx: 0, score: 9, ssrc: 1 }],
+    })),
     sctpParameters: undefined,
   }));
   mocks.createWorker.mockReset();
   mocks.createRouter.mockReset();
   mocks.createRouter.mockImplementation(async () => ({
+    canConsume: vi.fn().mockReturnValue(true),
     createWebRtcTransport: mocks.createWebRtcTransport,
     rtpCapabilities: {},
   }));
@@ -42,17 +86,20 @@ beforeEach(() => {
     createRouter: mocks.createRouter,
     createWebRtcServer: mocks.createWebRtcServer,
     on: vi.fn(),
+    getResourceUsage: vi.fn().mockResolvedValue({ ru_stime: 10, ru_utime: 20 }),
   });
 });
 
 describe('MediasoupMediaAdapter shared WebRTC servers', () => {
   it('offers H.264 before the optional browser codecs', async () => {
-    const adapter = new MediasoupMediaAdapter(parseAppEnv({
+    const adapter = new MediasoupMediaAdapter(
+      parseAppEnv({
       NODE_ENV: 'test',
       SFU_ANNOUNCED_IP: '127.0.0.1',
       SFU_RTC_MAX_PORT: '23340',
       SFU_RTC_MIN_PORT: '23335',
-    }));
+      }),
+    );
     const session = {
       channelId: '00000000-0000-4000-8000-000000000021',
       mode: 'voice' as const,
@@ -165,5 +212,71 @@ describe('MediasoupMediaAdapter shared WebRTC servers', () => {
     expect(transportServers[0]).toBe(transportServers[1]);
     expect(transportServers[2]).toBe(transportServers[3]);
     expect(transportServers[0]).not.toBe(transportServers[2]);
+  });
+
+  it('maps publisher and viewer RTP stats into cached stream diagnostics', async () => {
+    const adapter = new MediasoupMediaAdapter(
+      parseAppEnv({
+        NODE_ENV: 'test',
+        SFU_ANNOUNCED_IP: '127.0.0.1',
+        SFU_RTC_MAX_PORT: '23340',
+        SFU_RTC_MIN_PORT: '23335',
+      }),
+    );
+    const channelId = '00000000-0000-4000-8000-000000000051';
+    const streamId = '00000000-0000-4000-8000-000000000052';
+    const publisherSessionId = '00000000-0000-4000-8000-000000000053';
+    const viewerSessionId = '00000000-0000-4000-8000-000000000054';
+    const host = {
+      channelId,
+      mode: 'stream_publish' as const,
+      sessionId: publisherSessionId,
+      streamId,
+      transportMode: 'sfu' as const,
+      userId: '00000000-0000-4000-8000-000000000055',
+    };
+    const viewer = {
+      channelId,
+      mode: 'stream_watch' as const,
+      sessionId: viewerSessionId,
+      streamId,
+      transportMode: 'sfu' as const,
+      userId: '00000000-0000-4000-8000-000000000056',
+    };
+    await adapter.createSession(host);
+    await adapter.createSession(viewer);
+    const send = await adapter.createSfuTransport({
+      ...host,
+      direction: 'send',
+    });
+    const produced = await adapter.produceSfu({
+      ...host,
+      kind: 'video',
+      rtpParameters: {},
+      transportId: send.transportOptions.id,
+      userId: host.userId,
+    });
+    const recv = await adapter.createSfuTransport({
+      ...viewer,
+      direction: 'recv',
+    });
+    await adapter.consumeSfu({
+      ...viewer,
+      producerId: produced.producerId,
+      rtpCapabilities: {},
+      transportId: recv.transportOptions.id,
+    });
+
+    const diagnostics = await adapter.getStreamDiagnostics({
+      channelId,
+      publisherSessionId,
+      streamId,
+      viewerSessionId,
+    });
+    expect(diagnostics).toMatchObject({
+      ingress: { bitrateKbps: 3500, packetsLost: 1, score: 9 },
+      egress: { bitrateKbps: 3000, packetsLost: 2, score: 8 },
+      workerCpuPct: null,
+    });
   });
 });

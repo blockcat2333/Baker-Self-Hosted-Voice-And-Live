@@ -4,6 +4,7 @@ import type {
   SessionMode,
   SfuProducer,
   SfuSessionInfo,
+  StreamSfuDiagnostics,
 } from '@baker/protocol';
 
 export interface MediaSessionRecord {
@@ -16,20 +17,26 @@ export interface MediaAdapter {
   createSession(input: MediaSessionDescriptor): Promise<MediaSessionRecord>;
   getCapabilities(): MediaCapabilities;
   getHealth(): { backend: string; status: 'ok' };
-  closeSfu(input: SfuSessionInput & {
+  closeSfu(
+    input: SfuSessionInput & {
     consumerId?: string;
     producerId?: string;
     transportId?: string;
-  }): Promise<{ closedProducer?: SfuProducer }>;
-  connectSfuTransport(input: SfuSessionInput & {
+    },
+  ): Promise<{ closedProducer?: SfuProducer }>;
+  connectSfuTransport(
+    input: SfuSessionInput & {
     dtlsParameters: Record<string, unknown>;
     transportId: string;
-  }): Promise<void>;
-  consumeSfu(input: SfuSessionInput & {
+    },
+  ): Promise<void>;
+  consumeSfu(
+    input: SfuSessionInput & {
     producerId: string;
     rtpCapabilities: Record<string, unknown>;
     transportId: string;
-  }): Promise<{
+    },
+  ): Promise<{
     consumerId: string;
     id: string;
     kind: 'audio' | 'video';
@@ -38,9 +45,11 @@ export interface MediaAdapter {
     rtpParameters: Record<string, unknown>;
     type: string;
   }>;
-  createSfuTransport(input: SfuSessionInput & {
+  createSfuTransport(
+    input: SfuSessionInput & {
     direction: 'recv' | 'send';
-  }): Promise<{
+    },
+  ): Promise<{
     direction: 'recv' | 'send';
     transportOptions: {
       dtlsParameters: Record<string, unknown>;
@@ -51,16 +60,26 @@ export interface MediaAdapter {
     };
   }>;
   getSfuSessionInfo(input: MediaSessionDescriptor): Promise<SfuSessionInfo>;
-  produceSfu(input: SfuSessionInput & {
+  getStreamDiagnostics(input: {
+    channelId: string;
+    publisherSessionId: string;
+    streamId: string;
+    viewerSessionId?: string;
+  }): Promise<StreamSfuDiagnostics>;
+  produceSfu(
+    input: SfuSessionInput & {
     appData?: Record<string, unknown>;
     kind: 'audio' | 'video';
     rtpParameters: Record<string, unknown>;
     transportId: string;
     userId: string;
-  }): Promise<{ producer: SfuProducer; producerId: string }>;
-  resumeSfuConsumer(input: SfuSessionInput & {
+    },
+  ): Promise<{ producer: SfuProducer; producerId: string }>;
+  resumeSfuConsumer(
+    input: SfuSessionInput & {
     consumerId: string;
-  }): Promise<void>;
+    },
+  ): Promise<void>;
 }
 
 export interface SfuSessionInput {

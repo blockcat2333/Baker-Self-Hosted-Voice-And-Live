@@ -101,6 +101,7 @@ export const SfuProducerSourceSchema = z.enum(['music', 'stream', 'voice']);
 
 export const SfuProducerSchema = z.object({
   channelId: z.string().uuid(),
+  codec: z.enum(['h264', 'vp8', 'vp9', 'av1']).optional(),
   id: z.string().min(1),
   kind: z.enum(['audio', 'video']),
   sessionId: z.string().uuid(),
@@ -189,6 +190,13 @@ export const MediaModeUpdatedEventDataSchema = z.object({
   reason: z.enum(['admin_changed']),
 });
 
+export const MediaSfuDiagnosticsCommandDataSchema = z.object({
+  channelId: z.string().uuid(),
+  publisherSessionId: z.string().uuid(),
+  streamId: z.string().uuid(),
+  viewerSessionId: z.string().uuid().optional(),
+});
+
 /**
  * Rebuild the transport resources for an already-authorized logical media
  * session without removing the participant/publication from its room.
@@ -223,6 +231,7 @@ export type MediaSfuConsumeAckData = z.infer<typeof MediaSfuConsumeAckDataSchema
 export type MediaSfuCreateTransportAckData = z.infer<typeof MediaSfuCreateTransportAckDataSchema>;
 export type MediaSfuProducerEventData = z.infer<typeof MediaSfuProducerEventDataSchema>;
 export type MediaSfuProduceAckData = z.infer<typeof MediaSfuProduceAckDataSchema>;
+export type MediaSfuDiagnosticsCommandData = z.infer<typeof MediaSfuDiagnosticsCommandDataSchema>;
 export type SessionMode = z.infer<typeof SessionModeSchema>;
 export type SfuProducer = z.infer<typeof SfuProducerSchema>;
 export type SfuSessionInfo = z.infer<typeof SfuSessionInfoSchema>;

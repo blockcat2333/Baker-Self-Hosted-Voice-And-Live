@@ -16,7 +16,7 @@
 - desktop screen-share source selection is Electron-local: the main process owns the custom picker, serializes `desktopCapturer` previews, persists the `共享声音` preference, and returns `{ sourceId, shareAudio }` to the shared client capture helper
 - desktop shared-system-audio publishing uses a Windows-only native WASAPI process-loopback helper to exclude the Baker process tree; renderer code merges that excluded audio track with Electron desktop video instead of asking Electron for ordinary loopback audio
 - stream quality selection is also client-owned: the broadcaster chooses resolution/frame-rate presets in the client, capture constraints are applied in-browser, and the chosen settings only travel through protocol/session metadata for orchestration and visibility
-- stream quality selection now includes fixed bitrate presets plus a best-effort codec preference selector, and publish setup applies best-effort sender `maxBitrate`, sender `degradationPreference`, and publish-time codec ordering through browser WebRTC APIs
+- stream quality selection includes fixed bitrate presets and a strict primary-codec selector; publish setup applies best-effort sender `maxBitrate` and `degradationPreference`, while codec negotiation rejects unsupported selections or any primary-codec fallback
 - watched-stream popup viewers now read live WebRTC receiver stats from the active watch runtime and render them locally in the popup UI; this telemetry is not persisted through protocol/gateway state
 - broadcaster-side publish diagnostics also stay client-local: the `Your Stream` panel samples active sender stats in-browser and does not persist this telemetry through protocol/gateway state
 - gateway RTT sampling (`ping`/`pong`) is maintained in client gateway state and used as the unified voice latency metric in UI
@@ -126,13 +126,17 @@ Room stream flow:
 - a voice channel may contain multiple concurrent publisher-owned stream sessions
 - `streamId` is the primary identity for watch/unwatch/render/reconcile and signaling validation
 - `stream.start` may include requested quality settings for resolution/frame rate/bitrate
+- `stream.start` may include the selected strict video codec
+- `stream.diagnostics.report` accepts only the active publisher's memory-only sample
+- `stream.diagnostics.get` is restricted to the active publisher or viewer and
+  combines publisher, SFU, and local receiver evidence
 - gateway creates a publish or watch media session by authenticating to the media service with `MEDIA_INTERNAL_SECRET`, persists the publisher-owned stream session plus requested quality metadata, and broadcasts `stream.state.updated`
 - `voice.join` replays the current authoritative stream snapshot to late joiners when the room already has live streams
 - `voice.leave` and disconnect cleanup remove the caller's same-channel stream participation before broadcasting reconciled room state
 - viewers use `stream.watch` to join recv-only for a specific `streamId`
 - screen-share publishers mark outbound video tracks with `contentHint='detail'`
 - desktop screen-share publishers capture Electron desktop video without Electron loopback audio; when `共享声音` is enabled on Windows, a native helper streams system PCM with Baker's process tree excluded and the renderer turns it into an outbound WebRTC audio track
-- publishers apply best-effort sender bitrate caps (`maxBitrate`), sender `degradationPreference`, and optional codec-preference ordering during publish offer setup
+- publishers apply best-effort sender bitrate caps (`maxBitrate`) and `degradationPreference`; the selected primary codec is filtered strictly and verified after P2P negotiation or SFU Producer creation
 - `stream.state.updated` is the authoritative room snapshot for client reconciliation
 - client teardown is per-stream for watched sessions and separate from owned publish teardown
 - the main client shell renders separate `Your Stream`, `Watching`, and `Available Streams` control/status sections from that state model

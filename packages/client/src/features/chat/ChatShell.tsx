@@ -462,7 +462,7 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
           ) : hasAnyStream && showDataDetails ? (
             <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
               <StreamPanel
-                isShareDialogOpen={isStreamShareDialogOpen}
+                isShareDialogOpen={false}
                 onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
                 showDashboard={showDataDetails}
               />
@@ -470,13 +470,11 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
           ) : null}
         </div>
         <VoiceBottomControlBar onOpenStreamShareDialog={() => setIsStreamShareDialogOpen(true)} />
-        {hasAnyStream && showDataDetails ? null : (
-          <StreamPanel
-            isShareDialogOpen={isStreamShareDialogOpen}
-            onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
-            showDashboard={false}
-          />
-        )}
+        <StreamPanel
+          isShareDialogOpen={isStreamShareDialogOpen}
+          onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
+          showDashboard={false}
+        />
       </main>
 
       <MobileTabBar

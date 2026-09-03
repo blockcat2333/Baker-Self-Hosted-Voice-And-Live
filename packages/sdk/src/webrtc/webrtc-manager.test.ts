@@ -41,15 +41,24 @@ describe('video receive stats', () => {
     expect(result).toEqual({
       bytesReceived: 800_000,
       codec: 'H264',
+      decoderAcceleration: 'unknown',
       frameHeight: 1080,
       frameWidth: 1920,
       framesDecoded: 120,
       framesDropped: 4,
+      framesReceived: null,
       framesPerSecond: 59.8,
+      freezeCount: null,
+      jitterBufferDelayMs: null,
       jitterMs: 12,
+      keyFramesDecoded: null,
+      nackCount: null,
       packetsLost: 3,
       packetsReceived: 997,
+      pliCount: null,
       timestampMs: 2_000,
+      totalDecodeTimeMs: null,
+      totalFreezesDurationMs: null,
     });
   });
 
@@ -66,7 +75,10 @@ describe('video receive stats', () => {
       addTrack: vi.fn(),
       close: vi.fn(),
       connectionState: 'new',
-      createOffer: vi.fn().mockResolvedValue({ sdp: 'offer', type: 'offer' }),
+      createOffer: vi.fn().mockResolvedValue({
+        sdp: 'm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=rtpmap:102 H264/90000\r\n',
+        type: 'offer',
+      }),
       getReceivers: () => [],
       getSenders: () => [sender],
       getTransceivers: () => [{ sender, setCodecPreferences }],
@@ -100,11 +112,14 @@ describe('video receive stats', () => {
 
     expect(setCodecPreferences).toHaveBeenCalledWith([
       expect.objectContaining({ mimeType: 'video/H264' }),
-      expect.objectContaining({ mimeType: 'video/VP8' }),
     ]);
-    expect(setParameters).toHaveBeenCalledWith(expect.objectContaining({
+    expect(setParameters).toHaveBeenCalledWith(
+      expect.objectContaining({
       degradationPreference: 'balanced',
-      encodings: [expect.objectContaining({ maxBitrate: 6_000_000, maxFramerate: 60 })],
-    }));
+        encodings: [
+          expect.objectContaining({ maxBitrate: 6_000_000, maxFramerate: 60 }),
+        ],
+      }),
+    );
   });
 });

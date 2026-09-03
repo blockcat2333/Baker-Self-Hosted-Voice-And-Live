@@ -5030,6 +5030,19 @@ body {
   margin: 0;
 }
 
+.network-status-details-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.network-status-details-group h4 {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin: 0 0 7px;
+  text-transform: uppercase;
+}
+
 .network-status-details-grid > div,
 .voice-participant-menu-network > div {
   background: #1e1f22;

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 export type NetworkStatusLevel = 'danger' | 'good' | 'idle' | 'warn';
 
 export interface NetworkStatusMetric {
+  group?: string;
   label: string;
   value: string;
 }
@@ -127,19 +128,37 @@ export function NetworkStatusButton({
               >
                 <header className="network-status-details-header">
                   <div>
-                    <p className="network-status-details-kicker">{detailsLabel}</p>
+                    <p className="network-status-details-kicker">
+                      {detailsLabel}
+                    </p>
                     <h3>{label}</h3>
                   </div>
-                  <span className="network-status-details-level">{summary}</span>
+                  <span className="network-status-details-level">
+                    {summary}
+                  </span>
                 </header>
+                <div className="network-status-details-groups">
+                  {[
+                    ...new Set(metrics.map((metric) => metric.group ?? '')),
+                  ].map((group) => (
+                    <section
+                      className="network-status-details-group"
+                      key={group || 'default'}
+                    >
+                      {group ? <h4>{group}</h4> : null}
                 <dl className="network-status-details-grid">
-                  {metrics.map((metric) => (
-                    <div key={metric.label}>
+                        {metrics
+                          .filter((metric) => (metric.group ?? '') === group)
+                          .map((metric) => (
+                            <div key={`${group}:${metric.label}`}>
                       <dt>{metric.label}</dt>
                       <dd>{metric.value}</dd>
                     </div>
                   ))}
                 </dl>
+              </section>
+                  ))}
+                </div>
               </section>
             </>,
             document.body,

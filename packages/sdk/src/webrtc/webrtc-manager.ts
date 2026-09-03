@@ -55,15 +55,24 @@ export type LocalOutboundNetworkSample = {
 export type PeerVideoReceiveSample = {
   bytesReceived: number | null;
   codec: string | null;
+  decoderAcceleration: 'hardware' | 'software' | 'unknown';
   frameHeight: number | null;
   frameWidth: number | null;
   framesDecoded: number | null;
   framesDropped: number | null;
+  framesReceived: number | null;
   framesPerSecond: number | null;
+  freezeCount: number | null;
   jitterMs: number | null;
+  jitterBufferDelayMs: number | null;
+  keyFramesDecoded: number | null;
+  nackCount: number | null;
   packetsLost: number | null;
   packetsReceived: number | null;
+  pliCount: number | null;
   timestampMs: number | null;
+  totalDecodeTimeMs: number | null;
+  totalFreezesDurationMs: number | null;
 };
 
 export type VideoCodecPreference = 'default' | 'h264' | 'vp8' | 'vp9' | 'av1';
@@ -76,12 +85,16 @@ export type AggregatePeerVideoSendSample = {
   activePeerCount: number;
   bytesSent: number | null;
   codec: string | null;
+  encoderAcceleration: 'hardware' | 'software' | 'unknown';
   frameHeight: number | null;
   frameWidth: number | null;
   framesEncoded: number | null;
   framesPerSecond: number | null;
   packetsSent: number | null;
+  packetsLost: number | null;
   qualityLimitationReason: 'bandwidth' | 'cpu' | 'none' | 'other';
+  retransmittedPacketsSent: number | null;
+  roundTripTimeMs: number | null;
   timestampMs: number | null;
 };
 
@@ -106,7 +119,14 @@ function readCodecLabel(record: RTCStats | null): string | null {
   }
 
   const slashIndex = mimeType.indexOf('/');
-  return slashIndex >= 0 ? mimeType.slice(slashIndex + 1).toUpperCase() : mimeType.toUpperCase();
+  return slashIndex >= 0
+    ? mimeType.slice(slashIndex + 1).toUpperCase()
+    : mimeType.toUpperCase();
+}
+
+function readBooleanField(record: RTCStats, key: string): boolean | null {
+  const value = (record as unknown as Record<string, unknown>)[key];
+  return typeof value === 'boolean' ? value : null;
 }
 
 export function summarizeVideoReceiveStats(
@@ -116,34 +136,82 @@ export function summarizeVideoReceiveStats(
     const stats: RTCStats[] = [];
     report.forEach((stat) => stats.push(stat));
 
-    const inboundVideo = stats.find((stat) => {
+    const inboundVideo =
+      stats.find((stat) => {
       if (stat.type !== 'inbound-rtp') return false;
-      return (readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType')) === 'video';
+        return (
+          (readStringField(stat, 'kind') ??
+            readStringField(stat, 'mediaType')) === 'video'
+        );
     }) ?? null;
-    const trackVideo = stats.find((stat) => {
+    const trackVideo =
+      stats.find((stat) => {
       if ((stat.type as string) !== 'track') return false;
-      return (readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType')) === 'video';
+        return (
+          (readStringField(stat, 'kind') ??
+            readStringField(stat, 'mediaType')) === 'video'
+        );
     }) ?? null;
     const primary = inboundVideo ?? trackVideo;
     if (!primary) continue;
 
     const codecId = readStringField(primary, 'codecId');
-    const codecStat = codecId ? stats.find((stat) => stat.id === codecId) ?? null : null;
+    const codecStat = codecId
+      ? (stats.find((stat) => stat.id === codecId) ?? null)
+      : null;
     const dimensions = trackVideo ?? inboundVideo ?? primary;
     const jitter = readNumberField(primary, 'jitter');
+    const jitterBufferDelay = readNumberField(primary, 'jitterBufferDelay');
+    const jitterBufferEmittedCount = readNumberField(
+      primary,
+      'jitterBufferEmittedCount',
+    );
 
     return {
       bytesReceived: readNumberField(primary, 'bytesReceived'),
       codec: readCodecLabel(codecStat) ?? readCodecLabel(primary),
+      decoderAcceleration:
+        readBooleanField(primary, 'powerEfficientDecoder') === true
+          ? 'hardware'
+          : readBooleanField(primary, 'powerEfficientDecoder') === false
+            ? 'software'
+            : 'unknown',
       frameHeight: readNumberField(dimensions, 'frameHeight'),
       frameWidth: readNumberField(dimensions, 'frameWidth'),
       framesDecoded: readNumberField(primary, 'framesDecoded'),
-      framesDropped: readNumberField(dimensions, 'framesDropped') ?? readNumberField(primary, 'framesDropped'),
-      framesPerSecond: readNumberField(dimensions, 'framesPerSecond') ?? readNumberField(primary, 'framesPerSecond'),
+      framesDropped:
+        readNumberField(dimensions, 'framesDropped') ??
+        readNumberField(primary, 'framesDropped'),
+      framesReceived: readNumberField(primary, 'framesReceived'),
+      framesPerSecond:
+        readNumberField(dimensions, 'framesPerSecond') ??
+        readNumberField(primary, 'framesPerSecond'),
+      freezeCount: readNumberField(primary, 'freezeCount'),
       jitterMs: jitter === null ? null : Math.round(jitter * 1000),
+      jitterBufferDelayMs:
+        jitterBufferDelay === null || !jitterBufferEmittedCount
+          ? null
+          : Math.round((jitterBufferDelay / jitterBufferEmittedCount) * 1000),
+      keyFramesDecoded: readNumberField(primary, 'keyFramesDecoded'),
+      nackCount: readNumberField(primary, 'nackCount'),
       packetsLost: readNumberField(primary, 'packetsLost'),
       packetsReceived: readNumberField(primary, 'packetsReceived'),
-      timestampMs: Number.isFinite(primary.timestamp) ? Math.round(primary.timestamp) : null,
+      pliCount: readNumberField(primary, 'pliCount'),
+      timestampMs: Number.isFinite(primary.timestamp)
+        ? Math.round(primary.timestamp)
+        : null,
+      totalDecodeTimeMs:
+        readNumberField(primary, 'totalDecodeTime') === null
+          ? null
+          : Math.round(
+              (readNumberField(primary, 'totalDecodeTime') ?? 0) * 1000,
+            ),
+      totalFreezesDurationMs:
+        readNumberField(primary, 'totalFreezesDuration') === null
+          ? null
+          : Math.round(
+              (readNumberField(primary, 'totalFreezesDuration') ?? 0) * 1000,
+            ),
     };
   }
 
@@ -166,7 +234,13 @@ export function summarizeAggregateVideoSendStats(
   let hasBytesSent = false;
   let hasFramesEncoded = false;
   let hasPacketsSent = false;
+  let totalPacketsLost = 0;
+  let totalRetransmittedPacketsSent = 0;
+  let hasPacketsLost = false;
+  let hasRetransmittedPacketsSent = false;
+  let maxRoundTripTimeMs: number | null = null;
   const limitationReasons = new Set<string>();
+  const encoderAccelerations = new Set<'hardware' | 'software'>();
 
   for (const report of reports) {
     const stats: RTCStats[] = [];
@@ -227,29 +301,83 @@ export function summarizeAggregateVideoSendStats(
       hasPacketsSent = true;
     }
 
-    const framesPerSecond = readNumberField(trackVideo ?? outboundVideo!, 'framesPerSecond');
+    const framesPerSecond = readNumberField(
+      trackVideo ?? outboundVideo!,
+      'framesPerSecond',
+    );
     if (framesPerSecond !== null) {
       totalFramesPerSecond += framesPerSecond;
       frameRateSampleCount += 1;
     }
 
-    const frameWidth = readNumberField(trackVideo ?? outboundVideo!, 'frameWidth');
+    const frameWidth = readNumberField(
+      trackVideo ?? outboundVideo!,
+      'frameWidth',
+    );
     if (frameWidth !== null) {
-      maxFrameWidth = maxFrameWidth === null ? frameWidth : Math.max(maxFrameWidth, frameWidth);
+      maxFrameWidth =
+        maxFrameWidth === null
+          ? frameWidth
+          : Math.max(maxFrameWidth, frameWidth);
     }
 
-    const frameHeight = readNumberField(trackVideo ?? outboundVideo!, 'frameHeight');
+    const frameHeight = readNumberField(
+      trackVideo ?? outboundVideo!,
+      'frameHeight',
+    );
     if (frameHeight !== null) {
-      maxFrameHeight = maxFrameHeight === null ? frameHeight : Math.max(maxFrameHeight, frameHeight);
+      maxFrameHeight =
+        maxFrameHeight === null
+          ? frameHeight
+          : Math.max(maxFrameHeight, frameHeight);
     }
 
-    const qualityLimitationReason = readStringField(primaryVideoStat, 'qualityLimitationReason');
+    const qualityLimitationReason = readStringField(
+      primaryVideoStat,
+      'qualityLimitationReason',
+    );
     if (qualityLimitationReason) {
       limitationReasons.add(qualityLimitationReason);
     }
+    const powerEfficientEncoder = readBooleanField(
+      primaryVideoStat,
+      'powerEfficientEncoder',
+    );
+    if (powerEfficientEncoder !== null)
+      encoderAccelerations.add(powerEfficientEncoder ? 'hardware' : 'software');
+
+    const retransmittedPacketsSent = readNumberField(
+      primaryVideoStat,
+      'retransmittedPacketsSent',
+    );
+    if (retransmittedPacketsSent !== null) {
+      totalRetransmittedPacketsSent += retransmittedPacketsSent;
+      hasRetransmittedPacketsSent = true;
+    }
+    const remoteInbound = stats.find(
+      (stat) =>
+        stat.type === 'remote-inbound-rtp' &&
+        (readStringField(stat, 'kind') ??
+          readStringField(stat, 'mediaType')) === 'video',
+    );
+    if (remoteInbound) {
+      const packetsLost = readNumberField(remoteInbound, 'packetsLost');
+      if (packetsLost !== null) {
+        totalPacketsLost += packetsLost;
+        hasPacketsLost = true;
+      }
+      const roundTripTime = readNumberField(remoteInbound, 'roundTripTime');
+      if (roundTripTime !== null) {
+        maxRoundTripTimeMs = Math.max(
+          maxRoundTripTimeMs ?? 0,
+          Math.round(roundTripTime * 1000),
+        );
+      }
+    }
 
     if (Number.isFinite(primaryVideoStat.timestamp)) {
-      latestTimestampMs = latestTimestampMs === null
+      latestTimestampMs =
+        latestTimestampMs === null
         ? Math.round(primaryVideoStat.timestamp)
         : Math.max(latestTimestampMs, Math.round(primaryVideoStat.timestamp));
     }
@@ -272,12 +400,24 @@ export function summarizeAggregateVideoSendStats(
     activePeerCount,
     bytesSent: hasBytesSent ? totalBytesSent : null,
     codec,
+    encoderAcceleration:
+      encoderAccelerations.size === 1
+        ? [...encoderAccelerations][0]!
+        : 'unknown',
     frameHeight: maxFrameHeight,
     frameWidth: maxFrameWidth,
     framesEncoded: hasFramesEncoded ? totalFramesEncoded : null,
-    framesPerSecond: frameRateSampleCount > 0 ? totalFramesPerSecond / frameRateSampleCount : null,
+    framesPerSecond:
+      frameRateSampleCount > 0
+        ? totalFramesPerSecond / frameRateSampleCount
+        : null,
     packetsSent: hasPacketsSent ? totalPacketsSent : null,
+    packetsLost: hasPacketsLost ? totalPacketsLost : null,
     qualityLimitationReason,
+    retransmittedPacketsSent: hasRetransmittedPacketsSent
+      ? totalRetransmittedPacketsSent
+      : null,
+    roundTripTimeMs: maxRoundTripTimeMs,
     timestampMs: latestTimestampMs,
   };
 }
@@ -346,7 +486,9 @@ function codecMimeTypeMatches(mimeType: string | null, preferredCodec: VideoCode
   return mimeType.toLowerCase() === `video/${preferredCodec}`;
 }
 
-function prioritizeVideoCodecs(
+const PRIMARY_VIDEO_CODEC_NAMES = new Set(['av1', 'h264', 'vp8', 'vp9']);
+
+export function selectStrictVideoCodecs(
   codecs: CodecCapabilityLike[],
   preferredCodec: VideoCodecPreference,
 ): CodecCapabilityLike[] {
@@ -354,14 +496,43 @@ function prioritizeVideoCodecs(
     return codecs;
   }
 
-  const prioritized = [...codecs].sort((left, right) => {
-    const leftScore = codecMimeTypeMatches(left.mimeType ?? null, preferredCodec) ? 0 : 1;
-    const rightScore = codecMimeTypeMatches(right.mimeType ?? null, preferredCodec) ? 0 : 1;
-    return leftScore - rightScore;
+  const selected = codecs.filter((codec) =>
+    codecMimeTypeMatches(codec.mimeType ?? null, preferredCodec),
+  );
+  if (selected.length === 0) {
+    throw new Error(
+      `Selected video codec ${preferredCodec.toUpperCase()} is not supported by this browser.`,
+    );
+  }
+  const auxiliaries = codecs.filter((codec) => {
+    const mimeType = codec.mimeType?.toLowerCase() ?? '';
+    return (
+      mimeType.startsWith('video/') &&
+      !PRIMARY_VIDEO_CODEC_NAMES.has(mimeType.slice(6))
+    );
   });
+  return [...selected, ...auxiliaries];
+}
 
-  const changed = prioritized.some((codec, index) => codec !== codecs[index]);
-  return changed ? prioritized : codecs;
+function assertOfferUsesCodec(
+  sdp: string | undefined,
+  preferredCodec: VideoCodecPreference,
+): void {
+  if (!sdp || preferredCodec === 'default') return;
+  const primaryCodecs = [
+    ...sdp.matchAll(/^a=rtpmap:\d+\s+(AV1|H264|VP8|VP9)\/\d+/gim),
+  ]
+    .map((match) => match[1]?.toLowerCase())
+    .filter((codec): codec is string => Boolean(codec));
+  if (
+    primaryCodecs.length === 0 ||
+    primaryCodecs.some((codec) => codec !== preferredCodec)
+  ) {
+    throw new Error(
+      `Selected video codec ${preferredCodec.toUpperCase()} could not be negotiated exactly; ` +
+        'the stream was not started and no fallback codec was used.',
+    );
+  }
 }
 
 export class WebRtcManager {
@@ -426,33 +597,46 @@ export class WebRtcManager {
       return;
     }
 
-    if (typeof RTCRtpSender === 'undefined' || typeof RTCRtpSender.getCapabilities !== 'function') {
-      return;
+    if (
+      typeof RTCRtpSender === 'undefined' ||
+      typeof RTCRtpSender.getCapabilities !== 'function'
+    ) {
+      throw new Error(
+        `Selected video codec ${preferredCodec.toUpperCase()} cannot be enforced by this browser.`,
+      );
     }
 
     const capabilities = RTCRtpSender.getCapabilities('video');
     const codecs = capabilities?.codecs as CodecCapabilityLike[] | undefined;
     if (!codecs || codecs.length === 0) {
-      return;
+      throw new Error(
+        `Selected video codec ${preferredCodec.toUpperCase()} is not supported by this browser.`,
+      );
     }
 
-    const prioritizedCodecs = prioritizeVideoCodecs(codecs, preferredCodec);
-    if (prioritizedCodecs === codecs) {
-      return;
-    }
+    const strictCodecs = selectStrictVideoCodecs(codecs, preferredCodec);
+    let applied = false;
 
     for (const transceiver of pc.getTransceivers()) {
-      if (transceiver.sender.track?.kind !== 'video' || typeof transceiver.setCodecPreferences !== 'function') {
+      if (transceiver.sender.track?.kind !== 'video') {
         continue;
       }
-
-      try {
-        transceiver.setCodecPreferences(
-          prioritizedCodecs as unknown as Parameters<typeof transceiver.setCodecPreferences>[0],
+      if (typeof transceiver.setCodecPreferences !== 'function') {
+        throw new Error(
+          `Selected video codec ${preferredCodec.toUpperCase()} cannot be enforced by this browser.`,
         );
-      } catch {
-        // Best-effort only: older browsers may reject codec preference changes.
       }
+      transceiver.setCodecPreferences(
+        strictCodecs as unknown as Parameters<
+          typeof transceiver.setCodecPreferences
+        >[0],
+      );
+      applied = true;
+    }
+    if (!applied) {
+      throw new Error(
+        `Selected video codec ${preferredCodec.toUpperCase()} cannot be applied to this stream.`,
+      );
     }
   }
 
@@ -542,6 +726,10 @@ export class WebRtcManager {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    assertOfferUsesCodec(
+      pc.localDescription?.sdp ?? offer.sdp,
+      options?.preferredVideoCodec ?? 'default',
+    );
     return offer;
   }
 

@@ -139,6 +139,18 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     string,
     { expiresAt: number; value: StreamSfuDiagnostics }
   >();
+  private readonly diagnosticsLegSamples = new Map<
+    string,
+    {
+      byteCount: number | null;
+      nackCount: number | null;
+      packetCount: number | null;
+      packetsLost: number | null;
+      pliCount: number | null;
+      retransmittedPackets: number | null;
+      sampledAt: number;
+    }
+  >();
 
   constructor(private readonly env: AppEnv) {
     this.defaultMediaProfile = getDefaultMediaRegionProfile(env);
@@ -228,21 +240,36 @@ export class MediasoupMediaAdapter implements MediaAdapter {
             entry.kind === 'video' && entry.producerId === producer?.id,
         ) ?? null)
       : null;
-    const [producerStats, consumerStats, workerCpuPct] = await Promise.all([
+    const publisherTransport = publisher
+      ? ([...publisher.transports.values()].find((entry) => entry.direction === 'send')?.transport ?? null)
+      : null;
+    const viewerTransport = viewer
+      ? ([...viewer.transports.values()].find((entry) => entry.direction === 'recv')?.transport ?? null)
+      : null;
+    const getTransportStats = (transport: types.WebRtcTransport | null) =>
+      transport && typeof transport.getStats === 'function'
+        ? transport.getStats().catch(() => [])
+        : Promise.resolve([]);
+    const [producerStats, consumerStats, publisherTransportStats, viewerTransportStats, workerCpuPct] = await Promise.all([
       producer?.getStats().catch(() => []) ?? [],
       consumer?.getStats().catch(() => []) ?? [],
+      getTransportStats(publisherTransport),
+      getTransportStats(viewerTransport),
       this.sampleWorkerCpuPct(),
     ]);
 
     const value: StreamSfuDiagnostics = {
       egress: consumer
-        ? this.toSfuLegDiagnostics(consumerStats, consumer.paused, [
+        ? this.toSfuLegDiagnostics(consumer.id, consumerStats, viewerTransportStats, viewerTransport, consumer.paused, [
             consumer.score.score,
           ])
         : null,
       ingress: producer
         ? this.toSfuLegDiagnostics(
+            producer.id,
             producerStats,
+            publisherTransportStats,
+            publisherTransport,
             producer.paused,
             producer.score.map((entry) => entry.score),
           )
@@ -469,6 +496,7 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       const consumer = session.consumers.get(input.consumerId);
       consumer?.close();
       session.consumers.delete(input.consumerId);
+      this.diagnosticsLegSamples.delete(input.consumerId);
       return {};
     }
 
@@ -477,6 +505,7 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       record?.producer.close();
       session.producers.delete(input.producerId);
       this.producers.delete(input.producerId);
+      this.diagnosticsLegSamples.delete(input.producerId);
       return record ? { closedProducer: record.summary } : {};
     }
 
@@ -488,10 +517,12 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     }
 
     for (const consumer of session.consumers.values()) {
+      this.diagnosticsLegSamples.delete(consumer.id);
       consumer.close();
     }
     for (const producer of session.producers.values()) {
       this.producers.delete(producer.id);
+      this.diagnosticsLegSamples.delete(producer.id);
       producer.close();
     }
     for (const transport of session.transports.values()) {
@@ -505,7 +536,10 @@ export class MediasoupMediaAdapter implements MediaAdapter {
   }
 
   private toSfuLegDiagnostics(
+    entityId: string,
     stats: readonly unknown[],
+    transportStats: readonly unknown[],
+    transport: types.WebRtcTransport | null,
     paused: boolean,
     scores: number[],
   ): NonNullable<StreamSfuDiagnostics['ingress']> {
@@ -526,21 +560,72 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     };
     const bitrate = number('bitrate');
     const jitter = number('jitter');
-    return {
-      bitrateKbps: bitrate === null ? null : Math.round(bitrate / 1000),
-      bytes: number('byteCount', 'bytesReceived', 'bytesSent'),
-      jitterMs: jitter === null ? null : Math.round(jitter * 1000),
+    const transportRecord =
+      (transportStats as Record<string, unknown>[]).find((entry) =>
+        String(entry.type ?? '').includes('transport'),
+      ) ??
+      (transportStats as Record<string, unknown>[])[0] ??
+      {};
+    const transportNumber = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = transportRecord[key];
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+          return value;
+      }
+      return null;
+    };
+    const sampledAt = Date.now();
+    const current = {
+      byteCount: number('byteCount', 'bytesReceived', 'bytesSent'),
       nackCount: number('nackCount'),
-      packets: number('packetCount', 'packetsReceived', 'packetsSent'),
+      packetCount: number('packetCount', 'packetsReceived', 'packetsSent'),
       packetsLost: number('packetsLost'),
-      paused,
       pliCount: number('pliCount'),
       retransmittedPackets: number(
         'retransmittedPacketCount',
         'retransmittedPacketsSent',
         'retransmittedPacketsReceived',
       ),
+      sampledAt,
+    };
+    const previous = this.diagnosticsLegSamples.get(entityId);
+    this.diagnosticsLegSamples.set(entityId, current);
+    const delta = (next: number | null, prior: number | null | undefined) =>
+      next !== null && prior !== null && prior !== undefined && next >= prior ? next - prior : null;
+    const deltaMs = previous ? sampledAt - previous.sampledAt : 0;
+    const fallbackBitrateKbps =
+      previous && deltaMs > 0
+        ? (() => {
+            const bytes = delta(current.byteCount, previous.byteCount);
+            return bytes === null ? null : Math.round((bytes * 8) / deltaMs);
+          })()
+        : null;
+    const protocol = transport?.iceSelectedTuple?.protocol;
+    return {
+      availableOutgoingBitrateKbps:
+        transportNumber('availableOutgoingBitrate') === null
+          ? null
+          : Math.round((transportNumber('availableOutgoingBitrate') ?? 0) / 1000),
+      bitrateKbps: bitrate === null ? fallbackBitrateKbps : Math.round(bitrate / 1000),
+      bytes: current.byteCount,
+      dtlsState: transport?.dtlsState ?? null,
+      iceState: transport?.iceState ?? null,
+      jitterMs: jitter === null ? null : Math.round(jitter * 1000),
+      nackCount: current.nackCount,
+      packets: current.packetCount,
+      packetsLost: current.packetsLost,
+      paused,
+      pliCount: current.pliCount,
+      retransmittedPackets: current.retransmittedPackets,
       score: scores.length > 0 ? Math.min(...scores) : null,
+      transportProtocol: protocol === 'tcp' || protocol === 'udp' ? protocol : protocol ? 'unknown' : null,
+      windowNackCount: previous ? delta(current.nackCount, previous.nackCount) : null,
+      windowPackets: previous ? delta(current.packetCount, previous.packetCount) : null,
+      windowPacketsLost: previous ? delta(current.packetsLost, previous.packetsLost) : null,
+      windowPliCount: previous ? delta(current.pliCount, previous.pliCount) : null,
+      windowRetransmittedPackets: previous
+        ? delta(current.retransmittedPackets, previous.retransmittedPackets)
+        : null,
     };
   }
 

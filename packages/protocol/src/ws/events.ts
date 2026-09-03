@@ -211,17 +211,25 @@ const NullableMetricSchema = z.number().finite().nonnegative().nullable();
 
 export const StreamPublisherDiagnosticsSchema = z.object({
   actualCodec: StreamVideoCodecSchema.nullable(),
+  availableOutgoingBitrateKbps: NullableMetricSchema.optional(),
+  averageEncodeTimeMs: NullableMetricSchema.optional(),
   bitrateKbps: NullableMetricSchema,
   captureFrameRate: NullableMetricSchema,
   encodedFrameRate: NullableMetricSchema,
   encoderAcceleration: z.enum(['hardware', 'software', 'unknown']),
+  encoderImplementation: z.string().max(160).nullable().optional(),
   packetsLost: NullableMetricSchema,
   packetsSent: NullableMetricSchema,
   qualityLimitationReason: z.enum(['bandwidth', 'cpu', 'none', 'other']),
   requestedCodec: StreamVideoCodecSchema,
   roundTripTimeMs: NullableMetricSchema,
+  retransmittedPacketsSent: NullableMetricSchema.optional(),
   targetBitrateKbps: z.number().int().positive(),
+  encoderTargetBitrateKbps: NullableMetricSchema.optional(),
   targetFrameRate: z.number().int().positive(),
+  transportProtocol: z.enum(['tcp', 'udp', 'unknown']).nullable().optional(),
+  localCandidateType: z.enum(['host', 'prflx', 'relay', 'srflx', 'unknown']).nullable().optional(),
+  remoteCandidateType: z.enum(['host', 'prflx', 'relay', 'srflx', 'unknown']).nullable().optional(),
 });
 
 export const StreamDiagnosticsReportCommandDataSchema = z.object({
@@ -238,6 +246,7 @@ export const StreamDiagnosticsGetCommandDataSchema = z.object({
 });
 
 export const StreamSfuLegDiagnosticsSchema = z.object({
+  availableOutgoingBitrateKbps: NullableMetricSchema.optional(),
   bitrateKbps: NullableMetricSchema,
   bytes: NullableMetricSchema,
   jitterMs: NullableMetricSchema,
@@ -248,6 +257,14 @@ export const StreamSfuLegDiagnosticsSchema = z.object({
   pliCount: NullableMetricSchema,
   retransmittedPackets: NullableMetricSchema,
   score: NullableMetricSchema,
+  iceState: z.string().max(40).nullable().optional(),
+  dtlsState: z.string().max(40).nullable().optional(),
+  transportProtocol: z.enum(['tcp', 'udp', 'unknown']).nullable().optional(),
+  windowNackCount: NullableMetricSchema.optional(),
+  windowPackets: NullableMetricSchema.optional(),
+  windowPacketsLost: NullableMetricSchema.optional(),
+  windowPliCount: NullableMetricSchema.optional(),
+  windowRetransmittedPackets: NullableMetricSchema.optional(),
 });
 
 export const StreamSfuDiagnosticsSchema = z.object({

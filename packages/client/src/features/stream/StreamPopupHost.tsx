@@ -16,11 +16,15 @@ import {
   startPopupStreamPlayback,
 } from './stream-media';
 import {
+  getStreamDiagnostics,
   getWatchedStreamVideoStats,
+  reportWatchedStreamPresentationFrameRate,
   type WatchedStreamState,
   type WatchedStreamVideoStats,
   useStreamStore,
 } from './stream-store';
+import { diagnoseStream, type StreamDiagnosis } from './stream-diagnostics';
+import { StreamDiagnosticsSummary } from './StreamDiagnosticsSummary';
 import {
   closeAllStreamPopups,
   closeStreamPopup,
@@ -92,7 +96,7 @@ function StreamCloseIcon() {
 }
 
 const STREAM_PLAYBACK_START_TIMEOUT_MS = 3000;
-const STREAM_STATS_POLL_INTERVAL_MS = 1000;
+const STREAM_STATS_POLL_INTERVAL_MS = 2000;
 
 type PopupAttachWindow = Window &
   typeof globalThis & {
@@ -144,9 +148,11 @@ async function playPopupVideoElementWithAudio(video: HTMLVideoElement) {
 function StreamPopupVideo({
   playbackVolume = DEFAULT_STREAM_PLAYBACK_VOLUME,
   stream,
+  streamId,
 }: {
   playbackVolume?: number;
   stream: MediaStream | null;
+  streamId: string;
 }) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -263,6 +269,29 @@ function StreamPopupVideo({
     });
   }, [selectedAudioOutputId]);
 
+  useEffect(() => {
+    const mediaElement = videoRef.current;
+    if (!mediaElement || typeof mediaElement.requestVideoFrameCallback !== 'function') return;
+    let callbackId: number | null = null;
+    let frameCount = 0;
+    let windowStartedAt = performance.now();
+    const onFrame: VideoFrameRequestCallback = (now) => {
+      frameCount += 1;
+      const elapsed = now - windowStartedAt;
+      if (elapsed >= 1_000) {
+        reportWatchedStreamPresentationFrameRate(streamId, (frameCount * 1_000) / elapsed);
+        frameCount = 0;
+        windowStartedAt = now;
+      }
+      callbackId = mediaElement.requestVideoFrameCallback(onFrame);
+    };
+    callbackId = mediaElement.requestVideoFrameCallback(onFrame);
+    return () => {
+      if (callbackId !== null) mediaElement.cancelVideoFrameCallback(callbackId);
+      reportWatchedStreamPresentationFrameRate(streamId, null);
+    };
+  }, [stream, streamId]);
+
   async function handleManualPlaybackStart() {
     const mediaElement = videoRef.current;
     if (!mediaElement || !stream) {
@@ -332,14 +361,22 @@ function formatPacketLossValue(stats: WatchedStreamVideoStats | null) {
 }
 
 function StreamPopupStatsPanel({
+  showDetails,
   streamId,
   status,
 }: {
+  showDetails: boolean;
   streamId: string;
   status: WatchedStreamState['status'];
 }) {
   const { t } = useTranslation();
   const [stats, setStats] = useState<WatchedStreamVideoStats | null>(null);
+  const [diagnostics, setDiagnostics] = useState<Awaited<ReturnType<typeof getStreamDiagnostics>>>(null);
+  const [diagnosisState, setDiagnosisState] = useState<{
+    candidate: StreamDiagnosis;
+    count: number;
+    stable: StreamDiagnosis;
+  }>({ candidate: 'insufficient', count: 0, stable: 'insufficient' });
 
   useEffect(() => {
     if (status === 'ended' || status === 'stopping') {
@@ -351,9 +388,22 @@ function StreamPopupStatsPanel({
     let interval: ReturnType<typeof setInterval> | null = null;
 
     async function refreshStats() {
-      const next = await getWatchedStreamVideoStats(streamId);
+      const [next, details] = await Promise.all([
+        getWatchedStreamVideoStats(streamId),
+        getStreamDiagnostics(streamId),
+      ]);
       if (!cancelled) {
         setStats(next);
+        setDiagnostics(details);
+        const diagnosis = diagnoseStream(details, next);
+        setDiagnosisState((current) => {
+          const count = current.candidate === diagnosis ? current.count + 1 : 1;
+          return {
+            candidate: diagnosis,
+            count,
+            stable: count >= 2 ? diagnosis : current.stable,
+          };
+        });
       }
     }
 
@@ -371,7 +421,10 @@ function StreamPopupStatsPanel({
   }, [status, streamId]);
 
   return (
-    <section className={'stream-popup-stats'} aria-label={t('stream.popup_stats_title')}>
+    <>
+      <StreamDiagnosticsSummary diagnosis={diagnosisState.stable} diagnostics={diagnostics} receiver={stats} />
+      {showDetails ? (
+      <section className={'stream-popup-stats'} aria-label={t('stream.popup_stats_title')}>
       <div className={'stream-popup-stats-header'}>
         <h2 className={'stream-popup-stats-title'}>{t('stream.popup_stats_title')}</h2>
         <p className={'stream-popup-stats-copy'}>
@@ -407,19 +460,49 @@ function StreamPopupStatsPanel({
           <span className={'stream-popup-stats-label'}>{t('stream.popup_stats_frames_dropped')}</span>
           <strong className={'stream-popup-stats-value'}>{formatStatsValue(stats?.framesDropped)}</strong>
         </div>
+        <div className={'stream-popup-stats-item'}>
+          <span className={'stream-popup-stats-label'}>{t('stream.diagnostics_available_bitrate')}</span>
+          <strong className={'stream-popup-stats-value'}>{formatStatsValue(stats?.availableIncomingBitrateKbps, 'kbps')}</strong>
+        </div>
+        <div className={'stream-popup-stats-item'}>
+          <span className={'stream-popup-stats-label'}>{t('stream.diagnostics_receive_frame_rate')}</span>
+          <strong className={'stream-popup-stats-value'}>{formatStatsValue(stats?.receiveFrameRate, 'fps')}</strong>
+        </div>
+        <div className={'stream-popup-stats-item'}>
+          <span className={'stream-popup-stats-label'}>{t('stream.diagnostics_decode_frame_rate')}</span>
+          <strong className={'stream-popup-stats-value'}>{formatStatsValue(stats?.decodeFrameRate, 'fps')}</strong>
+        </div>
+        <div className={'stream-popup-stats-item'}>
+          <span className={'stream-popup-stats-label'}>{t('stream.diagnostics_render_frame_rate')}</span>
+          <strong className={'stream-popup-stats-value'}>{formatStatsValue(stats?.renderFrameRate, 'fps')}</strong>
+        </div>
+        <div className={'stream-popup-stats-item'}>
+          <span className={'stream-popup-stats-label'}>{t('stream.diagnostics_implementation')}</span>
+          <strong className={'stream-popup-stats-value'}>{formatStatsValue(stats?.decoderImplementation)}</strong>
+        </div>
+        <div className={'stream-popup-stats-item'}>
+          <span className={'stream-popup-stats-label'}>{t('stream.diagnostics_transport')}</span>
+          <strong className={'stream-popup-stats-value'}>
+            {formatStatsValue([stats?.transportProtocol, stats?.localCandidateType, stats?.remoteCandidateType].filter(Boolean).join(' / '))}
+          </strong>
+        </div>
       </div>
-    </section>
+      </section>
+      ) : null}
+    </>
   );
 }
 
 function StreamPopupWindow({
   entry,
   onClose,
+  onOpenStreamShareDialog,
   userLabel,
   watchedStream,
 }: {
   entry: StreamPopupSnapshotEntry;
   onClose: () => void;
+  onOpenStreamShareDialog: (channelId: string) => void;
   userLabel: (userId: string) => string;
   watchedStream: WatchedStreamState;
 }) {
@@ -479,6 +562,16 @@ function StreamPopupWindow({
           </div>
         </div>
         <div className={'stream-popup-header-actions'}>
+          <button
+            type={'button'}
+            className={'stream-popup-start-stream-btn'}
+            onClick={() => {
+              entry.document.defaultView?.opener?.focus();
+              onOpenStreamShareDialog(watchedStream.channelId);
+            }}
+          >
+            {t('stream.action_start_stream')}
+          </button>
           <span className={'stream-pill stream-popup-live-pill'}>
             {watchedStream.status === 'ended'
               ? t('stream.pill_ended')
@@ -532,7 +625,7 @@ function StreamPopupWindow({
           </section>
         ) : (
           <section ref={stageRef} className={'stream-popup-stage'}>
-            <StreamPopupVideo playbackVolume={watchedStream.playbackVolume} stream={watchedStream.remoteStream} />
+            <StreamPopupVideo playbackVolume={watchedStream.playbackVolume} stream={watchedStream.remoteStream} streamId={watchedStream.streamId} />
             <div className={'stream-popup-volume-dock'}>
               <div className={'stream-volume-control'}>
                 <label className={'stream-volume-label'} htmlFor={`popup-stream-volume-${watchedStream.streamId}`}>
@@ -563,15 +656,19 @@ function StreamPopupWindow({
             </div>
           </section>
         )}
-        {isStatsOpen && watchedStream.status !== 'ended' ? (
-          <StreamPopupStatsPanel streamId={watchedStream.streamId} status={watchedStream.status} />
+        {watchedStream.status !== 'ended' ? (
+          <StreamPopupStatsPanel showDetails={isStatsOpen} streamId={watchedStream.streamId} status={watchedStream.status} />
         ) : null}
       </div>
     </div>
   );
 }
 
-export function StreamPopupHost() {
+export function StreamPopupHost({
+  onOpenStreamShareDialog,
+}: {
+  onOpenStreamShareDialog: (channelId: string) => void;
+}) {
   const { t } = useTranslation();
   const popupEntries = useSyncExternalStore(
     subscribeToStreamPopupRegistry,
@@ -619,6 +716,7 @@ export function StreamPopupHost() {
           <StreamPopupWindow
             key={entry.streamId}
             entry={entry}
+            onOpenStreamShareDialog={onOpenStreamShareDialog}
             watchedStream={watchedStream}
             userLabel={userLabel}
             onClose={() => {

@@ -24,6 +24,8 @@ describe('video receive stats', () => {
           packetsReceived: 997,
           timestamp: 2_000,
           type: 'inbound-rtp',
+          decoderImplementation: 'ExternalDecoder',
+          powerEfficientDecoder: true,
         },
         {
           frameHeight: 1080,
@@ -35,13 +37,26 @@ describe('video receive stats', () => {
           type: 'track',
         },
         { id: 'codec-1', mimeType: 'video/H264', type: 'codec' },
+        { id: 'transport-1', selectedCandidatePairId: 'pair-1', type: 'transport' },
+        {
+          availableIncomingBitrate: 5_000_000,
+          id: 'pair-1',
+          localCandidateId: 'local-1',
+          remoteCandidateId: 'remote-1',
+          state: 'succeeded',
+          type: 'candidate-pair',
+        },
+        { candidateType: 'relay', id: 'local-1', protocol: 'udp', type: 'local-candidate' },
+        { candidateType: 'srflx', id: 'remote-1', type: 'remote-candidate' },
       ]),
     ]);
 
     expect(result).toEqual({
+      availableIncomingBitrateKbps: 5000,
       bytesReceived: 800_000,
       codec: 'H264',
-      decoderAcceleration: 'unknown',
+      decoderAcceleration: 'hardware',
+      decoderImplementation: 'ExternalDecoder',
       frameHeight: 1080,
       frameWidth: 1920,
       framesDecoded: 120,
@@ -52,13 +67,16 @@ describe('video receive stats', () => {
       jitterBufferDelayMs: null,
       jitterMs: 12,
       keyFramesDecoded: null,
+      localCandidateType: 'relay',
       nackCount: null,
       packetsLost: 3,
       packetsReceived: 997,
       pliCount: null,
+      remoteCandidateType: 'srflx',
       timestampMs: 2_000,
       totalDecodeTimeMs: null,
       totalFreezesDurationMs: null,
+      transportProtocol: 'udp',
     });
   });
 

@@ -1558,3 +1558,17 @@ Why:
   diagnostics without persistent storage
 - added sender/uplink/server/downlink/decode classification and codec
   acceleration visibility
+
+## 2026-09-04
+
+### Baker 1.1.7 livestream entry and SFU observability
+
+- moved all web start-stream behavior behind one explicit channel-aware dialog
+  host that is independent of voice join state
+- added direct publish entry points for opened voice channels and viewers already
+  watching another stream
+- kept simultaneous publishing and viewing as separate lifecycles
+- added four-leg bitrate diagnostics, transport health, local presentation rate,
+  implementation/acceleration reporting, and a 60-second in-memory trend
+- kept selected codecs strict while documenting that the browser chooses the
+  hardware/software implementation

@@ -972,3 +972,21 @@ Recommended next work:
   and four-stage client display with conservative fault classification
 - added actual hardware/software codec acceleration reporting when Chromium
   exposes the corresponding WebRTC statistics
+
+## 2026-09-04 Baker 1.1.7 Livestream Entry And SFU Observability
+
+- removed the remaining voice-state gate from the single `ChatShell` share-dialog
+  host, so watching another stream no longer makes the start action disappear
+- added start-stream entry points to an opened voice channel and the detached
+  viewer popup, including visible gateway/channel/already-publishing blockers
+- verified publish and watch teardown remain independent and retained strict AV1
+  negotiation plus failed-start server rollback
+- expanded browser diagnostics with encoder target, available bandwidth,
+  implementation/acceleration, encode/decode/presented frame rates, retransmits,
+  and privacy-safe ICE path types
+- expanded SFU legs with ICE/DTLS state, protocol, window deltas, and byte-count
+  bitrate fallback; the UI now shows a four-boundary summary and 60-second local
+  trend history
+- clarified that the selected bitrate is a ceiling and that standard WebRTC does
+  not provide a reliable hardware/software force switch
+- no migration or persistent telemetry was introduced

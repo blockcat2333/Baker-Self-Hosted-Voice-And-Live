@@ -53,9 +53,11 @@ export type LocalOutboundNetworkSample = {
 };
 
 export type PeerVideoReceiveSample = {
+  availableIncomingBitrateKbps: number | null;
   bytesReceived: number | null;
   codec: string | null;
   decoderAcceleration: 'hardware' | 'software' | 'unknown';
+  decoderImplementation: string | null;
   frameHeight: number | null;
   frameWidth: number | null;
   framesDecoded: number | null;
@@ -73,6 +75,9 @@ export type PeerVideoReceiveSample = {
   timestampMs: number | null;
   totalDecodeTimeMs: number | null;
   totalFreezesDurationMs: number | null;
+  transportProtocol: 'tcp' | 'udp' | 'unknown' | null;
+  localCandidateType: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
+  remoteCandidateType: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
 };
 
 export type VideoCodecPreference = 'default' | 'h264' | 'vp8' | 'vp9' | 'av1';
@@ -83,9 +88,11 @@ type CodecCapabilityLike = {
 
 export type AggregatePeerVideoSendSample = {
   activePeerCount: number;
+  availableOutgoingBitrateKbps: number | null;
   bytesSent: number | null;
   codec: string | null;
   encoderAcceleration: 'hardware' | 'software' | 'unknown';
+  encoderImplementation: string | null;
   frameHeight: number | null;
   frameWidth: number | null;
   framesEncoded: number | null;
@@ -95,7 +102,12 @@ export type AggregatePeerVideoSendSample = {
   qualityLimitationReason: 'bandwidth' | 'cpu' | 'none' | 'other';
   retransmittedPacketsSent: number | null;
   roundTripTimeMs: number | null;
+  targetBitrateKbps: number | null;
   timestampMs: number | null;
+  totalEncodeTimeMs: number | null;
+  transportProtocol: 'tcp' | 'udp' | 'unknown' | null;
+  localCandidateType: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
+  remoteCandidateType: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
 };
 
 function readNumberField(record: RTCStats, key: string): number | null {
@@ -127,6 +139,55 @@ function readCodecLabel(record: RTCStats | null): string | null {
 function readBooleanField(record: RTCStats, key: string): boolean | null {
   const value = (record as unknown as Record<string, unknown>)[key];
   return typeof value === 'boolean' ? value : null;
+}
+
+type CandidateType = 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown';
+type TransportProtocol = 'tcp' | 'udp' | 'unknown';
+
+function normalizeCandidateType(value: string | null): CandidateType | null {
+  return value === 'host' || value === 'prflx' || value === 'relay' || value === 'srflx'
+    ? value
+    : value
+      ? 'unknown'
+      : null;
+}
+
+function normalizeTransportProtocol(value: string | null): TransportProtocol | null {
+  return value === 'tcp' || value === 'udp' ? value : value ? 'unknown' : null;
+}
+
+function readSelectedNetworkPath(stats: RTCStats[]) {
+  const transport = stats.find((stat) => stat.type === 'transport') ?? null;
+  const selectedPairId = transport ? readStringField(transport, 'selectedCandidatePairId') : null;
+  const pair =
+    (selectedPairId ? stats.find((stat) => stat.id === selectedPairId) : null) ??
+    stats.find(
+      (stat) =>
+        stat.type === 'candidate-pair' &&
+        (readBooleanField(stat, 'selected') === true ||
+          (readBooleanField(stat, 'nominated') === true && readStringField(stat, 'state') === 'succeeded')),
+    ) ??
+    null;
+  const localCandidateId = pair ? readStringField(pair, 'localCandidateId') : null;
+  const remoteCandidateId = pair ? readStringField(pair, 'remoteCandidateId') : null;
+  const localCandidate = localCandidateId ? stats.find((stat) => stat.id === localCandidateId) ?? null : null;
+  const remoteCandidate = remoteCandidateId ? stats.find((stat) => stat.id === remoteCandidateId) ?? null : null;
+  return {
+    availableIncomingBitrateKbps:
+      pair && readNumberField(pair, 'availableIncomingBitrate') !== null
+        ? Math.round((readNumberField(pair, 'availableIncomingBitrate') ?? 0) / 1000)
+        : null,
+    availableOutgoingBitrateKbps:
+      pair && readNumberField(pair, 'availableOutgoingBitrate') !== null
+        ? Math.round((readNumberField(pair, 'availableOutgoingBitrate') ?? 0) / 1000)
+        : null,
+    localCandidateType: normalizeCandidateType(localCandidate ? readStringField(localCandidate, 'candidateType') : null),
+    remoteCandidateType: normalizeCandidateType(remoteCandidate ? readStringField(remoteCandidate, 'candidateType') : null),
+    transportProtocol: normalizeTransportProtocol(
+      (localCandidate ? readStringField(localCandidate, 'protocol') : null) ??
+      (pair ? readStringField(pair, 'protocol') : null),
+    ),
+  };
 }
 
 export function summarizeVideoReceiveStats(
@@ -166,8 +227,10 @@ export function summarizeVideoReceiveStats(
       primary,
       'jitterBufferEmittedCount',
     );
+    const networkPath = readSelectedNetworkPath(stats);
 
     return {
+      availableIncomingBitrateKbps: networkPath.availableIncomingBitrateKbps,
       bytesReceived: readNumberField(primary, 'bytesReceived'),
       codec: readCodecLabel(codecStat) ?? readCodecLabel(primary),
       decoderAcceleration:
@@ -176,6 +239,7 @@ export function summarizeVideoReceiveStats(
           : readBooleanField(primary, 'powerEfficientDecoder') === false
             ? 'software'
             : 'unknown',
+      decoderImplementation: readStringField(primary, 'decoderImplementation'),
       frameHeight: readNumberField(dimensions, 'frameHeight'),
       frameWidth: readNumberField(dimensions, 'frameWidth'),
       framesDecoded: readNumberField(primary, 'framesDecoded'),
@@ -212,6 +276,9 @@ export function summarizeVideoReceiveStats(
           : Math.round(
               (readNumberField(primary, 'totalFreezesDuration') ?? 0) * 1000,
             ),
+      transportProtocol: networkPath.transportProtocol,
+      localCandidateType: networkPath.localCandidateType,
+      remoteCandidateType: networkPath.remoteCandidateType,
     };
   }
 
@@ -239,6 +306,15 @@ export function summarizeAggregateVideoSendStats(
   let hasPacketsLost = false;
   let hasRetransmittedPacketsSent = false;
   let maxRoundTripTimeMs: number | null = null;
+  let minAvailableOutgoingBitrateKbps: number | null = null;
+  let totalTargetBitrateKbps = 0;
+  let totalEncodeTimeMs = 0;
+  let hasTargetBitrate = false;
+  let hasTotalEncodeTime = false;
+  let encoderImplementation: string | null = null;
+  let transportProtocol: TransportProtocol | null = null;
+  let localCandidateType: CandidateType | null = null;
+  let remoteCandidateType: CandidateType | null = null;
   const limitationReasons = new Set<string>();
   const encoderAccelerations = new Set<'hardware' | 'software'>();
 
@@ -282,6 +358,29 @@ export function summarizeAggregateVideoSendStats(
     const codecId = readStringField(primaryVideoStat, 'codecId');
     const codecStat = codecId ? stats.find((stat) => stat.id === codecId) ?? null : null;
     codec ??= readCodecLabel(codecStat);
+    encoderImplementation ??= readStringField(primaryVideoStat, 'encoderImplementation');
+
+    const networkPath = readSelectedNetworkPath(stats);
+    if (networkPath.availableOutgoingBitrateKbps !== null) {
+      minAvailableOutgoingBitrateKbps =
+        minAvailableOutgoingBitrateKbps === null
+          ? networkPath.availableOutgoingBitrateKbps
+          : Math.min(minAvailableOutgoingBitrateKbps, networkPath.availableOutgoingBitrateKbps);
+    }
+    transportProtocol ??= networkPath.transportProtocol;
+    localCandidateType ??= networkPath.localCandidateType;
+    remoteCandidateType ??= networkPath.remoteCandidateType;
+
+    const targetBitrate = readNumberField(primaryVideoStat, 'targetBitrate');
+    if (targetBitrate !== null) {
+      totalTargetBitrateKbps += targetBitrate / 1000;
+      hasTargetBitrate = true;
+    }
+    const totalEncodeTime = readNumberField(primaryVideoStat, 'totalEncodeTime');
+    if (totalEncodeTime !== null) {
+      totalEncodeTimeMs += totalEncodeTime * 1000;
+      hasTotalEncodeTime = true;
+    }
 
     const bytesSent = readNumberField(primaryVideoStat, 'bytesSent');
     if (bytesSent !== null) {
@@ -398,12 +497,14 @@ export function summarizeAggregateVideoSendStats(
 
   return {
     activePeerCount,
+    availableOutgoingBitrateKbps: minAvailableOutgoingBitrateKbps,
     bytesSent: hasBytesSent ? totalBytesSent : null,
     codec,
     encoderAcceleration:
       encoderAccelerations.size === 1
         ? [...encoderAccelerations][0]!
         : 'unknown',
+    encoderImplementation,
     frameHeight: maxFrameHeight,
     frameWidth: maxFrameWidth,
     framesEncoded: hasFramesEncoded ? totalFramesEncoded : null,
@@ -418,7 +519,12 @@ export function summarizeAggregateVideoSendStats(
       ? totalRetransmittedPacketsSent
       : null,
     roundTripTimeMs: maxRoundTripTimeMs,
+    targetBitrateKbps: hasTargetBitrate ? Math.round(totalTargetBitrateKbps) : null,
     timestampMs: latestTimestampMs,
+    totalEncodeTimeMs: hasTotalEncodeTime ? Math.round(totalEncodeTimeMs) : null,
+    transportProtocol,
+    localCandidateType,
+    remoteCandidateType,
   };
 }
 

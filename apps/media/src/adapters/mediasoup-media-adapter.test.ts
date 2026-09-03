@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseAppEnv } from '@baker/shared';
 
 const mocks = vi.hoisted(() => ({
+  consumerGetStats: vi.fn(),
   createRouter: vi.fn(),
   createWebRtcServer: vi.fn(),
   createWebRtcTransport: vi.fn(),
   createWorker: vi.fn(),
+  producerGetStats: vi.fn(),
 }));
 
 vi.mock('mediasoup', () => ({
@@ -19,6 +21,28 @@ beforeEach(() => {
   let transportSequence = 0;
   let serverSequence = 0;
 
+  mocks.consumerGetStats.mockReset();
+  mocks.consumerGetStats.mockResolvedValue([
+    {
+      bitrate: 3_000_000,
+      byteCount: 3000,
+      jitter: 0.004,
+      packetCount: 300,
+      packetsLost: 2,
+      type: 'outbound-rtp',
+    },
+  ]);
+  mocks.producerGetStats.mockReset();
+  mocks.producerGetStats.mockResolvedValue([
+    {
+      bitrate: 3_500_000,
+      byteCount: 3500,
+      packetCount: 350,
+      packetsLost: 1,
+      type: 'inbound-rtp',
+    },
+  ]);
+
   mocks.createWebRtcServer.mockReset();
   mocks.createWebRtcServer.mockImplementation(async () => ({
     id: `web-rtc-server-${++serverSequence}`,
@@ -29,16 +53,7 @@ beforeEach(() => {
     connect: vi.fn(),
     consume: vi.fn(async ({ producerId }) => ({
       close: vi.fn(),
-      getStats: vi.fn().mockResolvedValue([
-        {
-          bitrate: 3_000_000,
-          byteCount: 3000,
-          jitter: 0.004,
-          packetCount: 300,
-          packetsLost: 2,
-          type: 'outbound-rtp',
-        },
-      ]),
+      getStats: mocks.consumerGetStats,
       id: `consumer-${transportSequence}`,
       kind: 'video',
       on: vi.fn(),
@@ -50,22 +65,21 @@ beforeEach(() => {
       score: { producerScore: 9, producerScores: [9], score: 8 },
       type: 'simple',
     })),
+    dtlsState: 'connected',
     dtlsParameters: {},
     iceCandidates: [],
     iceParameters: {},
+    iceSelectedTuple: { protocol: 'udp' },
+    iceState: 'completed',
+    getStats: vi.fn().mockResolvedValue([{
+      availableOutgoingBitrate: 5_000_000,
+      type: 'webrtc-transport',
+    }]),
     id: `transport-${++transportSequence}`,
     on: vi.fn(),
     produce: vi.fn(async ({ kind }) => ({
       close: vi.fn(),
-      getStats: vi.fn().mockResolvedValue([
-        {
-          bitrate: 3_500_000,
-          byteCount: 3500,
-          packetCount: 350,
-          packetsLost: 1,
-          type: 'inbound-rtp',
-        },
-      ]),
+      getStats: mocks.producerGetStats,
       id: `producer-${transportSequence}`,
       kind,
       observer: { on: vi.fn() },
@@ -274,9 +288,71 @@ describe('MediasoupMediaAdapter shared WebRTC servers', () => {
       viewerSessionId,
     });
     expect(diagnostics).toMatchObject({
-      ingress: { bitrateKbps: 3500, packetsLost: 1, score: 9 },
-      egress: { bitrateKbps: 3000, packetsLost: 2, score: 8 },
+      ingress: {
+        availableOutgoingBitrateKbps: 5000,
+        bitrateKbps: 3500,
+        dtlsState: 'connected',
+        iceState: 'completed',
+        packetsLost: 1,
+        score: 9,
+        transportProtocol: 'udp',
+      },
+      egress: {
+        availableOutgoingBitrateKbps: 5000,
+        bitrateKbps: 3000,
+        dtlsState: 'connected',
+        iceState: 'completed',
+        packetsLost: 2,
+        score: 8,
+        transportProtocol: 'udp',
+      },
       workerCpuPct: null,
     });
+  });
+
+  it('derives an SFU bitrate from byte deltas when mediasoup omits instantaneous bitrate', async () => {
+    mocks.producerGetStats
+      .mockResolvedValueOnce([{ byteCount: 1_000, packetCount: 100, type: 'inbound-rtp' }])
+      .mockResolvedValueOnce([{ byteCount: 751_000, packetCount: 200, type: 'inbound-rtp' }]);
+    const adapter = new MediasoupMediaAdapter(parseAppEnv({
+      NODE_ENV: 'test',
+      SFU_ANNOUNCED_IP: '127.0.0.1',
+      SFU_RTC_MAX_PORT: '23340',
+      SFU_RTC_MIN_PORT: '23335',
+    }));
+    const session = {
+      channelId: '00000000-0000-4000-8000-000000000061',
+      mode: 'stream_publish' as const,
+      sessionId: '00000000-0000-4000-8000-000000000062',
+      streamId: '00000000-0000-4000-8000-000000000063',
+      transportMode: 'sfu' as const,
+      userId: '00000000-0000-4000-8000-000000000064',
+    };
+    await adapter.createSession(session);
+    const send = await adapter.createSfuTransport({ ...session, direction: 'send' });
+    await adapter.produceSfu({
+      ...session,
+      kind: 'video',
+      rtpParameters: {},
+      transportId: send.transportOptions.id,
+      userId: session.userId,
+    });
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    const first = await adapter.getStreamDiagnostics({
+      channelId: session.channelId,
+      publisherSessionId: session.sessionId,
+      streamId: session.streamId,
+    });
+    now.mockReturnValue(2_000);
+    const second = await adapter.getStreamDiagnostics({
+      channelId: session.channelId,
+      publisherSessionId: session.sessionId,
+      streamId: session.streamId,
+    });
+    now.mockRestore();
+
+    expect(first.ingress?.bitrateKbps).toBeNull();
+    expect(second.ingress?.bitrateKbps).toBe(6000);
+    expect(second.ingress?.windowPackets).toBe(100);
   });
 });

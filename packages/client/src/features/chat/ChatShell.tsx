@@ -12,6 +12,7 @@ import {
 } from '../recovery/recovery-store';
 import { StreamPanel } from '../stream/StreamPanel';
 import { StreamPopupHost } from '../stream/StreamPopupHost';
+import { StreamShareDialog } from '../stream/StreamShareDialog';
 import { useStreamStore } from '../stream/stream-store';
 import { useVoiceStore } from '../voice/voice-store';
 import { playVoiceSfx } from '../voice/voice-sfx';
@@ -90,7 +91,7 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
 
   const [mobileTab, setMobileTab] = useState<MobileTab>('chat');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isStreamShareDialogOpen, setIsStreamShareDialogOpen] = useState(false);
+  const [streamShareChannelId, setStreamShareChannelId] = useState<string | null>(null);
   const [isMemberListOpen, setIsMemberListOpen] = useState(true);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -437,6 +438,7 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
                   <VoiceChannelView
                     channelId={selectedVoiceChannel.id}
                     channelName={selectedVoiceChannel.name}
+                    onOpenStreamShareDialog={() => setStreamShareChannelId(selectedVoiceChannel.id)}
                     showConnectionHealth={!showDataDetails}
                   />
                 </section>
@@ -453,8 +455,6 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
               <MemberList />
               {hasAnyStream && showDataDetails ? (
                 <StreamPanel
-                  isShareDialogOpen={false}
-                  onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
                   showDashboard
                 />
               ) : null}
@@ -462,18 +462,20 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
           ) : hasAnyStream && showDataDetails ? (
             <div className="chat-main-pane chat-main-pane--stream" data-on-mobile="voice">
               <StreamPanel
-                isShareDialogOpen={false}
-                onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
                 showDashboard={showDataDetails}
               />
             </div>
           ) : null}
         </div>
-        <VoiceBottomControlBar onOpenStreamShareDialog={() => setIsStreamShareDialogOpen(true)} />
-        <StreamPanel
-          isShareDialogOpen={isStreamShareDialogOpen}
-          onCloseShareDialog={() => setIsStreamShareDialogOpen(false)}
-          showDashboard={false}
+        <VoiceBottomControlBar
+          onOpenStreamShareDialog={() => {
+            if (voiceChannelId) setStreamShareChannelId(voiceChannelId);
+          }}
+        />
+        <StreamShareDialog
+          channelId={streamShareChannelId}
+          isOpen={streamShareChannelId !== null}
+          onClose={() => setStreamShareChannelId(null)}
         />
       </main>
 
@@ -485,7 +487,7 @@ export function ChatShell({ api, gatewayUrl, hideGuildList = false, onChangeServ
         notifyVoice={voiceHasContent}
       />
 
-      <StreamPopupHost />
+      <StreamPopupHost onOpenStreamShareDialog={setStreamShareChannelId} />
 
       {isSettingsOpen ? (
         <SettingsDialog

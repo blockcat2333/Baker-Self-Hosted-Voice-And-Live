@@ -81,9 +81,12 @@ export interface WatchedStreamState {
 
 export interface WatchedStreamVideoStats {
   averageDecodeTimeMs: number | null;
+  availableIncomingBitrateKbps?: number | null;
   bitrateKbps: number | null;
   codec: string | null;
   decoderAcceleration: 'hardware' | 'software' | 'unknown';
+  decoderImplementation?: string | null;
+  decodeFrameRate?: number | null;
   frameRate: number | null;
   framesDropped: number | null;
   framesReceived: number | null;
@@ -95,14 +98,22 @@ export interface WatchedStreamVideoStats {
   packetsLost: number | null;
   packetsReceived: number | null;
   pliCount: number | null;
+  receiveFrameRate?: number | null;
+  renderFrameRate?: number | null;
   resolution: string | null;
+  transportProtocol?: 'tcp' | 'udp' | 'unknown' | null;
+  localCandidateType?: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
+  remoteCandidateType?: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
 }
 
 export interface OwnedStreamVideoStats {
   activePeerCount: number;
+  availableOutgoingBitrateKbps?: number | null;
+  averageEncodeTimeMs?: number | null;
   bitrateKbps: number | null;
   codec: string | null;
   encoderAcceleration: 'hardware' | 'software' | 'unknown';
+  encoderImplementation?: string | null;
   encoderLimited: boolean;
   frameRate: number | null;
   qualityLimitationReason: 'bandwidth' | 'cpu' | 'none' | 'other';
@@ -110,7 +121,11 @@ export interface OwnedStreamVideoStats {
   packetsSent: number | null;
   retransmittedPacketsSent: number | null;
   roundTripTimeMs: number | null;
+  encoderTargetBitrateKbps?: number | null;
   resolution: string | null;
+  transportProtocol?: 'tcp' | 'udp' | 'unknown' | null;
+  localCandidateType?: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
+  remoteCandidateType?: 'host' | 'prflx' | 'relay' | 'srflx' | 'unknown' | null;
 }
 
 interface StreamState {
@@ -246,6 +261,16 @@ const lastWatchedVideoStatsSamples = new Map<
   timestampMs: number | null;
   }
 >();
+const VIDEO_STATS_CACHE_MS = 750;
+const watchedVideoStatsCache = new Map<
+  string,
+  { at: number; value: WatchedStreamVideoStats | null }
+>();
+const watchedVideoStatsInFlight = new Map<
+  string,
+  Promise<WatchedStreamVideoStats | null>
+>();
+const watchedPresentationSamples = new Map<string, { frameRate: number; sampledAt: number }>();
 let ownedDiagnosticsTimer: ReturnType<typeof setInterval> | null = null;
 const WATCHED_CONNECTING_ISSUE_DELAY_MS = 10_000;
 const WATCHED_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
@@ -258,12 +283,41 @@ const ownedPeerRecoveryTimers = new Map<
 const lastOwnedVideoStatsSample: {
   bytesSent: number | null;
   framesEncoded: number | null;
+  packetsLost: number | null;
+  packetsSent: number | null;
+  retransmittedPacketsSent: number | null;
   timestampMs: number | null;
+  totalEncodeTimeMs: number | null;
 } = {
   bytesSent: null,
   framesEncoded: null,
+  packetsLost: null,
+  packetsSent: null,
+  retransmittedPacketsSent: null,
   timestampMs: null,
+  totalEncodeTimeMs: null,
 };
+let ownedVideoStatsCache: { at: number; value: OwnedStreamVideoStats | null } | null = null;
+let ownedVideoStatsInFlight: Promise<OwnedStreamVideoStats | null> | null = null;
+
+function resetOwnedVideoStatsSample() {
+  lastOwnedVideoStatsSample.bytesSent = null;
+  lastOwnedVideoStatsSample.framesEncoded = null;
+  lastOwnedVideoStatsSample.packetsLost = null;
+  lastOwnedVideoStatsSample.packetsSent = null;
+  lastOwnedVideoStatsSample.retransmittedPacketsSent = null;
+  lastOwnedVideoStatsSample.timestampMs = null;
+  lastOwnedVideoStatsSample.totalEncodeTimeMs = null;
+  ownedVideoStatsCache = null;
+}
+
+export function reportWatchedStreamPresentationFrameRate(streamId: string, frameRate: number | null) {
+  if (frameRate === null || !Number.isFinite(frameRate) || frameRate < 0) {
+    watchedPresentationSamples.delete(streamId);
+    return;
+  }
+  watchedPresentationSamples.set(streamId, { frameRate, sampledAt: Date.now() });
+}
 const streamIdRemapListeners = new Set<(previousStreamId: string, nextStreamId: string) => void>();
 
 export function subscribeToStreamIdRemaps(listener: (previousStreamId: string, nextStreamId: string) => void) {
@@ -298,24 +352,10 @@ function normalizeFrameRate(frameRate: number | null): number | null {
 
 function isEncoderLikelyLimited(
   reason: OwnedStreamVideoStats['qualityLimitationReason'],
-  actualFrameRate: number | null,
-  targetFrameRate: number | null,
+  _actualFrameRate: number | null,
+  _targetFrameRate: number | null,
 ): boolean {
-  if (reason === 'cpu') {
-    return true;
-  }
-
-  if (
-    actualFrameRate === null ||
-    targetFrameRate === null ||
-    !Number.isFinite(targetFrameRate) ||
-    targetFrameRate <= 0 ||
-    reason === 'bandwidth'
-  ) {
-    return false;
-  }
-
-  return actualFrameRate < Math.max(targetFrameRate * 0.85, targetFrameRate - 10);
+  return reason === 'cpu';
 }
 
 async function applyCaptureTrackPreferences(
@@ -699,9 +739,7 @@ function teardownOwnedRuntime() {
   }
   ownedRuntime.manager?.closeAll();
   ownedRuntime.sfuSession?.close();
-  lastOwnedVideoStatsSample.bytesSent = null;
-  lastOwnedVideoStatsSample.framesEncoded = null;
-  lastOwnedVideoStatsSample.timestampMs = null;
+  resetOwnedVideoStatsSample();
   pendingOwnedIceCandidates.clear();
   for (const track of ownedRuntime.localStream.getTracks()) {
     track.stop();
@@ -745,6 +783,8 @@ function teardownWatchedRuntime(streamId: string) {
   clearWatchedConnectionIssueTimer(streamId);
   lastWatchedIceRestartRequestAt.delete(streamId);
   lastWatchedVideoStatsSamples.delete(streamId);
+  watchedVideoStatsCache.delete(streamId);
+  watchedPresentationSamples.delete(streamId);
   pendingWatchedSignals.delete(streamId);
   for (const key of [...pendingWatchedIceCandidates.keys()]) {
     if (key.startsWith(`${streamId}:`)) {
@@ -858,9 +898,7 @@ function suspendOwnedTransport() {
     clearTimeout(ownedSfuRecoveryTimer);
     ownedSfuRecoveryTimer = null;
   }
-  lastOwnedVideoStatsSample.bytesSent = null;
-  lastOwnedVideoStatsSample.framesEncoded = null;
-  lastOwnedVideoStatsSample.timestampMs = null;
+  resetOwnedVideoStatsSample();
 }
 
 function suspendWatchedTransport(streamId: string) {
@@ -874,6 +912,8 @@ function suspendWatchedTransport(streamId: string) {
   for (const track of runtime.remoteStream?.getTracks() ?? []) track.stop();
   runtime.remoteStream = runtime.mediaMode === 'sfu' ? new MediaStream() : null;
   lastWatchedVideoStatsSamples.delete(streamId);
+  watchedVideoStatsCache.delete(streamId);
+  watchedPresentationSamples.delete(streamId);
   updateWatchedStreamState(streamId, (watched) => ({
     ...watched,
     connectionState: null,
@@ -1665,10 +1705,11 @@ async function flushPendingWatchedSignals(streamId: string) {
   }
 }
 
-export async function getWatchedStreamVideoStats(streamId: string): Promise<WatchedStreamVideoStats | null> {
+async function collectWatchedStreamVideoStats(streamId: string): Promise<WatchedStreamVideoStats | null> {
   const runtime = watchedRuntimes.get(streamId);
   if (!runtime) {
     lastWatchedVideoStatsSamples.delete(streamId);
+    watchedVideoStatsCache.delete(streamId);
     return null;
   }
 
@@ -1680,8 +1721,10 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
   }
 
   const previous = lastWatchedVideoStatsSamples.get(streamId);
+  const presentation = watchedPresentationSamples.get(streamId);
   const previousBytesReceived = previous?.bytesReceived ?? null;
   const previousFramesDecoded = previous?.framesDecoded ?? null;
+  const previousFramesReceived = previous?.framesReceived ?? null;
   const previousTimestampMs = previous?.timestampMs ?? null;
   lastWatchedVideoStatsSamples.set(streamId, {
     bytesReceived: sample.bytesReceived,
@@ -1729,6 +1772,20 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
     }
   }
 
+  let receiveFrameRate: number | null = null;
+  if (
+    previousFramesReceived !== null &&
+    sample.framesReceived !== null &&
+    previousTimestampMs !== null &&
+    sample.timestampMs !== null &&
+    sample.timestampMs > previousTimestampMs
+  ) {
+    receiveFrameRate = normalizeFrameRate(
+      ((sample.framesReceived - previousFramesReceived) * 1000) /
+        (sample.timestampMs - previousTimestampMs),
+    );
+  }
+
   return {
     averageDecodeTimeMs: (() => {
       const decodeMs = counterDelta(
@@ -1743,9 +1800,12 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
         ? Math.round((decodeMs / frames) * 10) / 10
         : null;
     })(),
+    availableIncomingBitrateKbps: sample.availableIncomingBitrateKbps,
     bitrateKbps,
     codec: sample.codec,
     decoderAcceleration: sample.decoderAcceleration ?? 'unknown',
+    decoderImplementation: sample.decoderImplementation,
+    decodeFrameRate: frameRate,
     frameRate,
     framesDropped: counterDelta(sample.framesDropped, previous?.framesDropped),
     framesReceived: counterDelta(
@@ -1766,15 +1826,39 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
       previous?.packetsReceived,
     ),
     pliCount: counterDelta(sample.pliCount, previous?.pliCount),
+    receiveFrameRate,
+    renderFrameRate:
+      presentation && Date.now() - presentation.sampledAt <= 6_000
+        ? normalizeFrameRate(presentation.frameRate)
+        : null,
     resolution: formatVideoResolution(sample.frameWidth, sample.frameHeight),
+    transportProtocol: sample.transportProtocol,
+    localCandidateType: sample.localCandidateType,
+    remoteCandidateType: sample.remoteCandidateType,
   };
 }
 
-export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats | null> {
+export function getWatchedStreamVideoStats(streamId: string): Promise<WatchedStreamVideoStats | null> {
+  const cached = watchedVideoStatsCache.get(streamId);
+  if (cached && Date.now() - cached.at < VIDEO_STATS_CACHE_MS) {
+    return Promise.resolve(cached.value);
+  }
+  const pending = watchedVideoStatsInFlight.get(streamId);
+  if (pending) return pending;
+
+  const request = collectWatchedStreamVideoStats(streamId)
+    .then((result) => {
+      if (result) watchedVideoStatsCache.set(streamId, { at: Date.now(), value: result });
+      return result;
+    })
+    .finally(() => watchedVideoStatsInFlight.delete(streamId));
+  watchedVideoStatsInFlight.set(streamId, request);
+  return request;
+}
+
+async function collectOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats | null> {
   if (!ownedRuntime) {
-    lastOwnedVideoStatsSample.bytesSent = null;
-    lastOwnedVideoStatsSample.framesEncoded = null;
-    lastOwnedVideoStatsSample.timestampMs = null;
+    resetOwnedVideoStatsSample();
     return null;
   }
 
@@ -1784,9 +1868,12 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
   if (!sample) {
     return {
       activePeerCount: 0,
+      availableOutgoingBitrateKbps: null,
+      averageEncodeTimeMs: null,
       bitrateKbps: null,
       codec: null,
       encoderAcceleration: 'unknown',
+      encoderImplementation: null,
       encoderLimited: false,
       frameRate: null,
       qualityLimitationReason: 'none',
@@ -1794,7 +1881,11 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
       packetsSent: null,
       retransmittedPacketsSent: null,
       roundTripTimeMs: null,
+      encoderTargetBitrateKbps: null,
       resolution: null,
+      transportProtocol: null,
+      localCandidateType: null,
+      remoteCandidateType: null,
     };
   }
 
@@ -1829,15 +1920,36 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
     }
   }
 
+  const averageEncodeTimeMs = (() => {
+    const encodeMs = counterDelta(sample.totalEncodeTimeMs, lastOwnedVideoStatsSample.totalEncodeTimeMs);
+    const frames = counterDelta(sample.framesEncoded, lastOwnedVideoStatsSample.framesEncoded);
+    return encodeMs !== null && frames && frames > 0
+      ? Math.round((encodeMs / frames) * 10) / 10
+      : null;
+  })();
+  const packetsLost = counterDelta(sample.packetsLost, lastOwnedVideoStatsSample.packetsLost);
+  const packetsSent = counterDelta(sample.packetsSent, lastOwnedVideoStatsSample.packetsSent);
+  const retransmittedPacketsSent = counterDelta(
+    sample.retransmittedPacketsSent,
+    lastOwnedVideoStatsSample.retransmittedPacketsSent,
+  );
+
   lastOwnedVideoStatsSample.bytesSent = sample.bytesSent;
   lastOwnedVideoStatsSample.framesEncoded = sample.framesEncoded;
+  lastOwnedVideoStatsSample.packetsLost = sample.packetsLost;
+  lastOwnedVideoStatsSample.packetsSent = sample.packetsSent;
+  lastOwnedVideoStatsSample.retransmittedPacketsSent = sample.retransmittedPacketsSent;
   lastOwnedVideoStatsSample.timestampMs = sample.timestampMs;
+  lastOwnedVideoStatsSample.totalEncodeTimeMs = sample.totalEncodeTimeMs;
 
   return {
     activePeerCount: sample.activePeerCount,
+    availableOutgoingBitrateKbps: sample.availableOutgoingBitrateKbps,
+    averageEncodeTimeMs,
     bitrateKbps,
     codec: sample.codec,
     encoderAcceleration: sample.encoderAcceleration ?? 'unknown',
+    encoderImplementation: sample.encoderImplementation,
     encoderLimited: isEncoderLikelyLimited(
       sample.qualityLimitationReason,
       frameRate,
@@ -1845,12 +1957,33 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
     ),
     frameRate,
     qualityLimitationReason: sample.qualityLimitationReason,
-    packetsLost: sample.packetsLost,
-    packetsSent: sample.packetsSent,
-    retransmittedPacketsSent: sample.retransmittedPacketsSent,
+    packetsLost,
+    packetsSent,
+    retransmittedPacketsSent,
     roundTripTimeMs: sample.roundTripTimeMs,
+    encoderTargetBitrateKbps: sample.targetBitrateKbps,
     resolution: formatVideoResolution(sample.frameWidth, sample.frameHeight),
+    transportProtocol: sample.transportProtocol,
+    localCandidateType: sample.localCandidateType,
+    remoteCandidateType: sample.remoteCandidateType,
   };
+}
+
+export function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats | null> {
+  if (ownedVideoStatsCache && Date.now() - ownedVideoStatsCache.at < VIDEO_STATS_CACHE_MS) {
+    return Promise.resolve(ownedVideoStatsCache.value);
+  }
+  if (ownedVideoStatsInFlight) return ownedVideoStatsInFlight;
+
+  ownedVideoStatsInFlight = collectOwnedStreamVideoStats()
+    .then((result) => {
+      if (result?.codec) ownedVideoStatsCache = { at: Date.now(), value: result };
+      return result;
+    })
+    .finally(() => {
+      ownedVideoStatsInFlight = null;
+    });
+  return ownedVideoStatsInFlight;
 }
 
 export async function getStreamDiagnostics(
@@ -1888,17 +2021,25 @@ function startOwnedDiagnosticsReporter() {
       channelId: runtime.channelId,
       publisher: {
         actualCodec: stats?.codec ? stats.codec.toLowerCase() : null,
+        availableOutgoingBitrateKbps: stats?.availableOutgoingBitrateKbps ?? null,
+        averageEncodeTimeMs: stats?.averageEncodeTimeMs ?? null,
         bitrateKbps: stats?.bitrateKbps ?? null,
         captureFrameRate,
         encodedFrameRate: stats?.frameRate ?? null,
         encoderAcceleration: stats?.encoderAcceleration ?? 'unknown',
+        encoderImplementation: stats?.encoderImplementation ?? null,
         packetsLost: stats?.packetsLost ?? null,
         packetsSent: stats?.packetsSent ?? null,
         qualityLimitationReason: stats?.qualityLimitationReason ?? 'none',
         requestedCodec: runtime.codecPreference,
         roundTripTimeMs: stats?.roundTripTimeMs ?? null,
+        retransmittedPacketsSent: stats?.retransmittedPacketsSent ?? null,
         targetBitrateKbps: runtime.quality.bitrateKbps,
+        encoderTargetBitrateKbps: stats?.encoderTargetBitrateKbps ?? null,
         targetFrameRate: runtime.quality.frameRate,
+        transportProtocol: stats?.transportProtocol ?? null,
+        localCandidateType: stats?.localCandidateType ?? null,
+        remoteCandidateType: stats?.remoteCandidateType ?? null,
       },
       sampledAt: Date.now(),
       sessionId: runtime.sessionId,
@@ -2525,6 +2666,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       return;
     }
     lastWatchedVideoStatsSamples.delete(producer.streamId);
+    watchedVideoStatsCache.delete(producer.streamId);
+    watchedPresentationSamples.delete(producer.streamId);
     void consumeSfuStreamProducers(producer.streamId, [producer]);
   },
 

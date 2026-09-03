@@ -21,6 +21,7 @@ interface VoiceControlsState {
   isMuted: boolean;
   playbackVolume: number;
   publishedMusic: ReturnType<typeof useMusicStore.getState>['publishedMusic'];
+  status: ReturnType<typeof useVoiceStore.getState>['status'];
   handleLeave(): void;
   handleMusicShareToggle(): void;
   handleMute(): void;
@@ -152,6 +153,7 @@ function useVoiceControls(): VoiceControlsState {
     isMuted,
     playbackVolume,
     publishedMusic,
+    status,
     setPlaybackVolume,
   };
 }
@@ -257,6 +259,7 @@ export function VoiceAudioDeviceControls() {
 export interface VoiceChannelViewProps {
   channelId: string;
   channelName: string;
+  onOpenStreamShareDialog?: () => void;
   showConnectionHealth?: boolean;
 }
 
@@ -484,7 +487,7 @@ export function VoiceParticipantMenu({
   );
 }
 
-export function VoiceChannelView({ channelId, channelName, showConnectionHealth = false }: VoiceChannelViewProps) {
+export function VoiceChannelView({ channelId, channelName, onOpenStreamShareDialog, showConnectionHealth = false }: VoiceChannelViewProps) {
   const { t } = useTranslation();
   const connectedChannelId = useVoiceStore((s) => s.channelId);
   const connectionIssue = useVoiceStore((s) => s.connectionIssue);
@@ -635,6 +638,16 @@ export function VoiceChannelView({ channelId, channelName, showConnectionHealth 
           <h2 className="voice-channel-view-title">{channelName}</h2>
         </div>
         <div className="voice-channel-view-meta">
+          {onOpenStreamShareDialog ? (
+            <button
+              type="button"
+              className="voice-channel-view-start-stream"
+              onClick={onOpenStreamShareDialog}
+            >
+              <ScreenShareIcon className="voice-channel-view-start-stream-icon" />
+              <span>{t('stream.action_start_stream')}</span>
+            </button>
+          ) : null}
           <span
             className={`voice-channel-view-dot${isViewingConnectedVoiceChannel ? '' : ' voice-channel-view-dot--idle'}`}
             aria-hidden="true"
@@ -907,7 +920,15 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
     <div className="voice-bottom-bar" role="region" aria-label={t('voice.controls_aria')}>
       <div className="voice-bottom-status">
         <span className="voice-bottom-status-dot" aria-hidden="true" />
-        <span>{controls.isConnecting ? t('voice.status_connecting') : t('voice.connected_short')}</span>
+        <span>
+          {controls.isConnecting
+            ? t('voice.status_connecting')
+            : controls.status === 'active'
+              ? t('voice.connected_short')
+              : controls.status === 'error'
+                ? t('voice.error_title')
+                : t('stream.voice_health_not_connected')}
+        </span>
         <span className="voice-bottom-divider" aria-hidden="true" />
         <span>{t('voice.latency_label', { latency: latencyLabel })}</span>
         <span className="voice-bottom-divider" aria-hidden="true" />

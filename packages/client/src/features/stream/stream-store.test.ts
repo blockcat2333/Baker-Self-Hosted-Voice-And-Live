@@ -94,6 +94,7 @@ const channelId = '11111111-1111-4111-8111-111111111111';
 const hostUserId = '22222222-2222-4222-8222-222222222222';
 const viewerUserId = '33333333-3333-4333-8333-333333333333';
 const streamId = '44444444-4444-4444-8444-444444444444';
+const otherStreamId = '77777777-7777-4777-8777-777777777777';
 const hostSessionId = '55555555-5555-4555-8555-555555555555';
 const viewerSessionId = '66666666-6666-4666-8666-666666666666';
 const localPreviewTrack = {
@@ -896,8 +897,12 @@ describe('stream store watch startup', () => {
         timestampMs: 2000,
       });
 
+    await flushPromises();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const first = await getOwnedStreamVideoStats();
+    now.mockReturnValue(2_000);
     const second = await getOwnedStreamVideoStats();
+    now.mockRestore();
 
     expect(first).toMatchObject({
       activePeerCount: 1,
@@ -968,8 +973,12 @@ describe('stream store watch startup', () => {
         timestampMs: 2000,
       });
 
+    await flushPromises();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const first = await getOwnedStreamVideoStats();
+    now.mockReturnValue(2_000);
     const second = await getOwnedStreamVideoStats();
+    now.mockRestore();
 
     expect(sfuLoad).toHaveBeenCalledOnce();
     expect(sfuProduceTracks).toHaveBeenCalledWith([localPreviewTrack], {
@@ -1096,8 +1105,11 @@ describe('stream store watch startup', () => {
         timestampMs: 2_000,
       });
 
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
     const first = await getWatchedStreamVideoStats(streamId);
+    now.mockReturnValue(2_000);
     const second = await getWatchedStreamVideoStats(streamId);
+    now.mockRestore();
 
     expect(first).toMatchObject({
       bitrateKbps: null,
@@ -1105,10 +1117,13 @@ describe('stream store watch startup', () => {
       resolution: '1920x1080',
     });
     expect(second).toEqual({
+      availableIncomingBitrateKbps: undefined,
       averageDecodeTimeMs: null,
       bitrateKbps: 6000,
       codec: 'H264',
       decoderAcceleration: 'unknown',
+      decoderImplementation: undefined,
+      decodeFrameRate: 60,
       frameRate: 60,
       framesDropped: 1,
       framesReceived: null,
@@ -1120,8 +1135,64 @@ describe('stream store watch startup', () => {
       packetsLost: 1,
       packetsReceived: 999,
       pliCount: null,
+      receiveFrameRate: null,
+      renderFrameRate: null,
       resolution: '1920x1080',
+      transportProtocol: undefined,
+      localCandidateType: undefined,
+      remoteCandidateType: undefined,
     });
+  });
+
+  it('keeps publish and watch runtimes independent when either direction stops', async () => {
+    const sendCommandAwaitAck = vi.fn(async (command: string) => {
+      if (command === 'stream.start') {
+        return { channelId, iceServers: [], sessionId: hostSessionId, streamId };
+      }
+      if (command === 'stream.watch') {
+        return {
+          channelId,
+          hostSessionId: '88888888-8888-4888-8888-888888888888',
+          hostUserId,
+          iceServers: [],
+          sessionId: viewerSessionId,
+          streamId: otherStreamId,
+        };
+      }
+      return {};
+    });
+
+    await useStreamStore.getState().startSharing(
+      channelId,
+      { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+      'screen',
+      sendCommandAwaitAck,
+      vi.fn(),
+    );
+    await useStreamStore.getState().watchStream(
+      channelId,
+      otherStreamId,
+      sendCommandAwaitAck,
+      vi.fn(),
+    );
+
+    expect(useStreamStore.getState().ownedStream?.streamId).toBe(streamId);
+    expect(useStreamStore.getState().watchedStreamsById[otherStreamId]).toBeDefined();
+
+    await useStreamStore.getState().stopSharing(sendCommandAwaitAck);
+    expect(useStreamStore.getState().ownedStream).toBeNull();
+    expect(useStreamStore.getState().watchedStreamsById[otherStreamId]).toBeDefined();
+
+    await useStreamStore.getState().startSharing(
+      channelId,
+      { bitrateKbps: 4000, frameRate: 30, resolution: '720p' },
+      'screen',
+      sendCommandAwaitAck,
+      vi.fn(),
+    );
+    await useStreamStore.getState().unwatchStream(otherStreamId, sendCommandAwaitAck);
+    expect(useStreamStore.getState().ownedStream?.streamId).toBe(streamId);
+    expect(useStreamStore.getState().watchedStreamsById[otherStreamId]).toBeUndefined();
   });
 
   it('does not create an orphaned runtime when unwatch completes before the watch ACK arrives', async () => {

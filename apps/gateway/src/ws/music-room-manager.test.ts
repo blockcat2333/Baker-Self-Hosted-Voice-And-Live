@@ -117,6 +117,18 @@ describe('MusicRoomManager', () => {
     expect(manager.createSnapshot('channel-a').publications).toEqual([]);
   });
 
+  it('does not remove a replacement connection when a stale socket closes', () => {
+    const connections = new ConnectionManager();
+    const manager = new MusicRoomManager(connections);
+    const stale = attachConnection(connections).conn;
+    const replacement = attachConnection(connections).conn;
+
+    manager.start('channel-a', 'music-a', 'user-host', replacement.id, 'new-session');
+
+    expect(manager.leaveAllForUser('user-host', stale.id)).toEqual([]);
+    expect(manager.getPublication('channel-a', 'music-a')?.host.connectionId).toBe(replacement.id);
+  });
+
   it('broadcasts state snapshots to the host, listeners, and explicit recipients', () => {
     const connections = new ConnectionManager();
     const manager = new MusicRoomManager(connections);

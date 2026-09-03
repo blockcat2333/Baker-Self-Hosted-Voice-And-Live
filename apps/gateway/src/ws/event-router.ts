@@ -452,7 +452,10 @@ async function handleVoiceJoin(
   }
 
   const existingChannelId = runtime.voiceRoom.getChannelForUser(userId);
-  if (existingChannelId === channelId) {
+  const existingParticipant = existingChannelId
+    ? runtime.voiceRoom.getParticipant(existingChannelId, userId)
+    : null;
+  if (existingChannelId === channelId && existingParticipant?.connectionId === connection.id) {
     return createErrorEnvelope({
       code: 'VOICE_ALREADY_JOINED',
       message: 'You are already in this voice channel.',
@@ -462,10 +465,6 @@ async function handleVoiceJoin(
   }
 
   if (existingChannelId) {
-    const existingParticipant = runtime.voiceRoom.getParticipant(
-      existingChannelId,
-      userId,
-    );
     const owningConnection = existingParticipant
       ? runtime.connections.getById(existingParticipant.connectionId)
       : null;

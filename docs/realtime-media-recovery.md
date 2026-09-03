@@ -2,13 +2,21 @@
 
 ## Scope
 
-This guide applies to Baker server `1.1.4`, Baker Desktop `1.1.4a`, and the
-shared Web client shipped by the `blockcat233/baker:1.1.4` all-in-one image. It
+This guide applies to Baker server `1.1.5`, Baker Desktop `1.1.5a`, and the
+shared Web client shipped by the `blockcat233/baker:1.1.5` all-in-one image. It
 covers transient Gateway, P2P, SFU, voice, livestream, and shared-music
 failures. It does not replace correct HTTPS, TURN, SFU port, DNS, reverse proxy,
 or regional media-profile configuration.
 
-## What Changed In 1.1.4
+## What Changed In 1.1.5
+
+- A replacement WebSocket can take over a stale same-user voice membership in
+  the same channel. Gateway reconnect no longer fails repeatedly with
+  `VOICE_ALREADY_JOINED` while the previous socket is waiting to be cleaned up.
+- Socket-close cleanup is connection-owned for voice, livestream, and music
+  records. A delayed close from an old socket cannot remove media state already
+  restored by its replacement.
+- The 1.1.4 recovery protocol and client behavior remain available unchanged:
 
 - The client keeps a unified recovery incident for Gateway, voice, stream
   publication/viewing, and music publication/listening failures.
@@ -20,7 +28,8 @@ or regional media-profile configuration.
 - Gateway connections detect handshake timeouts and half-open sockets. The
   browser-side latency probe reconnects after three missing Pongs; the server
   terminates stale sockets after six heartbeat misses.
-- Server `1.1.4` accepts authenticated `media.session.reconnect` commands. It
+- Server `1.1.4` and newer accept authenticated `media.session.reconnect`
+  commands. The Gateway
   verifies that the caller owns the active logical session and recreates the
   media transport without removing channel membership or publication intent.
 - `media.session.restarted` tells affected clients to rebuild the corresponding
@@ -55,19 +64,23 @@ specific session.
 
 Recovery operations are generation-guarded. Completion from an old, cancelled
 attempt cannot overwrite a newer session. Duplicate recovery starts for the
-same incident are coalesced.
+same incident are coalesced. If a replacement WebSocket rejoins before the old
+socket closes, the Gateway transfers the logical voice membership to the new
+connection. Later cleanup from the old connection removes only records that it
+still owns.
 
 ## Compatibility
 
-| Client            | Server         | Behavior                                                                                                        |
-| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------- |
-| 1.1.4 Web/Desktop | 1.1.4          | In-place media-session recovery with preserved intent                                                           |
-| 1.1.4 Web/Desktop | 1.1.3 or older | Client detects the unsupported command and uses the existing leave/rejoin or republish fallback where available |
-| 1.1.3 or older    | 1.1.4          | Existing commands remain available; the client does not use the new recovery protocol                           |
+| Client                | Server         | Behavior                                                                                                        |
+| --------------------- | -------------- | --------------------------------------------------------------------------------------------------------------- |
+| 1.1.5 Web/Desktop     | 1.1.5          | In-place recovery plus stale-WebSocket ownership transfer                                                       |
+| 1.1.4 or 1.1.5 client | 1.1.4          | In-place media recovery is available; the stale same-channel rejoin race remains possible                       |
+| 1.1.4 or newer client | 1.1.3 or older | Client detects the unsupported command and uses the existing leave/rejoin or republish fallback where available |
+| 1.1.3 or older client | 1.1.5          | Existing commands remain available; the client does not use the new recovery protocol                           |
 
 Upgrade the server and bundled Web client together by replacing the all-in-one
 image. Update installed Desktop clients separately. Mixed versions remain
-usable, but only the matching 1.1.4 pair provides the complete recovery path.
+usable, but server 1.1.5 is required for stale-connection takeover protection.
 
 ## Desktop Multi-Server Behavior
 
@@ -93,15 +106,15 @@ profiles as a credential migration mechanism.
    image tag, published ports, mounts, and environment variables.
 2. Run `supervisorctl status` and confirm PostgreSQL, Redis, API, Gateway,
    Media, Caddy, and enabled TURN processes are healthy before the change.
-3. Pull `blockcat233/baker:1.1.4` or use the authenticated admin one-click
+3. Pull `blockcat233/baker:1.1.5` or use the authenticated admin one-click
    updater. Do not deploy `latest` when deterministic rollback is required.
 4. Preserve `/var/lib/baker`, `/var/run/docker.sock`, the container restart
    policy, and every TURN/SFU/HTTPS port binding.
 5. Wait for Docker health to become healthy. Confirm `/health` reports
-   `1.1.4` and `/v1/meta/public-config` reports the intended media mode.
-6. Upgrade Windows clients to `1.1.4a`.
+   `1.1.5` and `/v1/meta/public-config` reports the intended media mode.
+6. Upgrade Windows clients to `1.1.5a`.
 
-No manual database migration or data reset is required for 1.1.4. Never remove
+No manual database migration or data reset is required for 1.1.5. Never remove
 the data volume as part of an image-only upgrade.
 
 ## Validation Matrix
@@ -133,12 +146,17 @@ last error before pressing **Retry now**. Then check these layers in order:
 
 1. `/health`, container health, and `supervisorctl status`.
 2. Browser HTTPS trust, WebSocket upgrade, and reverse-proxy timeouts.
-3. Gateway logs for authentication, heartbeat, ownership, or stale-session
+3. Every external watchdog and health probe. Its URL scheme, host, port, and
+   expected status must match the live public endpoint. After an HTTP-to-HTTPS
+   migration, an obsolete HTTP probe can repeatedly restart an otherwise
+   healthy relay. Test the exact probe manually and observe several complete
+   monitor intervals before declaring the migration stable.
+4. Gateway logs for authentication, heartbeat, ownership, or stale-session
    rejection.
-4. Media logs for router, transport, producer, consumer, ICE, or DTLS failures.
-5. Public TURN/SFU reachability for both TCP and UDP and the exact announced
+5. Media logs for router, transport, producer, consumer, ICE, or DTLS failures.
+6. Public TURN/SFU reachability for both TCP and UDP and the exact announced
    ports returned to the browser.
-6. `MEDIA_REGION_PROFILES` host matching when different public hostnames must
+7. `MEDIA_REGION_PROFILES` host matching when different public hostnames must
    use different media routes.
 
 Do not treat a successful Web page load as media-path proof. HTTPS, WSS, TURN,
@@ -154,7 +172,8 @@ problem is specifically isolated to its registry; deleting it signs users out
 and removes saved server entries.
 
 After rollback, repeat health, voice, livestream, music, and regional-route
-validation. Older versions do not provide the 1.1.4 in-place recovery protocol.
+validation. Versions before 1.1.4 do not provide in-place recovery; server
+versions before 1.1.5 do not provide stale-connection takeover protection.
 
 ## Security Boundaries
 

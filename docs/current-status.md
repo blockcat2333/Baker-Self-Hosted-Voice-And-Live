@@ -48,6 +48,14 @@ Milestone 5 quality hardening plus a first real self-hosted productization pass 
 
 ## Recently Completed
 
+### 2026-09-03 Baker 1.1.5 Stale-Connection Recovery
+
+- advanced the stable server release line to `1.1.5` and matching Windows client labels to `1.1.5a`
+- allowed a replacement WebSocket to take over a stale same-user voice membership instead of returning `VOICE_ALREADY_JOINED` indefinitely
+- made voice, livestream, and music disconnect cleanup conditional on the closing connection still owning each record
+- added regression coverage for voice takeover and stale-close protection across all three realtime room managers
+- documented HTTPS watchdog protocol migrations, restart-loop diagnosis, upgrade, validation, and rollback in English and Chinese
+
 ### 2026-08-30 Baker 1.1.4 Realtime Recovery And Desktop Multi-Server
 
 - advanced the stable server release line to `1.1.4` and matching Windows client labels to `1.1.4a`

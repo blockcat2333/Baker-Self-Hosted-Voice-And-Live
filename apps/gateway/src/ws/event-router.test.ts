@@ -742,6 +742,75 @@ describe('routeGatewayMessage', () => {
     if (second.op === 'error') expect(second.code).toBe('VOICE_ALREADY_JOINED');
   });
 
+  it('lets a replacement socket take over a stale same-channel voice membership', async () => {
+    const channelId = '00000000-0000-0000-0000-000000000290';
+    const guildId = '00000000-0000-0000-0000-000000000291';
+    const userId = '00000000-0000-0000-0000-000000000292';
+    const oldSessionId = '00000000-0000-0000-0000-000000000293';
+    const newSessionId = '00000000-0000-0000-0000-000000000294';
+    const sharedConnections = new ConnectionManager();
+    const voiceRoom = new VoiceRoomManager(sharedConnections);
+    const closeSfuSession = vi.fn().mockResolvedValue(undefined);
+    const createMediaSession = vi
+      .fn()
+      .mockResolvedValueOnce({ iceServers: [], sessionId: oldSessionId })
+      .mockResolvedValueOnce({ iceServers: [], sessionId: newSessionId });
+    const takeoverRuntime = makeRuntime({
+      closeSfuSession,
+      connections: sharedConnections,
+      createMediaSession,
+      db: {
+        channels: {
+          findById: async (id: string) =>
+            id === channelId
+              ? { id: channelId, guildId, name: 'General Voice', type: 'voice', position: 0, topic: null, createdAt: new Date() }
+              : null,
+        },
+        guildMembers: {
+          findMembership: async (gId: string, uId: string) =>
+            gId === guildId && uId === userId
+              ? { guildId, userId, joinedAt: new Date(), nickname: null }
+              : null,
+        },
+      } as unknown as DatabaseAccess,
+      mediaMode: 'sfu',
+      presence: new PresenceManager(sharedConnections, null),
+      voiceRoom,
+    });
+    const stale = sharedConnections.attach({ close() {}, send() {} });
+    stale.userId = userId;
+    const replacement = sharedConnections.attach({ close() {}, send() {} });
+    replacement.userId = userId;
+    const join = (connection: typeof stale, reqId: string) =>
+      routeGatewayMessage(
+        connection,
+        JSON.stringify({
+          command: 'voice.join',
+          data: { channelId },
+          op: 'command',
+          reqId,
+          ts: ts(),
+          v: 1,
+        }),
+        takeoverRuntime,
+      );
+
+    expect((await join(stale, 'req-vj-stale')).op).toBe('ack');
+    expect((await join(replacement, 'req-vj-replacement')).op).toBe('ack');
+    expect(stale.voiceChannelId).toBeNull();
+    expect(voiceRoom.getParticipant(channelId, userId)).toEqual(
+      expect.objectContaining({ connectionId: replacement.id, sessionId: newSessionId }),
+    );
+    expect(closeSfuSession).toHaveBeenCalledWith({
+      channelId,
+      mode: 'voice',
+      sessionId: oldSessionId,
+    });
+
+    expect(voiceRoom.leaveAllChannels(userId, stale.id)).toEqual([]);
+    expect(voiceRoom.getParticipant(channelId, userId)?.connectionId).toBe(replacement.id);
+  });
+
   it('moves a user out of a stale voice room before joining another channel', async () => {
     const channelIdA = '00000000-0000-0000-0000-000000000093';
     const channelIdB = '00000000-0000-0000-0000-000000000094';

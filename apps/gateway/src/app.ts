@@ -151,7 +151,7 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
           void runtime.presence.onDisconnect(userId);
 
           // Remove the user from all voice rooms and notify remaining participants.
-          const affected = runtime.voiceRoom.leaveAllChannels(userId);
+          const affected = runtime.voiceRoom.leaveAllChannels(userId, connection.id);
           for (const { channelId, left, remaining } of affected) {
             if (remaining.length > 0) {
               runtime.voiceRoom.broadcastStateUpdated(channelId, remaining);
@@ -167,7 +167,7 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
             void runtime.broadcastVoiceNetworkUpdated(channelId);
           }
 
-          const streamChanges = runtime.streamRoom.leaveAllForUser(userId);
+          const streamChanges = runtime.streamRoom.leaveAllForUser(userId, connection.id);
           for (const change of streamChanges) {
             const voiceConnectionIds = runtime.voiceRoom
               .getParticipants(change.channelId)
@@ -199,7 +199,7 @@ export async function buildGatewayApp(): Promise<GatewayApp> {
             }
           }
 
-          const musicChanges = runtime.musicRoom.leaveAllForUser(userId);
+          const musicChanges = runtime.musicRoom.leaveAllForUser(userId, connection.id);
           for (const change of musicChanges) {
             const voiceConnectionIds = runtime.voiceRoom
               .getParticipants(change.channelId)

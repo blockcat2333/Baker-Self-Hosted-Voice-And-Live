@@ -28,7 +28,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 ## Current Status
 
-- Release line: server `1.1.4`; desktop clients `1.1.4a`
+- Release line: server `1.1.5`; desktop clients `1.1.5a`
 - Validated through the current Milestone 5 hardening stage
 - Monorepo includes the web client, desktop shell, admin panel, API, gateway, and media boundary services
 - Auth, chat, presence, voice, livestream signaling, popup stream viewing, and server settings are implemented
@@ -45,7 +45,7 @@ The project name is inspired by Baker from Arknights: Endfield.
 
 For the realtime recovery protocol, desktop multi-server behavior, compatibility,
 upgrade validation, incident response, and rollback procedures introduced in
-1.1.4, read the [Realtime Media Recovery Operations Guide](docs/realtime-media-recovery.md).
+1.1.5, read the [Realtime Media Recovery Operations Guide](docs/realtime-media-recovery.md).
 
 ## Start Here If You Are New
 
@@ -70,7 +70,7 @@ docker run -d \
   -p 3001:8080 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.4
+  blockcat233/baker:1.1.5
 
 docker logs baker
 ```
@@ -82,7 +82,7 @@ Open:
 
 The first boot prints the admin password once. All runtime secrets, Redis data, and PostgreSQL data live under `/var/lib/baker` inside the mounted volume, so a simple `docker restart baker` keeps the instance intact.
 
-If you want to follow the newest rolling image instead of pinning this release, replace `1.1.4` with `latest`.
+If you want to follow the newest rolling image instead of pinning this release, replace `1.1.5` with `latest`.
 
 The public deployment guide assumes this all-in-one image. It contains PostgreSQL, Redis, API, Gateway, Media, Caddy, optional coturn, the runtime watchdog, and `supervisorctl` in one container. Admin runtime repair, self-repair, public IP automation restarts, and deployment-settings apply all depend on that supervisor environment. If you run split services manually, Baker can still serve traffic, but you must provide your own process supervision and restart Media/TURN after runtime config changes.
 
@@ -118,7 +118,7 @@ Baker tries several public IP endpoints by default, including endpoints that are
 
 If you prefer Docker Desktop instead of the command line, use these exact values in the container creation form:
 
-- Image: `blockcat233/baker:1.1.4`
+- Image: `blockcat233/baker:1.1.5`
 - Container name: `baker` or `baker-test`
 - Ports:
   - host `3000` -> container `80/tcp`
@@ -177,7 +177,7 @@ docker run -d \
   -e BAKER_PUBLIC_IP_ENDPOINTS='https://ip.3322.net,https://myip.ipip.net,https://ifconfig.co/ip,https://api.ipify.org?format=json' \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.4
+  blockcat233/baker:1.1.5
 ```
 
 If `TURN_URLS` is not set, Baker automatically derives it from `TURN_EXTERNAL_IP` and `TURN_PORT`. If you prefer an explicit relay hostname, set `TURN_URLS` yourself.
@@ -210,7 +210,7 @@ docker run -d \
   -e SFU_ANNOUNCED_IP=203.0.113.10 \
   -v baker-data:/var/lib/baker \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  blockcat233/baker:1.1.4
+  blockcat233/baker:1.1.5
 ```
 
 Then open the admin panel and switch **Server settings -> Media mode** from `p2p` to `sfu`. The switch immediately rebuilds current voice and livestream media sessions while keeping chat WebSocket connections online. If the SFU public IP or port range is missing, the admin API rejects the switch instead of silently falling back to P2P.
@@ -265,6 +265,7 @@ Operational notes:
 - `MEDIA_REGION_PROFILES` is stored in `runtime.env` after first boot and can be edited from **Deployment Settings -> Media Region Profiles JSON** in the admin panel.
 - Public IP Automation only manages the legacy global TURN/SFU values. Multi-region profile addresses are intentional static routes and must be updated explicitly when a relay IP or port range changes.
 - The web entry, TURN relay, and SFU RTC ports may use different published ports, but every SFU candidate port announced in a profile must be reachable at that same number from the user's browser.
+- Health monitors must probe the endpoint's current scheme and port. When an FRP entry changes from HTTP to HTTPS, update the probe before enabling restart actions; otherwise a protocol-mismatch response can create a restart loop that repeatedly drops WSS and media tunnels.
 
 ### Optional: built-in HTTPS with Aliyun DNS-01
 
@@ -280,6 +281,8 @@ The all-in-one image can terminate HTTPS itself when an FRP relay exposes only a
 ```
 
 Configure the FRP TCP proxy so the public HTTPS port forwards unchanged TLS traffic to the Docker host's port `3443`. For example, `hkserver.evergarden.space:23333 -> 192.168.233.2:3443` keeps the public URL at `https://hkserver.evergarden.space:23333/`. TURN and SFU mappings remain separate and unchanged.
+
+After changing the endpoint scheme, run the exact watchdog health request manually and observe several complete watchdog intervals. A browser page load alone does not prove that the watchdog, WSS, TURN, and SFU paths agree.
 
 Caddy creates and renews the certificate through Aliyun DNS-01. Its ACME account, certificate, and private-key data are stored under `/var/lib/baker/caddy`, so the existing `/var/lib/baker` volume must remain mounted across upgrades. Use a dedicated RAM user with only the DNS-record permissions needed for the managed zone; do not use an Alibaba Cloud root-account access key. The access key values stay in the container environment and are not written into the generated Caddyfile.
 

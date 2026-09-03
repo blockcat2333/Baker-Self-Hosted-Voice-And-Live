@@ -124,11 +124,11 @@ export class VoiceRoomManager {
    * Remove a user from all voice rooms they are in (used on disconnect).
    * Returns affected rooms: [{ channelId, remaining }]
    */
-  leaveAllChannels(userId: string): Array<{ channelId: string; left: VoiceParticipantRecord; remaining: VoiceParticipantRecord[] }> {
+  leaveAllChannels(userId: string, connectionId?: string): Array<{ channelId: string; left: VoiceParticipantRecord; remaining: VoiceParticipantRecord[] }> {
     const affected: Array<{ channelId: string; left: VoiceParticipantRecord; remaining: VoiceParticipantRecord[] }> = [];
     for (const [channelId, room] of this.rooms) {
       const left = room.get(userId);
-      if (left) {
+      if (left && (!connectionId || left.connectionId === connectionId)) {
         room.delete(userId);
         if (room.size === 0) this.rooms.delete(channelId);
         affected.push({ channelId, left, remaining: room.size > 0 ? [...room.values()] : [] });

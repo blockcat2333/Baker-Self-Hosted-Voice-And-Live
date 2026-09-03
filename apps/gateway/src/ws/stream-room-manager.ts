@@ -128,11 +128,12 @@ export class StreamRoomManager {
     channelId: string,
     room: Map<string, StreamPublicationRecord>,
     userId: string,
+    connectionId?: string,
   ): StreamDisconnectResult[] {
     const results: StreamDisconnectResult[] = [];
 
     for (const [streamId, publication] of room) {
-      if (publication.host.userId === userId) {
+      if (publication.host.userId === userId && (!connectionId || publication.host.connectionId === connectionId)) {
         room.delete(streamId);
         results.push({
           channelId,
@@ -145,7 +146,7 @@ export class StreamRoomManager {
       }
 
       const viewer = publication.viewers.get(userId);
-      if (viewer) {
+      if (viewer && (!connectionId || viewer.connectionId === connectionId)) {
         publication.viewers.delete(userId);
         results.push({ channelId, sessionId: viewer.sessionId, streamId, type: 'viewer_left' });
       }
@@ -399,11 +400,11 @@ export class StreamRoomManager {
     return this.leaveRoomForUser(channelId, room, userId);
   }
 
-  leaveAllForUser(userId: string): StreamDisconnectResult[] {
+  leaveAllForUser(userId: string, connectionId?: string): StreamDisconnectResult[] {
     const results: StreamDisconnectResult[] = [];
 
     for (const [channelId, room] of this.rooms) {
-      results.push(...this.leaveRoomForUser(channelId, room, userId));
+      results.push(...this.leaveRoomForUser(channelId, room, userId, connectionId));
     }
 
     return results;

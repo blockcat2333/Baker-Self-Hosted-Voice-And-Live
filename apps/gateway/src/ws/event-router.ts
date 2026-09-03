@@ -56,6 +56,9 @@ import {
   MusicUnlistenCommandDataSchema,
   StreamStartAckDataSchema,
   StreamStartCommandDataSchema,
+  StreamDiagnosticsGetAckDataSchema,
+  StreamDiagnosticsGetCommandDataSchema,
+  StreamDiagnosticsReportCommandDataSchema,
   StreamStopAckDataSchema,
   StreamStopCommandDataSchema,
   StreamUnwatchAckDataSchema,
@@ -218,6 +221,12 @@ export async function routeGatewayMessage(
     case 'stream.start':
       return handleStreamStart(connection, reqId, data, runtime);
 
+    case 'stream.diagnostics.report':
+      return handleStreamDiagnosticsReport(connection, reqId, data, runtime);
+
+    case 'stream.diagnostics.get':
+      return handleStreamDiagnosticsGet(connection, reqId, data, runtime);
+
     case 'stream.stop':
       return handleStreamStop(connection, reqId, data, runtime);
 
@@ -259,6 +268,106 @@ export async function routeGatewayMessage(
       // All other recognised command names are acked without action for now.
       return createAckEnvelope(reqId, { command: cmd, connectionId: connection.id });
   }
+}
+
+function handleStreamDiagnosticsReport(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): RouterReply {
+  const parsed = StreamDiagnosticsReportCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message:
+        'stream.diagnostics.report requires an active stream publisher sample.',
+      reqId,
+      retryable: false,
+    });
+  }
+  const accepted = runtime.streamRoom.setPublisherDiagnostics(
+    parsed.data.channelId,
+    parsed.data.streamId,
+    parsed.data.sessionId,
+    connection.id,
+    parsed.data.publisher,
+    Date.now(),
+  );
+  if (!accepted) {
+    return createErrorEnvelope({
+      code: 'STREAM_NOT_HOST',
+      message: 'Only the active stream publisher can report diagnostics.',
+      reqId,
+      retryable: false,
+    });
+  }
+  return createAckEnvelope(reqId, { accepted: true });
+}
+
+async function handleStreamDiagnosticsGet(
+  connection: GatewayConnection,
+  reqId: string,
+  data: unknown,
+  runtime: GatewayRuntime,
+): Promise<RouterReply> {
+  const parsed = StreamDiagnosticsGetCommandDataSchema.safeParse(data);
+  if (!parsed.success) {
+    return createErrorEnvelope({
+      code: 'INVALID_PAYLOAD',
+      message: 'stream.diagnostics.get requires { channelId, streamId }.',
+      reqId,
+      retryable: false,
+    });
+  }
+  const publication = runtime.streamRoom.getPublication(
+    parsed.data.channelId,
+    parsed.data.streamId,
+  );
+  const userId = connection.userId as string;
+  const viewer = publication?.viewers.get(userId) ?? null;
+  const isHost =
+    publication?.host.userId === userId &&
+    publication.host.connectionId === connection.id;
+  const isViewer = viewer?.connectionId === connection.id;
+  if (!publication || (!isHost && !isViewer)) {
+    return createErrorEnvelope({
+      code: 'FORBIDDEN',
+      message:
+        'Stream diagnostics are available only to the active publisher or viewer.',
+      reqId,
+      retryable: false,
+    });
+  }
+
+  let sfu = null;
+  if (runtime.mediaMode === 'sfu') {
+    try {
+      sfu = await runtime.getStreamSfuDiagnostics({
+        channelId: publication.channelId,
+        publisherSessionId: publication.host.sessionId,
+        streamId: publication.streamId,
+        ...(viewer ? { viewerSessionId: viewer.sessionId } : {}),
+      });
+    } catch (err) {
+      log.warn(
+        { err, streamId: publication.streamId },
+        'Failed to read stream SFU diagnostics',
+      );
+    }
+  }
+
+  const publisherSample = publication.publisherDiagnostics;
+  return createAckEnvelope(
+    reqId,
+    StreamDiagnosticsGetAckDataSchema.parse({
+      mediaMode: runtime.mediaMode,
+      publisher: publisherSample?.publisher ?? null,
+      publisherSampledAt: publisherSample?.sampledAt ?? null,
+      sampledAt: Date.now(),
+      sfu,
+    }),
+  );
 }
 
 // ── system.authenticate ───────────────────────────────────────────────────────
@@ -823,16 +932,24 @@ async function handleMusicStart(
     });
   }
 
-  runtime.musicRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+  runtime.musicRoom.broadcastStateUpdated(
+    channelId,
+    getVoiceConnectionIds(runtime, channelId),
+  );
 
-  return createAckEnvelope(reqId, MusicStartAckDataSchema.parse({
+  return createAckEnvelope(
+    reqId,
+    MusicStartAckDataSchema.parse({
     channelId,
     iceServers: mediaSession.iceServers,
     mediaMode: runtime.mediaMode,
     musicId,
     sessionId: mediaSession.sessionId,
-    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
-  }));
+      ...(runtime.mediaMode === 'sfu' && mediaSession.sfu
+        ? { sfu: mediaSession.sfu }
+        : {}),
+    }),
+  );
 }
 
 async function handleMusicStop(
@@ -955,9 +1072,15 @@ async function handleMusicListen(
     });
   }
 
-  const existingListener = runtime.musicRoom.getListener(channelId, musicId, userId);
+  const existingListener = runtime.musicRoom.getListener(
+    channelId,
+    musicId,
+    userId,
+  );
   if (existingListener) {
-    return createAckEnvelope(reqId, MusicListenAckDataSchema.parse({
+    return createAckEnvelope(
+      reqId,
+      MusicListenAckDataSchema.parse({
       channelId,
       hostSessionId: publication.host.sessionId,
       hostUserId: publication.host.userId,
@@ -965,7 +1088,8 @@ async function handleMusicListen(
       mediaMode: runtime.mediaMode,
       musicId,
       sessionId: existingListener.sessionId,
-    }));
+      }),
+    );
   }
 
   let mediaSession: MediaSessionResponse;
@@ -998,9 +1122,14 @@ async function handleMusicListen(
     });
   }
 
-  runtime.musicRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+  runtime.musicRoom.broadcastStateUpdated(
+    channelId,
+    getVoiceConnectionIds(runtime, channelId),
+  );
 
-  return createAckEnvelope(reqId, MusicListenAckDataSchema.parse({
+  return createAckEnvelope(
+    reqId,
+    MusicListenAckDataSchema.parse({
     channelId,
     hostSessionId: listen.publication.host.sessionId,
     hostUserId: listen.publication.host.userId,
@@ -1008,8 +1137,11 @@ async function handleMusicListen(
     mediaMode: runtime.mediaMode,
     musicId,
     sessionId: listen.listenerSessionId,
-    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
-  }));
+      ...(runtime.mediaMode === 'sfu' && mediaSession.sfu
+        ? { sfu: mediaSession.sfu }
+        : {}),
+    }),
+  );
 }
 
 async function handleMusicUnlisten(
@@ -1064,7 +1196,7 @@ async function handleStreamStart(
     });
   }
 
-  const { channelId, quality, sourceType } = parsed.data;
+  const { channelId, codec, quality, sourceType } = parsed.data;
   const userId = connection.userId as string;
 
   const channel = await runtime.db.channels.findById(channelId);
@@ -1143,10 +1275,17 @@ async function handleStreamStart(
       channelId,
       hostUserId: userId,
       id: mediaSession.sessionId,
-      metadata: quality ? { quality } : {},
+      metadata: {
+        ...(codec ? { codec } : {}),
+        ...(quality ? { quality } : {}),
+      },
       sourceType,
     });
-    await runtime.db.streamSessions.updateStatus(mediaSession.sessionId, 'live', { startedAt: new Date() });
+    await runtime.db.streamSessions.updateStatus(
+      mediaSession.sessionId,
+      'live',
+      { startedAt: new Date() },
+    );
   } catch (err) {
     const stopped = runtime.streamRoom.stop(channelId, streamId, userId);
     if (stopped) {
@@ -1164,16 +1303,24 @@ async function handleStreamStart(
     });
   }
 
-  runtime.streamRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+  runtime.streamRoom.broadcastStateUpdated(
+    channelId,
+    getVoiceConnectionIds(runtime, channelId),
+  );
 
-  return createAckEnvelope(reqId, StreamStartAckDataSchema.parse({
+  return createAckEnvelope(
+    reqId,
+    StreamStartAckDataSchema.parse({
     channelId,
     iceServers: mediaSession.iceServers,
     mediaMode: runtime.mediaMode,
     sessionId: mediaSession.sessionId,
-    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
+      ...(runtime.mediaMode === 'sfu' && mediaSession.sfu
+        ? { sfu: mediaSession.sfu }
+        : {}),
     streamId,
-  }));
+    }),
+  );
 }
 
 async function handleStreamStop(
@@ -1325,9 +1472,15 @@ async function handleStreamWatch(
     });
   }
 
-  const existingViewer = runtime.streamRoom.getViewer(channelId, publication.streamId, userId);
+  const existingViewer = runtime.streamRoom.getViewer(
+    channelId,
+    publication.streamId,
+    userId,
+  );
   if (existingViewer) {
-    return createAckEnvelope(reqId, StreamWatchAckDataSchema.parse({
+    return createAckEnvelope(
+      reqId,
+      StreamWatchAckDataSchema.parse({
       channelId,
       hostSessionId: publication.host.sessionId,
       hostUserId: publication.host.userId,
@@ -1335,7 +1488,8 @@ async function handleStreamWatch(
       mediaMode: runtime.mediaMode,
       sessionId: existingViewer.sessionId,
       streamId: publication.streamId,
-    }));
+      }),
+    );
   }
 
   let mediaSession: MediaSessionResponse;
@@ -1374,18 +1528,26 @@ async function handleStreamWatch(
     });
   }
 
-  runtime.streamRoom.broadcastStateUpdated(channelId, getVoiceConnectionIds(runtime, channelId));
+  runtime.streamRoom.broadcastStateUpdated(
+    channelId,
+    getVoiceConnectionIds(runtime, channelId),
+  );
 
-  return createAckEnvelope(reqId, StreamWatchAckDataSchema.parse({
+  return createAckEnvelope(
+    reqId,
+    StreamWatchAckDataSchema.parse({
     channelId,
     hostSessionId: watch.publication.host.sessionId,
     hostUserId: watch.publication.host.userId,
     iceServers: mediaSession.iceServers,
     mediaMode: runtime.mediaMode,
     sessionId: watch.viewerSessionId,
-    ...(runtime.mediaMode === 'sfu' && mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
+      ...(runtime.mediaMode === 'sfu' && mediaSession.sfu
+        ? { sfu: mediaSession.sfu }
+        : {}),
     streamId: watch.publication.streamId,
-  }));
+    }),
+  );
 }
 
 async function handleStreamUnwatch(
@@ -1473,9 +1635,11 @@ function handleMediaSignalRelay(
   const targetConn = runtime.connections.findByUserId(targetUserId);
   if (!targetConn) {
     return createErrorEnvelope({
-      code: signal.session.mode === 'voice'
+      code:
+        signal.session.mode === 'voice'
         ? 'VOICE_NOT_JOINED'
-        : signal.session.mode === 'music_publish' || signal.session.mode === 'music_listen'
+          : signal.session.mode === 'music_publish' ||
+              signal.session.mode === 'music_listen'
           ? 'MUSIC_NOT_LIVE'
           : 'STREAM_NOT_LIVE',
       message: 'Target user is not connected.',
@@ -1669,21 +1833,38 @@ async function handleMediaSessionReconnect(
       session,
       userId: connection.userId,
     });
-    for (const connectionId of getMediaSessionAudienceConnectionIds(runtime, session)) {
+    for (const connectionId of getMediaSessionAudienceConnectionIds(
+      runtime,
+      session,
+    )) {
       if (connectionId === connection.id) continue;
       const target = runtime.connections.getById(connectionId);
       if (!target) continue;
-      target.socket.send(JSON.stringify(createEventEnvelope(target.nextSequence(), 'media.session.restarted', eventData)));
+      target.socket.send(
+        JSON.stringify(
+          createEventEnvelope(
+            target.nextSequence(),
+            'media.session.restarted',
+            eventData,
+          ),
+        ),
+      );
     }
 
-    return createAckEnvelope(reqId, MediaSessionReconnectAckDataSchema.parse({
+    return createAckEnvelope(
+      reqId,
+      MediaSessionReconnectAckDataSchema.parse({
       iceServers: mediaSession.iceServers,
       mediaMode: runtime.mediaMode,
       session,
       ...(mediaSession.sfu ? { sfu: mediaSession.sfu } : {}),
-    }));
+      }),
+    );
   } catch (err) {
-    log.warn({ err, connectionId: connection.id, mode: session.mode }, 'Media session reconnect failed');
+    log.warn(
+      { err, connectionId: connection.id, mode: session.mode },
+      'Media session reconnect failed',
+    );
     return createErrorEnvelope({
       code: 'MEDIA_NEGOTIATION_TIMEOUT',
       message: 'Failed to rebuild media session. Retrying is allowed.',
@@ -1787,10 +1968,13 @@ async function handleSfuProduce(
   }
 
   try {
-    return createAckEnvelope(reqId, await runtime.produceSfu({
+    return createAckEnvelope(
+      reqId,
+      await runtime.produceSfu({
       ...parsed.data,
       userId: connection.userId as string,
-    }));
+      }),
+    );
   } catch (err) {
     log.warn({ err, connectionId: connection.id }, 'SFU produce failed');
     return createErrorEnvelope({

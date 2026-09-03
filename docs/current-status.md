@@ -961,3 +961,14 @@ Recommended next work:
   - PID listener inspection
   - `.env` fallback
 - Expected result: HTTPS reverse proxy now tracks the active Vite port (for example `3233`) and serves a client that uses same-origin gateway defaults (`wss://<domain>/ws`) instead of stale LAN `ws://` values.
+
+## 2026-09-03 Baker 1.1.6 Livestream Codec And Diagnostics
+
+- fixed the web layout branch that prevented opening the share dialog while a
+  stream dashboard was visible, preserving simultaneous watch and publish
+- changed video codec selection from best-effort ordering to strict
+  negotiation and added SFU Producer codec verification with server rollback
+- added authenticated, stream-scoped, memory-only sender/SFU diagnostic samples
+  and four-stage client display with conservative fault classification
+- added actual hardware/software codec acceleration reporting when Chromium
+  exposes the corresponding WebRTC statistics

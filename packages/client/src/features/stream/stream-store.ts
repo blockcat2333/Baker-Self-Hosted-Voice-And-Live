@@ -9,6 +9,7 @@ import type {
   MediaTransportMode,
   SfuProducer,
   StreamPublication,
+  StreamDiagnosticsGetAckData,
   StreamQualitySettings,
   StreamSourceType,
   StreamStateUpdatedEventData,
@@ -17,6 +18,7 @@ import type {
 import {
   MediaSessionReconnectAckDataSchema,
   StreamStartAckDataSchema,
+  StreamDiagnosticsGetAckDataSchema,
   StreamWatchAckDataSchema,
 } from '@baker/protocol';
 import { SfuClientSession, WebRtcManager } from '@baker/sdk';
@@ -78,13 +80,21 @@ export interface WatchedStreamState {
 }
 
 export interface WatchedStreamVideoStats {
+  averageDecodeTimeMs: number | null;
   bitrateKbps: number | null;
   codec: string | null;
+  decoderAcceleration: 'hardware' | 'software' | 'unknown';
   frameRate: number | null;
   framesDropped: number | null;
+  framesReceived: number | null;
+  freezeCount: number | null;
+  freezeDurationMs: number | null;
   jitterMs: number | null;
+  jitterBufferDelayMs: number | null;
+  nackCount: number | null;
   packetsLost: number | null;
   packetsReceived: number | null;
+  pliCount: number | null;
   resolution: string | null;
 }
 
@@ -92,9 +102,14 @@ export interface OwnedStreamVideoStats {
   activePeerCount: number;
   bitrateKbps: number | null;
   codec: string | null;
+  encoderAcceleration: 'hardware' | 'software' | 'unknown';
   encoderLimited: boolean;
   frameRate: number | null;
   qualityLimitationReason: 'bandwidth' | 'cpu' | 'none' | 'other';
+  packetsLost: number | null;
+  packetsSent: number | null;
+  retransmittedPacketsSent: number | null;
+  roundTripTimeMs: number | null;
   resolution: string | null;
 }
 
@@ -192,26 +207,54 @@ interface WatchedStreamRuntime {
 
 let ownedRuntime: OwnedPublishRuntime | null = null;
 const watchedRuntimes = new Map<string, WatchedStreamRuntime>();
-const watchedReceiverSyncTimers = new Map<string, ReturnType<typeof setInterval>>();
+const watchedReceiverSyncTimers = new Map<
+  string,
+  ReturnType<typeof setInterval>
+>();
 const cancelledWatchRequests = new Set<string>();
 const pendingWatchedSignals = new Map<string, MediaSignalRelayEventData[]>();
 const pendingOwnedIceCandidates = new Map<string, RTCIceCandidateInit[]>();
 const pendingWatchedIceCandidates = new Map<string, RTCIceCandidateInit[]>();
-const sfuWatchedTracks = new Map<string, { streamId: string; track: MediaStreamTrack }>();
+const sfuWatchedTracks = new Map<
+  string,
+  { streamId: string; track: MediaStreamTrack }
+>();
 const WATCHED_RECEIVER_SYNC_INTERVAL_MS = 500;
 const lastWatchedIceRestartRequestAt = new Map<string, number>();
-const pendingWatchedIceRestartTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const pendingWatchedConnectionIssueTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const lastWatchedVideoStatsSamples = new Map<string, {
+const pendingWatchedIceRestartTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
+const pendingWatchedConnectionIssueTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
+const lastWatchedVideoStatsSamples = new Map<
+  string,
+  {
   bytesReceived: number | null;
   framesDecoded: number | null;
+    framesDropped: number | null;
+    framesReceived: number | null;
+    freezeCount: number | null;
+    totalDecodeTimeMs: number | null;
+    totalFreezesDurationMs: number | null;
+    nackCount: number | null;
+    packetsLost: number | null;
+    packetsReceived: number | null;
+    pliCount: number | null;
   timestampMs: number | null;
-}>();
+  }
+>();
+let ownedDiagnosticsTimer: ReturnType<typeof setInterval> | null = null;
 const WATCHED_CONNECTING_ISSUE_DELAY_MS = 10_000;
 const WATCHED_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
 const WATCHED_FAILED_ISSUE_DELAY_MS = 2_000;
 let ownedSfuRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
-const ownedPeerRecoveryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const ownedPeerRecoveryTimers = new Map<
+  string,
+  ReturnType<typeof setTimeout>
+>();
 const lastOwnedVideoStatsSample: {
   bytesSent: number | null;
   framesEncoded: number | null;
@@ -285,14 +328,30 @@ async function applyCaptureTrackPreferences(
       track.contentHint = quality.frameRate === 60 ? 'motion' : 'detail';
     }
     if (typeof track.applyConstraints === 'function') {
-      await track.applyConstraints({
+      await track
+        .applyConstraints({
         frameRate: { ideal: quality.frameRate, max: quality.frameRate },
-      }).catch(() => {
+        })
+        .catch(() => {
         // Fixed-refresh sources may not accept the requested target. The UI
         // reports the actual track setting instead of discarding the capture.
       });
     }
   }
+}
+
+function counterDelta(
+  current: number | null,
+  previous: number | null | undefined,
+): number | null {
+  if (
+    current === null ||
+    previous === null ||
+    previous === undefined ||
+    current < previous
+  )
+    return null;
+  return current - previous;
 }
 
 function getMyUserId(): string | null {
@@ -628,6 +687,16 @@ function teardownOwnedRuntime() {
     return;
   }
 
+  if (ownedDiagnosticsTimer) {
+    clearInterval(ownedDiagnosticsTimer);
+    ownedDiagnosticsTimer = null;
+  }
+  for (const timer of ownedPeerRecoveryTimers.values()) clearTimeout(timer);
+  ownedPeerRecoveryTimers.clear();
+  if (ownedSfuRecoveryTimer) {
+    clearTimeout(ownedSfuRecoveryTimer);
+    ownedSfuRecoveryTimer = null;
+  }
   ownedRuntime.manager?.closeAll();
   ownedRuntime.sfuSession?.close();
   lastOwnedVideoStatsSample.bytesSent = null;
@@ -639,6 +708,26 @@ function teardownOwnedRuntime() {
   }
 
   ownedRuntime = null;
+}
+
+async function abortOwnedPublication(error: unknown) {
+  const runtime = ownedRuntime;
+  if (!runtime) return;
+  await runtime
+    .sendCommandAwaitAck('stream.stop', {
+      channelId: runtime.channelId,
+      streamId: runtime.streamId,
+    })
+    .catch(() => undefined);
+  if (ownedRuntime !== runtime) return;
+  teardownOwnedRuntime();
+  useStreamStore.setState({
+    error:
+      error instanceof Error
+        ? error.message
+        : 'The selected video codec could not be used.',
+    ownedStream: null,
+  });
 }
 
 function teardownWatchedRuntime(streamId: string) {
@@ -707,19 +796,32 @@ function handleOwnedSfuTransportState(state: RTCPeerConnectionState) {
     ownedSfuRecoveryTimer = null;
   }
   if (state !== 'disconnected' && state !== 'failed') return;
-  ownedSfuRecoveryTimer = setTimeout(() => {
+  ownedSfuRecoveryTimer = setTimeout(
+    () => {
     ownedSfuRecoveryTimer = null;
     beginOwnedMediaRecovery(`SFU publishing transport ${state}.`);
-  }, state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS);
+    },
+    state === 'failed'
+      ? WATCHED_FAILED_ISSUE_DELAY_MS
+      : WATCHED_DISCONNECTED_ISSUE_DELAY_MS,
+  );
 }
 
-function handleWatchedSfuTransportState(streamId: string, state: RTCPeerConnectionState) {
-  updateWatchedStreamState(streamId, (watched) => ({ ...watched, connectionState: state }));
+function handleWatchedSfuTransportState(
+  streamId: string,
+  state: RTCPeerConnectionState,
+) {
+  updateWatchedStreamState(streamId, (watched) => ({
+    ...watched,
+    connectionState: state,
+  }));
   clearWatchedConnectionIssueTimer(streamId);
   if (state === 'disconnected' || state === 'failed') {
     scheduleWatchedConnectionIssue(
       streamId,
-      state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS,
+      state === 'failed'
+        ? WATCHED_FAILED_ISSUE_DELAY_MS
+        : WATCHED_DISCONNECTED_ISSUE_DELAY_MS,
       [state],
     );
   }
@@ -737,6 +839,10 @@ function suspendOwnedTransport() {
   if (!ownedRuntime) return;
   ownedRuntime.manager?.closeAll();
   ownedRuntime.sfuSession?.close();
+  if (ownedDiagnosticsTimer) {
+    clearInterval(ownedDiagnosticsTimer);
+    ownedDiagnosticsTimer = null;
+  }
   for (const timer of ownedPeerRecoveryTimers.values()) clearTimeout(timer);
   ownedPeerRecoveryTimers.clear();
   if (ownedSfuRecoveryTimer) {
@@ -800,15 +906,20 @@ async function attemptOwnedMediaRecovery() {
   } catch (error) {
     if (!isMediaReconnectUnsupported(error)) throw error;
     const previousStreamId = runtime.streamId;
-    await runtime.sendCommandAwaitAck('stream.stop', {
+    await runtime
+      .sendCommandAwaitAck('stream.stop', {
       channelId: runtime.channelId,
       streamId: previousStreamId,
-    }).catch(() => undefined);
-    const fallback = StreamStartAckDataSchema.parse(await runtime.sendCommandAwaitAck('stream.start', {
+      })
+      .catch(() => undefined);
+    const fallback = StreamStartAckDataSchema.parse(
+      await runtime.sendCommandAwaitAck('stream.start', {
       channelId: runtime.channelId,
+        codec: runtime.codecPreference,
       quality: runtime.quality,
       sourceType: runtime.sourceType,
-    }));
+      }),
+    );
     const nextStreamId = fallback.streamId ?? fallback.sessionId;
     reconnect = MediaSessionReconnectAckDataSchema.parse({
       iceServers: fallback.iceServers,
@@ -852,12 +963,17 @@ async function attemptOwnedMediaRecovery() {
   } else {
     runtime.manager = createOwnedManager();
     for (const viewer of useStreamStore.getState().ownedStream?.viewers ?? []) {
-      const offer = await runtime.manager.createOffer(viewer.userId, runtime.localStream, runtime.iceServers, {
+      const offer = await runtime.manager.createOffer(
+        viewer.userId,
+        runtime.localStream,
+        runtime.iceServers,
+        {
         degradationPreference: 'balanced',
         maxVideoBitrateKbps: runtime.quality.bitrateKbps,
         maxVideoFramerate: runtime.quality.frameRate,
         preferredVideoCodec: runtime.codecPreference,
-      });
+        },
+      );
       sendOwnedSignal(viewer.userId, { type: 'offer', sdp: offer.sdp ?? '' });
     }
   }
@@ -874,6 +990,7 @@ async function attemptOwnedMediaRecovery() {
         }
       : null,
   }));
+  startOwnedDiagnosticsReporter();
 }
 
 function beginOwnedMediaRecovery(reason: string) {
@@ -911,14 +1028,18 @@ async function attemptWatchedMediaRecovery(streamId: string) {
     reconnect = MediaSessionReconnectAckDataSchema.parse(raw);
   } catch (error) {
     if (!isMediaReconnectUnsupported(error)) throw error;
-    await runtime.sendCommandAwaitAck('stream.unwatch', {
+    await runtime
+      .sendCommandAwaitAck('stream.unwatch', {
       channelId: runtime.channelId,
       streamId: runtime.streamId,
-    }).catch(() => undefined);
-    fallbackWatch = StreamWatchAckDataSchema.parse(await runtime.sendCommandAwaitAck('stream.watch', {
+      })
+      .catch(() => undefined);
+    fallbackWatch = StreamWatchAckDataSchema.parse(
+      await runtime.sendCommandAwaitAck('stream.watch', {
       channelId: runtime.channelId,
       streamId: runtime.streamId,
-    }));
+      }),
+    );
     reconnect = MediaSessionReconnectAckDataSchema.parse({
       iceServers: fallbackWatch.iceServers,
       mediaMode: fallbackWatch.mediaMode,
@@ -1085,13 +1206,24 @@ function createOwnedManager(): WebRtcManager {
       if (state !== 'disconnected' && state !== 'failed') return;
       const runtime = ownedRuntime;
       if (!runtime?.manager) return;
-      void runtime.manager.restartIce(userId).then((offer) => {
-        if (offer) sendOwnedSignal(userId, { type: 'offer', sdp: offer.sdp ?? '' });
-      }).catch(() => undefined);
-      const timer = setTimeout(() => {
+      void runtime.manager
+        .restartIce(userId)
+        .then((offer) => {
+          if (offer)
+            sendOwnedSignal(userId, { type: 'offer', sdp: offer.sdp ?? '' });
+        })
+        .catch(() => undefined);
+      const timer = setTimeout(
+        () => {
         ownedPeerRecoveryTimers.delete(userId);
-        beginOwnedMediaRecovery(`Live transport to viewer ${userId} ${state}.`);
-      }, state === 'failed' ? WATCHED_FAILED_ISSUE_DELAY_MS : WATCHED_DISCONNECTED_ISSUE_DELAY_MS);
+          beginOwnedMediaRecovery(
+            `Live transport to viewer ${userId} ${state}.`,
+          );
+        },
+        state === 'failed'
+          ? WATCHED_FAILED_ISSUE_DELAY_MS
+          : WATCHED_DISCONNECTED_ISSUE_DELAY_MS,
+      );
       ownedPeerRecoveryTimers.set(userId, timer);
     },
   });
@@ -1279,7 +1411,10 @@ async function captureStream(
   return stream;
 }
 
-function reconcileOwnedPublication(channelId: string, streamsById: Record<string, StreamPublication>) {
+function reconcileOwnedPublication(
+  channelId: string,
+  streamsById: Record<string, StreamPublication>,
+) {
   if (!ownedRuntime || ownedRuntime.channelId !== channelId) {
     return;
   }
@@ -1308,18 +1443,34 @@ function reconcileOwnedPublication(channelId: string, streamsById: Record<string
   }
 
   for (const viewer of publication.viewers) {
-    if (ownedRuntime.mediaMode === 'p2p' && !previousViewerIds.has(viewer.userId) && ownedRuntime.manager) {
+    if (
+      ownedRuntime.mediaMode === 'p2p' &&
+      !previousViewerIds.has(viewer.userId) &&
+      ownedRuntime.manager
+    ) {
       void ownedRuntime.manager
-        .createOffer(viewer.userId, ownedRuntime.localStream, ownedRuntime.iceServers, {
+        .createOffer(
+          viewer.userId,
+          ownedRuntime.localStream,
+          ownedRuntime.iceServers,
+          {
           degradationPreference: 'balanced',
           maxVideoBitrateKbps: ownedRuntime.quality.bitrateKbps,
           maxVideoFramerate: ownedRuntime.quality.frameRate,
           preferredVideoCodec: ownedRuntime.codecPreference,
-        })
+          },
+        )
         .then((offer) => {
-          sendOwnedSignal(viewer.userId, { type: 'offer', sdp: offer.sdp ?? '' });
+          sendOwnedSignal(viewer.userId, {
+            type: 'offer',
+            sdp: offer.sdp ?? '',
+          });
         })
         .catch((err) => {
+          if (err instanceof Error && /codec/i.test(err.message)) {
+            void abortOwnedPublication(err);
+            return;
+          }
           console.warn('[stream] offer failed for viewer', viewer.userId, err);
         });
     }
@@ -1535,7 +1686,16 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
   lastWatchedVideoStatsSamples.set(streamId, {
     bytesReceived: sample.bytesReceived,
     framesDecoded: sample.framesDecoded,
+    framesDropped: sample.framesDropped,
+    framesReceived: sample.framesReceived,
+    freezeCount: sample.freezeCount,
+    nackCount: sample.nackCount,
+    packetsLost: sample.packetsLost,
+    packetsReceived: sample.packetsReceived,
+    pliCount: sample.pliCount,
     timestampMs: sample.timestampMs,
+    totalDecodeTimeMs: sample.totalDecodeTimeMs,
+    totalFreezesDurationMs: sample.totalFreezesDurationMs,
   });
 
   let bitrateKbps: number | null = null;
@@ -1570,13 +1730,42 @@ export async function getWatchedStreamVideoStats(streamId: string): Promise<Watc
   }
 
   return {
+    averageDecodeTimeMs: (() => {
+      const decodeMs = counterDelta(
+        sample.totalDecodeTimeMs,
+        previous?.totalDecodeTimeMs,
+      );
+      const frames = counterDelta(
+        sample.framesDecoded,
+        previous?.framesDecoded,
+      );
+      return decodeMs !== null && frames && frames > 0
+        ? Math.round((decodeMs / frames) * 10) / 10
+        : null;
+    })(),
     bitrateKbps,
     codec: sample.codec,
+    decoderAcceleration: sample.decoderAcceleration ?? 'unknown',
     frameRate,
-    framesDropped: sample.framesDropped,
+    framesDropped: counterDelta(sample.framesDropped, previous?.framesDropped),
+    framesReceived: counterDelta(
+      sample.framesReceived,
+      previous?.framesReceived,
+    ),
+    freezeCount: counterDelta(sample.freezeCount, previous?.freezeCount),
+    freezeDurationMs: counterDelta(
+      sample.totalFreezesDurationMs,
+      previous?.totalFreezesDurationMs,
+    ),
     jitterMs: sample.jitterMs,
-    packetsLost: sample.packetsLost,
-    packetsReceived: sample.packetsReceived,
+    jitterBufferDelayMs: sample.jitterBufferDelayMs ?? null,
+    nackCount: counterDelta(sample.nackCount, previous?.nackCount),
+    packetsLost: counterDelta(sample.packetsLost, previous?.packetsLost),
+    packetsReceived: counterDelta(
+      sample.packetsReceived,
+      previous?.packetsReceived,
+    ),
+    pliCount: counterDelta(sample.pliCount, previous?.pliCount),
     resolution: formatVideoResolution(sample.frameWidth, sample.frameHeight),
   };
 }
@@ -1597,9 +1786,14 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
       activePeerCount: 0,
       bitrateKbps: null,
       codec: null,
+      encoderAcceleration: 'unknown',
       encoderLimited: false,
       frameRate: null,
       qualityLimitationReason: 'none',
+      packetsLost: null,
+      packetsSent: null,
+      retransmittedPacketsSent: null,
+      roundTripTimeMs: null,
       resolution: null,
     };
   }
@@ -1643,6 +1837,7 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
     activePeerCount: sample.activePeerCount,
     bitrateKbps,
     codec: sample.codec,
+    encoderAcceleration: sample.encoderAcceleration ?? 'unknown',
     encoderLimited: isEncoderLikelyLimited(
       sample.qualityLimitationReason,
       frameRate,
@@ -1650,8 +1845,68 @@ export async function getOwnedStreamVideoStats(): Promise<OwnedStreamVideoStats 
     ),
     frameRate,
     qualityLimitationReason: sample.qualityLimitationReason,
+    packetsLost: sample.packetsLost,
+    packetsSent: sample.packetsSent,
+    retransmittedPacketsSent: sample.retransmittedPacketsSent,
+    roundTripTimeMs: sample.roundTripTimeMs,
     resolution: formatVideoResolution(sample.frameWidth, sample.frameHeight),
   };
+}
+
+export async function getStreamDiagnostics(
+  streamId: string,
+): Promise<StreamDiagnosticsGetAckData | null> {
+  const runtime =
+    watchedRuntimes.get(streamId) ??
+    (ownedRuntime?.streamId === streamId ? ownedRuntime : null);
+  if (!runtime) return null;
+  try {
+    return StreamDiagnosticsGetAckDataSchema.parse(
+      await runtime.sendCommandAwaitAck('stream.diagnostics.get', {
+        channelId: runtime.channelId,
+        streamId,
+      }),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function startOwnedDiagnosticsReporter() {
+  if (ownedDiagnosticsTimer) clearInterval(ownedDiagnosticsTimer);
+  const report = async () => {
+    const runtime = ownedRuntime;
+    if (!runtime) return;
+    const stats = await getOwnedStreamVideoStats();
+    if (!ownedRuntime || ownedRuntime !== runtime) return;
+    const videoTrack = runtime.localStream.getVideoTracks()[0];
+    const captureFrameRate =
+      videoTrack && typeof videoTrack.getSettings === 'function'
+        ? (videoTrack.getSettings().frameRate ?? null)
+        : null;
+    runtime.sendRawCommand('stream.diagnostics.report', {
+      channelId: runtime.channelId,
+      publisher: {
+        actualCodec: stats?.codec ? stats.codec.toLowerCase() : null,
+        bitrateKbps: stats?.bitrateKbps ?? null,
+        captureFrameRate,
+        encodedFrameRate: stats?.frameRate ?? null,
+        encoderAcceleration: stats?.encoderAcceleration ?? 'unknown',
+        packetsLost: stats?.packetsLost ?? null,
+        packetsSent: stats?.packetsSent ?? null,
+        qualityLimitationReason: stats?.qualityLimitationReason ?? 'none',
+        requestedCodec: runtime.codecPreference,
+        roundTripTimeMs: stats?.roundTripTimeMs ?? null,
+        targetBitrateKbps: runtime.quality.bitrateKbps,
+        targetFrameRate: runtime.quality.frameRate,
+      },
+      sampledAt: Date.now(),
+      sessionId: runtime.sessionId,
+      streamId: runtime.streamId,
+    });
+  };
+  void report();
+  ownedDiagnosticsTimer = setInterval(() => void report(), 2_000);
 }
 
 export const useStreamStore = create<StreamState>((set, get) => ({
@@ -1671,14 +1926,28 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       ownedRuntime.manager
     ) {
       void ownedRuntime.manager
-        .createOffer(event.userId, ownedRuntime.localStream, ownedRuntime.iceServers, {
+        .createOffer(
+          event.userId,
+          ownedRuntime.localStream,
+          ownedRuntime.iceServers,
+          {
           degradationPreference: 'balanced',
           maxVideoBitrateKbps: ownedRuntime.quality.bitrateKbps,
           maxVideoFramerate: ownedRuntime.quality.frameRate,
           preferredVideoCodec: ownedRuntime.codecPreference,
-        })
-        .then((offer) => sendOwnedSignal(event.userId, { type: 'offer', sdp: offer.sdp ?? '' }))
-        .catch((error) => beginOwnedMediaRecovery(error instanceof Error ? error.message : 'Offer recovery failed.'));
+          },
+        )
+        .then((offer) =>
+          sendOwnedSignal(event.userId, {
+            type: 'offer',
+            sdp: offer.sdp ?? '',
+          }),
+        )
+        .catch((error) =>
+          beginOwnedMediaRecovery(
+            error instanceof Error ? error.message : 'Offer recovery failed.',
+          ),
+        );
     }
   },
   ...emptyState(),
@@ -1784,17 +2053,24 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     sendRawCommand,
     codecPreference = DEFAULT_STREAM_CODEC_PREFERENCE,
   ) {
-    if (codecPreference === 'default') codecPreference = DEFAULT_STREAM_CODEC_PREFERENCE;
+    if (codecPreference === 'default')
+      codecPreference = DEFAULT_STREAM_CODEC_PREFERENCE;
     if (ownedRuntime) {
       return;
     }
 
-    if (codecPreference !== 'default' && !getSupportedStreamCodecPreferences().includes(codecPreference)) {
-      set({ error: `Selected video codec ${codecPreference.toUpperCase()} is not supported by this browser.` });
+    if (
+      codecPreference !== 'default' &&
+      !getSupportedStreamCodecPreferences().includes(codecPreference)
+    ) {
+      set({
+        error: `Selected video codec ${codecPreference.toUpperCase()} is not supported by this browser.`,
+      });
       return;
     }
 
-    const cameraSelection = sourceType === 'camera'
+    const cameraSelection =
+      sourceType === 'camera'
       ? resolveSelectedCameraSelection(get())
       : DEFAULT_CAMERA_SELECTION;
 
@@ -1818,9 +2094,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       captured = await captureStream(sourceType, quality, cameraSelection);
     } catch (err) {
       set({
-        error: err instanceof Error && err.message
+        error:
+          err instanceof Error && err.message
           ? err.message
-          : sourceType === 'screen' ? 'Screen share capture failed.' : 'Camera capture failed.',
+            : sourceType === 'screen'
+              ? 'Screen share capture failed.'
+              : 'Camera capture failed.',
         ownedStream: null,
       });
       return;
@@ -1843,7 +2122,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
     let ackData: ReturnType<typeof StreamStartAckDataSchema.parse>;
     try {
-      const raw = await sendCommandAwaitAck('stream.start', { channelId, quality, sourceType });
+      const raw = await sendCommandAwaitAck('stream.start', {
+        channelId,
+        codec: codecPreference,
+        quality,
+        sourceType,
+      });
       ackData = StreamStartAckDataSchema.parse(raw);
     } catch (err) {
       for (const track of captured.getTracks()) {
@@ -1859,6 +2143,9 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     const streamId = ackData.streamId ?? ackData.sessionId;
     const userId = getMyUserId();
     if (!userId) {
+      await sendCommandAwaitAck('stream.stop', { channelId, streamId }).catch(
+        () => undefined,
+      );
       for (const track of captured.getTracks()) {
         track.stop();
       }
@@ -1889,23 +2176,34 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       'ended',
       () => {
         const runtime = ownedRuntime;
-        if (!runtime || runtime.localStream !== captured || get().ownedStream?.status === 'stopping') return;
+        if (
+          !runtime ||
+          runtime.localStream !== captured ||
+          get().ownedStream?.status === 'stopping'
+        )
+          return;
         resolveMediaRecovery(ownedRecoveryId(runtime.streamId));
-        void runtime.sendCommandAwaitAck('stream.stop', {
+        void runtime
+          .sendCommandAwaitAck('stream.stop', {
           channelId: runtime.channelId,
           streamId: runtime.streamId,
-        }).catch(() => {
+          })
+          .catch(() => {
           // The capture permission has already ended locally.
         });
         teardownOwnedRuntime();
-        set({ error: 'Screen capture ended. Select a sharing source again.', ownedStream: null });
+        set({
+          error: 'Screen capture ended. Select a sharing source again.',
+          ownedStream: null,
+        });
       },
       { once: true },
     );
 
     if (ackData.mediaMode === 'sfu') {
       try {
-        if (!ackData.sfu) throw new Error('SFU stream session is missing setup data.');
+        if (!ackData.sfu)
+          throw new Error('SFU stream session is missing setup data.');
         const sfuSession = new SfuClientSession(
           {
             channelId,
@@ -1927,9 +2225,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           ownedRuntime.sfuSession = sfuSession;
         }
       } catch (err) {
+        await sendCommandAwaitAck('stream.stop', { channelId, streamId }).catch(
+          () => undefined,
+        );
         teardownOwnedRuntime();
         set({
-          error: err instanceof Error ? err.message : 'Failed to start SFU stream.',
+          error:
+            err instanceof Error ? err.message : 'Failed to start SFU stream.',
           ownedStream: null,
         });
         return;
@@ -1950,6 +2252,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         viewers: [],
       },
     });
+    startOwnedDiagnosticsReporter();
   },
 
   async stopSharing(sendCommandAwaitAck) {
@@ -2336,8 +2639,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
     set((state) => {
       const nextWatched: Record<string, WatchedStreamState> = {};
-      for (const [streamId, watched] of Object.entries(state.watchedStreamsById)) {
-        nextWatched[streamId] = watched.status === 'ended'
+      for (const [streamId, watched] of Object.entries(
+        state.watchedStreamsById,
+      )) {
+        nextWatched[streamId] =
+          watched.status === 'ended'
           ? watched
           : {
               ...watched,
@@ -2350,7 +2656,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       }
       return {
         error: null,
-        ownedStream: canReuseOwned && owned
+        ownedStream:
+          canReuseOwned && owned
           ? {
               channelId: owned.channelId,
               codecPreference: owned.codecPreference,
@@ -2372,6 +2679,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       try {
         const raw = await sendCommandAwaitAck('stream.start', {
           channelId: owned.channelId,
+          codec: owned.codecPreference,
           quality: owned.quality,
           sourceType: owned.sourceType,
         });
@@ -2457,6 +2765,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           viewers: [],
         },
       });
+      startOwnedDiagnosticsReporter();
     }
 
     for (const entry of watchedEntries) {

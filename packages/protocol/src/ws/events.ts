@@ -63,6 +63,8 @@ export const GatewayCommandNameSchema = z.enum([
   'music.unlisten',
   'presence.subscribe',
   'stream.start',
+  'stream.diagnostics.get',
+  'stream.diagnostics.report',
   'stream.stop',
   'stream.unwatch',
   'stream.watch',
@@ -140,8 +142,11 @@ export const StreamPublicationSchema = z.object({
 
 // ── Stream command data ───────────────────────────────────────────────────────
 
+export const StreamVideoCodecSchema = z.enum(['h264', 'vp8', 'vp9', 'av1']);
+
 export const StreamStartCommandDataSchema = z.object({
   channelId: z.string().uuid(),
+  codec: StreamVideoCodecSchema.optional(),
   quality: StreamQualitySettingsSchema.optional(),
   sourceType: StreamSourceTypeSchema,
 });
@@ -200,6 +205,64 @@ export const StreamStateUpdatedEventDataSchema = z.object({
   session: StreamSessionSchema.nullable().default(null),
   streams: z.array(StreamPublicationSchema).default([]),
   viewers: z.array(StreamViewerSchema).default([]),
+});
+
+const NullableMetricSchema = z.number().finite().nonnegative().nullable();
+
+export const StreamPublisherDiagnosticsSchema = z.object({
+  actualCodec: StreamVideoCodecSchema.nullable(),
+  bitrateKbps: NullableMetricSchema,
+  captureFrameRate: NullableMetricSchema,
+  encodedFrameRate: NullableMetricSchema,
+  encoderAcceleration: z.enum(['hardware', 'software', 'unknown']),
+  packetsLost: NullableMetricSchema,
+  packetsSent: NullableMetricSchema,
+  qualityLimitationReason: z.enum(['bandwidth', 'cpu', 'none', 'other']),
+  requestedCodec: StreamVideoCodecSchema,
+  roundTripTimeMs: NullableMetricSchema,
+  targetBitrateKbps: z.number().int().positive(),
+  targetFrameRate: z.number().int().positive(),
+});
+
+export const StreamDiagnosticsReportCommandDataSchema = z.object({
+  channelId: z.string().uuid(),
+  sampledAt: z.number().int().nonnegative(),
+  sessionId: z.string().uuid(),
+  streamId: z.string().uuid(),
+  publisher: StreamPublisherDiagnosticsSchema,
+});
+
+export const StreamDiagnosticsGetCommandDataSchema = z.object({
+  channelId: z.string().uuid(),
+  streamId: z.string().uuid(),
+});
+
+export const StreamSfuLegDiagnosticsSchema = z.object({
+  bitrateKbps: NullableMetricSchema,
+  bytes: NullableMetricSchema,
+  jitterMs: NullableMetricSchema,
+  nackCount: NullableMetricSchema,
+  packets: NullableMetricSchema,
+  packetsLost: NullableMetricSchema,
+  paused: z.boolean(),
+  pliCount: NullableMetricSchema,
+  retransmittedPackets: NullableMetricSchema,
+  score: NullableMetricSchema,
+});
+
+export const StreamSfuDiagnosticsSchema = z.object({
+  egress: StreamSfuLegDiagnosticsSchema.nullable(),
+  ingress: StreamSfuLegDiagnosticsSchema.nullable(),
+  queryLatencyMs: z.number().finite().nonnegative(),
+  workerCpuPct: NullableMetricSchema,
+});
+
+export const StreamDiagnosticsGetAckDataSchema = z.object({
+  mediaMode: MediaTransportModeSchema,
+  publisher: StreamPublisherDiagnosticsSchema.nullable(),
+  publisherSampledAt: z.number().int().nonnegative().nullable(),
+  sampledAt: z.number().int().nonnegative(),
+  sfu: StreamSfuDiagnosticsSchema.nullable(),
 });
 
 export const MusicStatusSchema = z.enum(['live', 'starting', 'stopping']);
@@ -454,29 +517,66 @@ export const ChannelUnsubscribeCommandDataSchema = z.object({
 export type ConnectionState = z.infer<typeof ConnectionStateSchema>;
 export type GatewayCommandName = z.infer<typeof GatewayCommandNameSchema>;
 export type GatewayEventName = z.infer<typeof GatewayEventNameSchema>;
-export type MessageCreatedEventData = z.infer<typeof MessageCreatedEventDataSchema>;
-export type MediaSfuCloseCommandData = z.infer<typeof MediaSfuCloseCommandDataSchema>;
-export type MediaSfuConnectTransportCommandData = z.infer<typeof MediaSfuConnectTransportCommandDataSchema>;
-export type MediaSfuConsumeCommandData = z.infer<typeof MediaSfuConsumeCommandDataSchema>;
-export type MediaSfuCreateTransportCommandData = z.infer<typeof MediaSfuCreateTransportCommandDataSchema>;
-export type MediaSfuProduceCommandData = z.infer<typeof MediaSfuProduceCommandDataSchema>;
-export type MediaSfuResumeConsumerCommandData = z.infer<typeof MediaSfuResumeConsumerCommandDataSchema>;
+export type MessageCreatedEventData = z.infer<
+  typeof MessageCreatedEventDataSchema
+>;
+export type MediaSfuCloseCommandData = z.infer<
+  typeof MediaSfuCloseCommandDataSchema
+>;
+export type MediaSfuConnectTransportCommandData = z.infer<
+  typeof MediaSfuConnectTransportCommandDataSchema
+>;
+export type MediaSfuConsumeCommandData = z.infer<
+  typeof MediaSfuConsumeCommandDataSchema
+>;
+export type MediaSfuCreateTransportCommandData = z.infer<
+  typeof MediaSfuCreateTransportCommandDataSchema
+>;
+export type MediaSfuProduceCommandData = z.infer<
+  typeof MediaSfuProduceCommandDataSchema
+>;
+export type MediaSfuResumeConsumerCommandData = z.infer<
+  typeof MediaSfuResumeConsumerCommandDataSchema
+>;
 export type MusicListenAckData = z.infer<typeof MusicListenAckDataSchema>;
-export type MusicListenCommandData = z.infer<typeof MusicListenCommandDataSchema>;
+export type MusicListenCommandData = z.infer<
+  typeof MusicListenCommandDataSchema
+>;
 export type MusicListener = z.infer<typeof MusicListenerSchema>;
 export type MusicPublication = z.infer<typeof MusicPublicationSchema>;
 export type MusicStartAckData = z.infer<typeof MusicStartAckDataSchema>;
 export type MusicStartCommandData = z.infer<typeof MusicStartCommandDataSchema>;
-export type MusicStateUpdatedEventData = z.infer<typeof MusicStateUpdatedEventDataSchema>;
+export type MusicStateUpdatedEventData = z.infer<
+  typeof MusicStateUpdatedEventDataSchema
+>;
 export type MusicStatus = z.infer<typeof MusicStatusSchema>;
 export type MusicStopAckData = z.infer<typeof MusicStopAckDataSchema>;
 export type MusicStopCommandData = z.infer<typeof MusicStopCommandDataSchema>;
 export type MusicUnlistenAckData = z.infer<typeof MusicUnlistenAckDataSchema>;
-export type MusicUnlistenCommandData = z.infer<typeof MusicUnlistenCommandDataSchema>;
-export type PresenceUpdatedEventData = z.infer<typeof PresenceUpdatedEventDataSchema>;
+export type MusicUnlistenCommandData = z.infer<
+  typeof MusicUnlistenCommandDataSchema
+>;
+export type PresenceUpdatedEventData = z.infer<
+  typeof PresenceUpdatedEventDataSchema
+>;
 export type RoomRuntimeState = z.infer<typeof RoomRuntimeStateSchema>;
 export type StreamStartAckData = z.infer<typeof StreamStartAckDataSchema>;
-export type StreamStartCommandData = z.infer<typeof StreamStartCommandDataSchema>;
+export type StreamStartCommandData = z.infer<
+  typeof StreamStartCommandDataSchema
+>;
+export type StreamDiagnosticsGetAckData = z.infer<
+  typeof StreamDiagnosticsGetAckDataSchema
+>;
+export type StreamDiagnosticsGetCommandData = z.infer<
+  typeof StreamDiagnosticsGetCommandDataSchema
+>;
+export type StreamDiagnosticsReportCommandData = z.infer<
+  typeof StreamDiagnosticsReportCommandDataSchema
+>;
+export type StreamPublisherDiagnostics = z.infer<
+  typeof StreamPublisherDiagnosticsSchema
+>;
+export type StreamSfuDiagnostics = z.infer<typeof StreamSfuDiagnosticsSchema>;
 export type StreamPublication = z.infer<typeof StreamPublicationSchema>;
 export type StreamQualitySettings = z.infer<typeof StreamQualitySettingsSchema>;
 export type StreamBitrateKbps = z.infer<typeof StreamBitrateKbpsSchema>;

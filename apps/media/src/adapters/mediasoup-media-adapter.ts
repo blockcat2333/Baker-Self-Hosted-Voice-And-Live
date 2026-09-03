@@ -12,11 +12,19 @@ import type {
   MediaSessionDescriptor,
   SfuProducer,
   SfuSessionInfo,
+  StreamSfuDiagnostics,
 } from '@baker/protocol';
 
-import type { MediaAdapter, MediaSessionRecord, SfuSessionInput } from './media-adapter';
+import type {
+  MediaAdapter,
+  MediaSessionRecord,
+  SfuSessionInput,
+} from './media-adapter';
 
-type RouterMediaCodec = Omit<types.RtpCodecCapability, 'preferredPayloadType'> & {
+type RouterMediaCodec = Omit<
+  types.RtpCodecCapability,
+  'preferredPayloadType'
+> & {
   preferredPayloadType?: number;
 };
 
@@ -120,9 +128,17 @@ export class MediasoupMediaAdapter implements MediaAdapter {
   private readonly sessions = new Map<string, SfuSessionRecord>();
   private readonly producers = new Map<string, SfuProducerRecord>();
   private readonly webRtcServerPorts = new Set<number>();
-  private readonly webRtcServers = new Map<string, Promise<types.WebRtcServer>>();
+  private readonly webRtcServers = new Map<
+    string,
+    Promise<types.WebRtcServer>
+  >();
   private readonly defaultMediaProfile: MediaRegionProfile;
   private readonly mediaRegionProfiles: MediaRegionProfile[];
+  private workerUsageSample: { cpuMs: number; sampledAt: number } | null = null;
+  private readonly diagnosticsCache = new Map<
+    string,
+    { expiresAt: number; value: StreamSfuDiagnostics }
+  >();
 
   constructor(private readonly env: AppEnv) {
     this.defaultMediaProfile = getDefaultMediaRegionProfile(env);
@@ -175,7 +191,78 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     };
   }
 
-  async createSfuTransport(input: SfuSessionInput & { direction: 'recv' | 'send' }) {
+  async getStreamDiagnostics(input: {
+    channelId: string;
+    publisherSessionId: string;
+    streamId: string;
+    viewerSessionId?: string;
+  }): Promise<StreamSfuDiagnostics> {
+    const cacheKey = `${input.publisherSessionId}:${input.viewerSessionId ?? 'host'}`;
+    const cached = this.diagnosticsCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const startedAt = performance.now();
+    const publisherCandidate = this.sessions.get(input.publisherSessionId);
+    const publisher =
+      publisherCandidate?.descriptor.channelId === input.channelId &&
+      publisherCandidate.descriptor.streamId === input.streamId &&
+      publisherCandidate.descriptor.mode === 'stream_publish'
+        ? publisherCandidate
+        : null;
+    const viewerCandidate = input.viewerSessionId
+      ? this.sessions.get(input.viewerSessionId)
+      : null;
+    const viewer =
+      viewerCandidate?.descriptor.channelId === input.channelId &&
+      viewerCandidate.descriptor.streamId === input.streamId &&
+      viewerCandidate.descriptor.mode === 'stream_watch'
+        ? viewerCandidate
+        : null;
+    const producer = publisher
+      ? ([...publisher.producers.values()].find(
+          (entry) => entry.kind === 'video',
+        ) ?? null)
+      : null;
+    const consumer = viewer
+      ? ([...viewer.consumers.values()].find(
+          (entry) =>
+            entry.kind === 'video' && entry.producerId === producer?.id,
+        ) ?? null)
+      : null;
+    const [producerStats, consumerStats, workerCpuPct] = await Promise.all([
+      producer?.getStats().catch(() => []) ?? [],
+      consumer?.getStats().catch(() => []) ?? [],
+      this.sampleWorkerCpuPct(),
+    ]);
+
+    const value: StreamSfuDiagnostics = {
+      egress: consumer
+        ? this.toSfuLegDiagnostics(consumerStats, consumer.paused, [
+            consumer.score.score,
+          ])
+        : null,
+      ingress: producer
+        ? this.toSfuLegDiagnostics(
+            producerStats,
+            producer.paused,
+            producer.score.map((entry) => entry.score),
+          )
+        : null,
+      queryLatencyMs: Math.max(
+        0,
+        Math.round((performance.now() - startedAt) * 10) / 10,
+      ),
+      workerCpuPct,
+    };
+    this.diagnosticsCache.set(cacheKey, {
+      expiresAt: Date.now() + 1_000,
+      value,
+    });
+    return value;
+  }
+
+  async createSfuTransport(
+    input: SfuSessionInput & { direction: 'recv' | 'send' },
+  ) {
     const session = this.requireSession(input.sessionId);
     const profile = this.resolveSessionProfile(session);
     this.assertSfuConfigured(profile);
@@ -205,26 +292,37 @@ export class MediasoupMediaAdapter implements MediaAdapter {
         iceCandidates: toRecordArray(transport.iceCandidates),
         iceParameters: toRecord(transport.iceParameters),
         id: transport.id,
-        sctpParameters: transport.sctpParameters ? toRecord(transport.sctpParameters) : undefined,
+        sctpParameters: transport.sctpParameters
+          ? toRecord(transport.sctpParameters)
+          : undefined,
       },
     };
   }
 
-  async connectSfuTransport(input: SfuSessionInput & {
+  async connectSfuTransport(
+    input: SfuSessionInput & {
     dtlsParameters: Record<string, unknown>;
     transportId: string;
-  }): Promise<void> {
-    const transport = this.requireTransport(input.sessionId, input.transportId).transport;
-    await transport.connect({ dtlsParameters: input.dtlsParameters as types.DtlsParameters });
+    },
+  ): Promise<void> {
+    const transport = this.requireTransport(
+      input.sessionId,
+      input.transportId,
+    ).transport;
+    await transport.connect({
+      dtlsParameters: input.dtlsParameters as types.DtlsParameters,
+    });
   }
 
-  async produceSfu(input: SfuSessionInput & {
+  async produceSfu(
+    input: SfuSessionInput & {
     appData?: Record<string, unknown>;
     kind: 'audio' | 'video';
     rtpParameters: Record<string, unknown>;
     transportId: string;
     userId: string;
-  }) {
+    },
+  ) {
     const session = this.requireSession(input.sessionId);
     const transport = this.requireTransport(input.sessionId, input.transportId);
     if (transport.direction !== 'send') {
@@ -236,13 +334,35 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       kind: input.kind,
       rtpParameters: input.rtpParameters as types.RtpParameters,
     });
-    const source = input.mode === 'voice'
+    const source =
+      input.mode === 'voice'
       ? 'voice'
       : input.mode === 'music_publish' || input.mode === 'music_listen'
         ? 'music'
         : 'stream';
+    const primaryCodec =
+      input.kind === 'video'
+        ? (
+            input.rtpParameters as { codecs?: Array<{ mimeType?: string }> }
+          ).codecs
+            ?.find(
+              (entry) =>
+                entry.mimeType?.toLowerCase().startsWith('video/') &&
+                ![
+                  'video/rtx',
+                  'video/red',
+                  'video/ulpfec',
+                  'video/flexfec-03',
+                ].includes(entry.mimeType.toLowerCase()),
+            )
+            ?.mimeType?.split('/')[1]
+            ?.toLowerCase()
+        : undefined;
     const summary: SfuProducer = {
       channelId: input.channelId,
+      ...(primaryCodec && ['h264', 'vp8', 'vp9', 'av1'].includes(primaryCodec)
+        ? { codec: primaryCodec as NonNullable<SfuProducer['codec']> }
+        : {}),
       id: producer.id,
       kind: input.kind,
       sessionId: input.sessionId,
@@ -268,21 +388,27 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     };
   }
 
-  async consumeSfu(input: SfuSessionInput & {
+  async consumeSfu(
+    input: SfuSessionInput & {
     producerId: string;
     rtpCapabilities: Record<string, unknown>;
     transportId: string;
-  }) {
+    },
+  ) {
     const router = await this.getRouter(input.channelId);
     const producer = this.producers.get(input.producerId)?.producer;
     if (!producer) {
       throw new Error('Producer not found.');
     }
-    if (!router.canConsume({
+    if (
+      !router.canConsume({
       producerId: input.producerId,
       rtpCapabilities: input.rtpCapabilities as types.RtpCapabilities,
-    })) {
-      throw new Error('Consumer RTP capabilities cannot consume this producer.');
+      })
+    ) {
+      throw new Error(
+        'Consumer RTP capabilities cannot consume this producer.',
+      );
     }
 
     const session = this.requireSession(input.sessionId);
@@ -315,19 +441,25 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     };
   }
 
-  async resumeSfuConsumer(input: SfuSessionInput & { consumerId: string }): Promise<void> {
-    const consumer = this.requireSession(input.sessionId).consumers.get(input.consumerId);
+  async resumeSfuConsumer(
+    input: SfuSessionInput & { consumerId: string },
+  ): Promise<void> {
+    const consumer = this.requireSession(input.sessionId).consumers.get(
+      input.consumerId,
+    );
     if (!consumer) {
       throw new Error('Consumer not found.');
     }
     await consumer.resume();
   }
 
-  async closeSfu(input: SfuSessionInput & {
+  async closeSfu(
+    input: SfuSessionInput & {
     consumerId?: string;
     producerId?: string;
     transportId?: string;
-  }): Promise<{ closedProducer?: SfuProducer }> {
+    },
+  ): Promise<{ closedProducer?: SfuProducer }> {
     const session = this.sessions.get(input.sessionId);
     if (!session) {
       return {};
@@ -366,7 +498,75 @@ export class MediasoupMediaAdapter implements MediaAdapter {
       transport.transport.close();
     }
     this.sessions.delete(input.sessionId);
+    for (const key of this.diagnosticsCache.keys()) {
+      if (key.includes(input.sessionId)) this.diagnosticsCache.delete(key);
+    }
     return {};
+  }
+
+  private toSfuLegDiagnostics(
+    stats: readonly unknown[],
+    paused: boolean,
+    scores: number[],
+  ): NonNullable<StreamSfuDiagnostics['ingress']> {
+    const record =
+      (stats as Record<string, unknown>[]).find((entry) => {
+        const type = String(entry.type ?? '');
+        return type === 'inbound-rtp' || type === 'outbound-rtp';
+      }) ??
+      (stats as Record<string, unknown>[])[0] ??
+      {};
+    const number = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = record[key];
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+          return value;
+      }
+      return null;
+    };
+    const bitrate = number('bitrate');
+    const jitter = number('jitter');
+    return {
+      bitrateKbps: bitrate === null ? null : Math.round(bitrate / 1000),
+      bytes: number('byteCount', 'bytesReceived', 'bytesSent'),
+      jitterMs: jitter === null ? null : Math.round(jitter * 1000),
+      nackCount: number('nackCount'),
+      packets: number('packetCount', 'packetsReceived', 'packetsSent'),
+      packetsLost: number('packetsLost'),
+      paused,
+      pliCount: number('pliCount'),
+      retransmittedPackets: number(
+        'retransmittedPacketCount',
+        'retransmittedPacketsSent',
+        'retransmittedPacketsReceived',
+      ),
+      score: scores.length > 0 ? Math.min(...scores) : null,
+    };
+  }
+
+  private async sampleWorkerCpuPct(): Promise<number | null> {
+    if (!this.worker) return null;
+    try {
+      const usage = await this.worker.getResourceUsage();
+      const sampledAt = Date.now();
+      const cpuMs = usage.ru_utime + usage.ru_stime;
+      const previous = this.workerUsageSample;
+      this.workerUsageSample = { cpuMs, sampledAt };
+      if (
+        !previous ||
+        sampledAt <= previous.sampledAt ||
+        cpuMs < previous.cpuMs
+      )
+        return null;
+      return Math.max(
+        0,
+        Math.round(
+          ((cpuMs - previous.cpuMs) / (sampledAt - previous.sampledAt)) * 1000,
+        ) / 10,
+      );
+    } catch {
+      return null;
+    }
   }
 
   private assertSfuConfigured(profile: MediaRegionProfile) {

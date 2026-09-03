@@ -33,12 +33,14 @@ import {
 } from './stream-media';
 import {
   getOwnedStreamVideoStats,
+  getStreamDiagnostics,
   getWatchedStreamVideoStats,
   type OwnedStreamVideoStats,
   type WatchedStreamState,
   type WatchedStreamVideoStats,
   useStreamStore,
 } from './stream-store';
+import { diagnoseStream, type StreamDiagnosis } from './stream-diagnostics';
 
 const STREAM_DASHBOARD_REFRESH_INTERVAL_MS = 1000;
 
@@ -102,6 +104,13 @@ function formatLatency(value: number | null | undefined) {
 
 function formatVolumeLabel(volume: number) {
   return `${Math.round(volume * 100)}%`;
+}
+
+function accelerationLabel(
+  t: TFunction,
+  value: 'hardware' | 'software' | 'unknown' | null | undefined,
+) {
+  return t(`stream.acceleration_${value ?? 'unknown'}` as const);
 }
 
 function formatPacketLoss(stats: WatchedStreamVideoStats | null) {
@@ -260,10 +269,27 @@ function LiveDetailPanel() {
   const ownedStream = useStreamStore((s) => s.ownedStream);
   const watchedStreamsById = useStreamStore((s) => s.watchedStreamsById);
   const watchedStream = useMemo<WatchedStreamState | null>(
-    () => Object.values(watchedStreamsById).find((entry) => entry.status !== 'ended') ?? null,
+    () =>
+      Object.values(watchedStreamsById).find(
+        (entry) => entry.status !== 'ended',
+      ) ?? null,
     [watchedStreamsById],
   );
-  const [statsState, setStatsState] = useState<LiveStatsState>({ kind: 'none', stats: null });
+  const [statsState, setStatsState] = useState<LiveStatsState>({
+    kind: 'none',
+    stats: null,
+  });
+  const [diagnostics, setDiagnostics] =
+    useState<Awaited<ReturnType<typeof getStreamDiagnostics>>>(null);
+  const [diagnosisState, setDiagnosisState] = useState<{
+    candidate: StreamDiagnosis;
+    count: number;
+    stable: StreamDiagnosis;
+  }>({
+    candidate: 'insufficient',
+    count: 0,
+    stable: 'insufficient',
+  });
   const hasLiveData = !!ownedStream || !!watchedStream;
 
   useEffect(() => {
@@ -271,23 +297,50 @@ function LiveDetailPanel() {
     let interval: ReturnType<typeof setInterval> | null = null;
 
     async function refreshStats() {
-      if (ownedStream) {
-        const stats = await getOwnedStreamVideoStats();
+      if (!ownedStream && watchedStream) {
+        const [stats, details] = await Promise.all([
+          getWatchedStreamVideoStats(watchedStream.streamId),
+          getStreamDiagnostics(watchedStream.streamId),
+        ]);
         if (!cancelled) {
-          setStatsState({ kind: 'owned', stats });
+          setStatsState({ kind: 'watched', stats });
+          setDiagnostics(details);
+          const next = diagnoseStream(details, stats);
+          setDiagnosisState((current) => {
+            const count = current.candidate === next ? current.count + 1 : 1;
+            return {
+              candidate: next,
+              count,
+              stable: count >= 2 ? next : current.stable,
+            };
+          });
         }
         return;
       }
 
-      if (watchedStream) {
-        const stats = await getWatchedStreamVideoStats(watchedStream.streamId);
+      if (ownedStream?.streamId) {
+        const [stats, details] = await Promise.all([
+          getOwnedStreamVideoStats(),
+          getStreamDiagnostics(ownedStream.streamId),
+        ]);
         if (!cancelled) {
-          setStatsState({ kind: 'watched', stats });
+          setStatsState({ kind: 'owned', stats });
+          setDiagnostics(details);
+          const next = diagnoseStream(details, null);
+          setDiagnosisState((current) => {
+            const count = current.candidate === next ? current.count + 1 : 1;
+            return {
+              candidate: next,
+              count,
+              stable: count >= 2 ? next : current.stable,
+            };
+          });
         }
         return;
       }
 
       setStatsState({ kind: 'none', stats: null });
+      setDiagnostics(null);
     }
 
     void refreshStats();
@@ -351,31 +404,143 @@ function LiveDetailPanel() {
             : 'good';
     }
   }
-  const streamNetworkSummary =
-    streamNetworkLevel === 'danger'
-      ? t('stream.network_danger')
-      : streamNetworkLevel === 'warn'
-        ? t('stream.network_warn')
-        : t('stream.network_good');
+  const diagnosis = diagnosisState.stable;
+  const diagnosisKey = `stream.diagnosis_${diagnosis}` as const;
+  const streamNetworkSummary = t(diagnosisKey);
+  streamNetworkLevel =
+    diagnosis === 'healthy'
+      ? 'good'
+      : diagnosis === 'insufficient'
+        ? 'warn'
+        : 'danger';
+  const publisher = diagnostics?.publisher;
+  const ingress = diagnostics?.sfu?.ingress;
+  const egress = diagnostics?.sfu?.egress;
   const streamNetworkMetrics: NetworkStatusMetric[] = [
-    { label: t('stream.popup_stats_codec'), value: formatNullableValue(activeStats?.codec) },
-    { label: t('stream.popup_stats_resolution'), value: formatNullableValue(activeStats?.resolution) },
-    { label: t('stream.popup_stats_frame_rate'), value: formatNullableValue(activeStats?.frameRate, 'fps') },
-    { label: t('stream.popup_stats_bitrate'), value: formatNullableValue(activeStats?.bitrateKbps, 'kbps') },
     {
+      group: t('stream.diagnostics_sender'),
+      label: t('stream.health_preferred_codec'),
+      value: formatNullableValue(publisher?.requestedCodec?.toUpperCase()),
+    },
+    {
+      group: t('stream.diagnostics_sender'),
+      label: t('stream.health_actual_codec'),
+      value: formatNullableValue(publisher?.actualCodec?.toUpperCase()),
+    },
+    {
+      group: t('stream.diagnostics_sender'),
+      label: t('stream.diagnostics_acceleration'),
+      value: accelerationLabel(t, publisher?.encoderAcceleration),
+    },
+    {
+      group: t('stream.diagnostics_sender'),
+      label: t('stream.live_detail_capture_frame_rate'),
+      value: formatNullableValue(publisher?.captureFrameRate, 'fps'),
+    },
+    {
+      group: t('stream.diagnostics_sender'),
+      label: t('stream.health_actual_frame_rate'),
+      value: formatNullableValue(publisher?.encodedFrameRate, 'fps'),
+    },
+    {
+      group: t('stream.diagnostics_sender'),
+      label: t('stream.health_send_bitrate'),
+      value: formatNullableValue(publisher?.bitrateKbps, 'kbps'),
+    },
+    {
+      group: t('stream.diagnostics_sfu_ingress'),
+      label: t('stream.diagnostics_mode'),
+      value:
+        diagnostics?.mediaMode === 'p2p'
+          ? t('stream.diagnostics_not_applicable')
+          : formatNullableValue(diagnostics?.mediaMode?.toUpperCase()),
+    },
+    {
+      group: t('stream.diagnostics_sfu_ingress'),
+      label: t('stream.popup_stats_bitrate'),
+      value: formatNullableValue(ingress?.bitrateKbps, 'kbps'),
+    },
+    {
+      group: t('stream.diagnostics_sfu_ingress'),
+      label: t('stream.diagnostics_score'),
+      value: formatNullableValue(ingress?.score),
+    },
+    {
+      group: t('stream.diagnostics_sfu_ingress'),
       label: t('stream.popup_stats_packet_loss'),
+      value: formatNullableValue(ingress?.packetsLost),
+    },
+    {
+      group: t('stream.diagnostics_server'),
+      label: t('stream.diagnostics_worker_cpu'),
+      value: formatNullableValue(diagnostics?.sfu?.workerCpuPct, '%'),
+    },
+    {
+      group: t('stream.diagnostics_server'),
+      label: t('stream.diagnostics_query_latency'),
+      value: formatNullableValue(diagnostics?.sfu?.queryLatencyMs, 'ms'),
+    },
+    {
+      group: t('stream.diagnostics_server'),
+      label: t('stream.diagnostics_egress_bitrate'),
+      value: formatNullableValue(egress?.bitrateKbps, 'kbps'),
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.popup_stats_bitrate'),
+      value: formatNullableValue(activeStats?.bitrateKbps, 'kbps'),
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.popup_stats_frame_rate'),
+      value: formatNullableValue(activeStats?.frameRate, 'fps'),
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.diagnostics_acceleration'),
       value:
         statsState.kind === 'watched'
-          ? watchedPacketLossPct === null
-            ? '--'
-            : `${watchedPacketLossPct.toFixed(1)}%`
+          ? accelerationLabel(t, statsState.stats?.decoderAcceleration)
           : '--',
     },
     {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.popup_stats_packet_loss'),
+      value:
+        watchedPacketLossPct === null
+          ? '--'
+          : `${watchedPacketLossPct.toFixed(1)}%`,
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
       label: t('stream.popup_stats_jitter'),
       value:
         statsState.kind === 'watched'
           ? formatNullableValue(statsState.stats?.jitterMs, 'ms')
+          : '--',
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.diagnostics_jitter_buffer'),
+      value:
+        statsState.kind === 'watched'
+          ? formatNullableValue(statsState.stats?.jitterBufferDelayMs, 'ms')
+          : '--',
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.diagnostics_freezes'),
+      value:
+        statsState.kind === 'watched'
+          ? `${formatNullableValue(statsState.stats?.freezeCount)} / ${formatNullableValue(statsState.stats?.freezeDurationMs, 'ms')}`
+          : '--',
+    },
+    {
+      group: t('stream.diagnostics_receiver'),
+      label: t('stream.diagnostics_decode_time'),
+      value:
+        statsState.kind === 'watched'
+          ? formatNullableValue(statsState.stats?.averageDecodeTimeMs, 'ms')
           : '--',
     },
   ];
@@ -404,11 +569,20 @@ function LiveDetailPanel() {
         <dl className={'stream-live-detail-list'}>
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.live_detail_source')}</dt>
-            <dd>{sourceLabel(t, ownedStream?.sourceType ?? watchedStream?.sourceType ?? null)}</dd>
+            <dd>
+              {sourceLabel(
+                t,
+                ownedStream?.sourceType ?? watchedStream?.sourceType ?? null,
+              )}
+            </dd>
           </div>
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.live_detail_viewers')}</dt>
-            <dd>{ownedStream?.viewers.length ?? watchedStream?.viewers.length ?? 0}</dd>
+            <dd>
+              {ownedStream?.viewers.length ??
+                watchedStream?.viewers.length ??
+                0}
+            </dd>
           </div>
         {ownedStream ? (
           <>
@@ -418,7 +592,13 @@ function LiveDetailPanel() {
             </div>
             <div className={'stream-live-detail-row'}>
               <dt>{t('stream.live_detail_capture_frame_rate')}</dt>
-              <dd className={captureBelowTarget ? 'stream-live-detail-warning' : undefined}>
+                <dd
+                  className={
+                    captureBelowTarget
+                      ? 'stream-live-detail-warning'
+                      : undefined
+                  }
+                >
                 {formatNullableValue(captureFrameRate, 'fps')}
               </dd>
             </div>
@@ -430,8 +610,27 @@ function LiveDetailPanel() {
           </div>
         ) : null}
           <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.health_preferred_codec')}</dt>
+            <dd>
+              {formatNullableValue(
+                publisher?.requestedCodec?.toUpperCase() ??
+                  ownedStream?.codecPreference.toUpperCase(),
+              )}
+            </dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
             <dt>{t('stream.popup_stats_codec')}</dt>
             <dd>{formatNullableValue(activeStats?.codec)}</dd>
+          </div>
+          <div className={'stream-live-detail-row'}>
+            <dt>{t('stream.diagnostics_acceleration')}</dt>
+            <dd>
+              {statsState.kind === 'owned'
+                ? accelerationLabel(t, statsState.stats?.encoderAcceleration)
+                : statsState.kind === 'watched'
+                  ? accelerationLabel(t, statsState.stats?.decoderAcceleration)
+                  : '--'}
+            </dd>
           </div>
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.popup_stats_resolution')}</dt>
@@ -447,15 +646,27 @@ function LiveDetailPanel() {
           </div>
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.popup_stats_packet_loss')}</dt>
-            <dd>{statsState.kind === 'watched' ? formatPacketLoss(statsState.stats) : '--'}</dd>
+            <dd>
+              {statsState.kind === 'watched'
+                ? formatPacketLoss(statsState.stats)
+                : '--'}
+            </dd>
           </div>
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.popup_stats_jitter')}</dt>
-            <dd>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.jitterMs, 'ms') : '--'}</dd>
+            <dd>
+              {statsState.kind === 'watched'
+                ? formatNullableValue(statsState.stats?.jitterMs, 'ms')
+                : '--'}
+            </dd>
           </div>
           <div className={'stream-live-detail-row'}>
             <dt>{t('stream.popup_stats_frames_dropped')}</dt>
-            <dd>{statsState.kind === 'watched' ? formatNullableValue(statsState.stats?.framesDropped) : '--'}</dd>
+            <dd>
+              {statsState.kind === 'watched'
+                ? formatNullableValue(statsState.stats?.framesDropped)
+                : '--'}
+            </dd>
           </div>
         {statsState.kind === 'owned' ? (
           <>
@@ -465,7 +676,12 @@ function LiveDetailPanel() {
             </div>
             <div className={'stream-live-detail-row'}>
               <dt>{t('stream.health_limitation_reason')}</dt>
-              <dd>{limitationReasonLabel(t, statsState.stats?.qualityLimitationReason)}</dd>
+                <dd>
+                  {limitationReasonLabel(
+                    t,
+                    statsState.stats?.qualityLimitationReason,
+                  )}
+                </dd>
             </div>
           </>
         ) : null}
@@ -673,13 +889,16 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                 </header>
                 <div className={'stream-quality-controls'}>
                 <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_resolution')}</span>
+                    <span className={'stream-quality-label'}>
+                      {t('stream.quality_resolution')}
+                    </span>
                   <select
                     className={'stream-quality-select'}
                     value={streamQuality.resolution}
                     onChange={(event) =>
                       handleStreamQualityChange({
-                        resolution: event.target.value as StreamQualitySettings['resolution'],
+                          resolution: event.target
+                            .value as StreamQualitySettings['resolution'],
                       })
                     }
                   >
@@ -691,13 +910,17 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                   </select>
                 </label>
                 <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_frame_rate')}</span>
+                    <span className={'stream-quality-label'}>
+                      {t('stream.quality_frame_rate')}
+                    </span>
                   <select
                     className={'stream-quality-select'}
                     value={String(streamQuality.frameRate)}
                     onChange={(event) =>
                       handleStreamQualityChange({
-                        frameRate: Number(event.target.value) as StreamQualitySettings['frameRate'],
+                          frameRate: Number(
+                            event.target.value,
+                          ) as StreamQualitySettings['frameRate'],
                       })
                     }
                   >
@@ -709,13 +932,17 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                   </select>
                 </label>
                 <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_bitrate')}</span>
+                    <span className={'stream-quality-label'}>
+                      {t('stream.quality_bitrate')}
+                    </span>
                   <select
                     className={'stream-quality-select'}
                     value={String(streamQuality.bitrateKbps)}
                     onChange={(event) =>
                       handleStreamQualityChange({
-                        bitrateKbps: Number(event.target.value) as StreamQualitySettings['bitrateKbps'],
+                          bitrateKbps: Number(
+                            event.target.value,
+                          ) as StreamQualitySettings['bitrateKbps'],
                       })
                     }
                   >
@@ -727,19 +954,25 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                   </select>
                 </label>
                 <label className={'stream-quality-field'}>
-                  <span className={'stream-quality-label'}>{t('stream.quality_codec')}</span>
+                    <span className={'stream-quality-label'}>
+                      {t('stream.quality_codec')}
+                    </span>
                   <select
                     className={'stream-quality-select'}
                     value={streamCodecPreference}
                     onChange={(event) =>
-                      handleStreamCodecPreferenceChange(event.target.value as StreamCodecPreference)
+                        handleStreamCodecPreferenceChange(
+                          event.target.value as StreamCodecPreference,
+                        )
                     }
                   >
                     {STREAM_CODEC_OPTIONS.map((codecPreference) => (
                       <option
                         key={codecPreference}
                         value={codecPreference}
-                        disabled={!supportedCodecPreferences.includes(codecPreference)}
+                          disabled={
+                            !supportedCodecPreferences.includes(codecPreference)
+                          }
                       >
                         {codecPreferenceLabel(t, codecPreference)}
                         {!supportedCodecPreferences.includes(codecPreference)
@@ -750,7 +983,9 @@ export function StreamPanel({ isShareDialogOpen, onCloseShareDialog, showDashboa
                   </select>
                 </label>
               </div>
-                {selectedShareSource === 'camera' ? renderCameraSourceControl(isSwitchingCamera) : null}
+                {selectedShareSource === 'camera'
+                  ? renderCameraSourceControl(isSwitchingCamera)
+                  : null}
               </section>
             </div>
 

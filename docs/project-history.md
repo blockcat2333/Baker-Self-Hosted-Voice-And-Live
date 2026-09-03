@@ -1546,3 +1546,15 @@ Why:
 
 - startup frequently failed with `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine` when Docker Desktop was not yet running.
 - users interpreted stale-PID warnings as fatal errors even though they are harmless in normal restarts.
+
+# 2026-09-03
+
+### Baker 1.1.6 livestream concurrency, strict codecs, and SFU diagnostics
+
+- decoupled the share dialog from conditional dashboard placement
+- enforced the selected primary codec in P2P offers and SFU Producers
+- rolled back partially started SFU broadcasts on setup failure
+- introduced stream-scoped sender, SFU ingress/egress/worker, and receiver
+  diagnostics without persistent storage
+- added sender/uplink/server/downlink/decode classification and codec
+  acceleration visibility

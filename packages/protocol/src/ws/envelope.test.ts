@@ -92,6 +92,12 @@ describe('GatewayEnvelopeSchema', () => {
   it('parses music protocol commands, session modes, and SFU producer source', () => {
     expect(GatewayCommandNameSchema.parse('music.start')).toBe('music.start');
     expect(GatewayCommandNameSchema.parse('music.listen')).toBe('music.listen');
+    expect(GatewayCommandNameSchema.parse('stream.diagnostics.report')).toBe(
+      'stream.diagnostics.report',
+    );
+    expect(GatewayCommandNameSchema.parse('stream.diagnostics.get')).toBe(
+      'stream.diagnostics.get',
+    );
     expect(SessionModeSchema.parse('music_publish')).toBe('music_publish');
     expect(SessionModeSchema.parse('music_listen')).toBe('music_listen');
     expect(SfuProducerSourceSchema.parse('music')).toBe('music');

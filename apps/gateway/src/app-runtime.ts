@@ -22,6 +22,7 @@ import {
   MediaSfuConsumeAckDataSchema,
   MediaSfuCreateTransportAckDataSchema,
   MediaSfuProduceAckDataSchema,
+  StreamSfuDiagnosticsSchema,
 } from '@baker/protocol';
 import type {
   MediaSfuCloseCommandData,
@@ -37,6 +38,7 @@ import type {
   MediaTransportMode,
   SessionMode,
   SfuProducer,
+  StreamSfuDiagnostics,
 } from '@baker/protocol';
 
 import {
@@ -168,34 +170,48 @@ export class GatewayRuntime {
     return profile?.id ?? null;
   }
 
-  async createSfuTransport(data: MediaSfuCreateTransportCommandData): Promise<MediaSfuCreateTransportAckData> {
-    const json = await this.callMedia('/v1/internal/media/sfu/transports', data);
+  async createSfuTransport(
+    data: MediaSfuCreateTransportCommandData,
+  ): Promise<MediaSfuCreateTransportAckData> {
+    const json = await this.callMedia(
+      '/v1/internal/media/sfu/transports',
+      data,
+    );
     return MediaSfuCreateTransportAckDataSchema.parse(json);
   }
 
-  async connectSfuTransport(data: MediaSfuConnectTransportCommandData): Promise<void> {
+  async connectSfuTransport(
+    data: MediaSfuConnectTransportCommandData,
+  ): Promise<void> {
     await this.callMedia('/v1/internal/media/sfu/transports/connect', data);
   }
 
-  async produceSfu(data: MediaSfuProduceCommandData & { userId: string }): Promise<MediaSfuProduceAckData> {
+  async produceSfu(
+    data: MediaSfuProduceCommandData & { userId: string },
+  ): Promise<MediaSfuProduceAckData> {
     const json = await this.callMedia('/v1/internal/media/sfu/producers', data);
     const parsed = MediaSfuProduceAckDataSchema.parse(json);
     this.broadcastSfuProducerAdded(parsed.producer);
     return parsed;
   }
 
-  async consumeSfu(data: MediaSfuConsumeCommandData): Promise<MediaSfuConsumeAckData> {
+  async consumeSfu(
+    data: MediaSfuConsumeCommandData,
+  ): Promise<MediaSfuConsumeAckData> {
     const json = await this.callMedia('/v1/internal/media/sfu/consumers', data);
     return MediaSfuConsumeAckDataSchema.parse(json);
   }
 
-  async resumeSfuConsumer(data: MediaSfuResumeConsumerCommandData): Promise<void> {
+  async resumeSfuConsumer(
+    data: MediaSfuResumeConsumerCommandData,
+  ): Promise<void> {
     await this.callMedia('/v1/internal/media/sfu/consumers/resume', data);
   }
 
   async closeSfu(data: MediaSfuCloseCommandData): Promise<void> {
     const json = await this.callMedia('/v1/internal/media/sfu/close', data);
-    const closedProducer = typeof json === 'object' && json !== null && 'closedProducer' in json
+    const closedProducer =
+      typeof json === 'object' && json !== null && 'closedProducer' in json
       ? (json as { closedProducer?: unknown }).closedProducer
       : undefined;
     if (closedProducer) {
@@ -203,15 +219,39 @@ export class GatewayRuntime {
     }
   }
 
-  async closeSfuSession(input: { channelId: string; mode: SessionMode; sessionId: string; streamId?: string }): Promise<void> {
+  async closeSfuSession(input: {
+    channelId: string;
+    mode: SessionMode;
+    sessionId: string;
+    streamId?: string;
+  }): Promise<void> {
     await this.closeSfu(input).catch((err) => {
-      log.warn({ err, sessionId: input.sessionId }, 'Failed to close SFU session');
+      log.warn(
+        { err, sessionId: input.sessionId },
+        'Failed to close SFU session',
+      );
     });
+  }
+
+  async getStreamSfuDiagnostics(input: {
+    channelId: string;
+    publisherSessionId: string;
+    streamId: string;
+    viewerSessionId?: string;
+  }): Promise<StreamSfuDiagnostics> {
+    const json = await this.callMedia(
+      '/v1/internal/media/sfu/diagnostics',
+      input,
+    );
+    return StreamSfuDiagnosticsSchema.parse(json);
   }
 
   private async callMedia(path: string, body: unknown): Promise<unknown> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MEDIA_SESSION_TIMEOUT_MS);
+    const timer = setTimeout(
+      () => controller.abort(),
+      MEDIA_SESSION_TIMEOUT_MS,
+    );
 
     try {
       const response = await fetch(`${this.mediaBaseUrl}${path}`, {
@@ -260,7 +300,9 @@ export class GatewayRuntime {
       }
     });
 
-    this.subClient.on('pmessage', (_pattern: string, channel: string, message: string) => {
+    this.subClient.on(
+      'pmessage',
+      (_pattern: string, channel: string, message: string) => {
       const match = MESSAGE_CHANNEL_REGEX.exec(channel);
       if (!match) return;
 
@@ -271,7 +313,10 @@ export class GatewayRuntime {
       try {
         payload = JSON.parse(message);
       } catch {
-        log.warn({ channel }, 'Received non-JSON message from Redis — skipping');
+          log.warn(
+            { channel },
+            'Received non-JSON message from Redis — skipping',
+          );
         return;
       }
 
@@ -280,13 +325,21 @@ export class GatewayRuntime {
 
       for (const conn of subscribers) {
         try {
-          const envelope = createEventEnvelope(conn.nextSequence(), 'chat.message.created', payload);
+            const envelope = createEventEnvelope(
+              conn.nextSequence(),
+              'chat.message.created',
+              payload,
+            );
           conn.socket.send(JSON.stringify(envelope));
         } catch (err) {
-          log.warn({ err, connectionId: conn.id, channelId }, 'Failed to push message.created to connection');
+            log.warn(
+              { err, connectionId: conn.id, channelId },
+              'Failed to push message.created to connection',
+            );
         }
       }
-    });
+      },
+    );
 
     this.subClient.on('message', (channel: string, message: string) => {
       if (channel !== MEDIA_MODE_CHANNEL) {
@@ -300,7 +353,10 @@ export class GatewayRuntime {
         return;
       }
 
-      const mediaMode = typeof payload === 'object' && payload !== null && 'mediaMode' in payload
+      const mediaMode =
+        typeof payload === 'object' &&
+        payload !== null &&
+        'mediaMode' in payload
         ? (payload as { mediaMode?: unknown }).mediaMode
         : null;
       if (mediaMode !== 'p2p' && mediaMode !== 'sfu') {
@@ -320,11 +376,13 @@ export class GatewayRuntime {
     const voiceChannelIds = this.voiceRoom.getActiveChannelIds();
     const streamChanges = this.streamRoom.clearAll();
     const musicChanges = this.musicRoom.clearAll();
-    const affectedChannelIds = [...new Set([
+    const affectedChannelIds = [
+      ...new Set([
       ...voiceChannelIds,
       ...streamChanges.map((change) => change.channelId),
       ...musicChanges.map((change) => change.channelId),
-    ])];
+      ]),
+    ];
     const targetConnectionIds = new Set<string>();
 
     for (const channelId of voiceChannelIds) {

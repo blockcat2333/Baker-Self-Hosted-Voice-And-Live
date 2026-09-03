@@ -7,9 +7,11 @@ import {
   MediaSfuConsumeCommandDataSchema,
   MediaSfuCreateTransportAckDataSchema,
   MediaSfuCreateTransportCommandDataSchema,
+  MediaSfuDiagnosticsCommandDataSchema,
   MediaSfuProduceAckDataSchema,
   MediaSfuProduceCommandDataSchema,
   MediaSfuResumeConsumerCommandDataSchema,
+  StreamSfuDiagnosticsSchema,
 } from '@baker/protocol';
 
 import type { MediaAdapter } from '../adapters/media-adapter';
@@ -33,30 +35,60 @@ function sfuError(reply: FastifyReply, err: unknown) {
   });
 }
 
-export function registerSfuRoutes(app: SfuRouteRegistrar, adapter: MediaAdapter) {
-  app.post('/v1/internal/media/sfu/transports', async (request, reply) => {
+export function registerSfuRoutes(
+  app: SfuRouteRegistrar,
+  adapter: MediaAdapter,
+) {
+  app.post('/v1/internal/media/sfu/diagnostics', async (request, reply) => {
     if (!isInternalMediaRequestAuthorized(request)) {
       return rejectUnauthorizedInternalMediaRequest(reply);
     }
-
-    const parsed = MediaSfuCreateTransportCommandDataSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return validationError(reply);
-    }
-
+    const parsed = MediaSfuDiagnosticsCommandDataSchema.safeParse(request.body);
+    if (!parsed.success) return validationError(reply);
     try {
-      return reply.send(MediaSfuCreateTransportAckDataSchema.parse(await adapter.createSfuTransport(parsed.data)));
+      return reply.send(
+        StreamSfuDiagnosticsSchema.parse(
+          await adapter.getStreamDiagnostics(parsed.data),
+        ),
+      );
     } catch (err) {
       return sfuError(reply, err);
     }
   });
 
-  app.post('/v1/internal/media/sfu/transports/connect', async (request, reply) => {
+  app.post('/v1/internal/media/sfu/transports', async (request, reply) => {
     if (!isInternalMediaRequestAuthorized(request)) {
       return rejectUnauthorizedInternalMediaRequest(reply);
     }
 
-    const parsed = MediaSfuConnectTransportCommandDataSchema.safeParse(request.body);
+    const parsed = MediaSfuCreateTransportCommandDataSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      return validationError(reply);
+    }
+
+    try {
+      return reply.send(
+        MediaSfuCreateTransportAckDataSchema.parse(
+          await adapter.createSfuTransport(parsed.data),
+        ),
+      );
+    } catch (err) {
+      return sfuError(reply, err);
+    }
+  });
+
+  app.post(
+    '/v1/internal/media/sfu/transports/connect',
+    async (request, reply) => {
+    if (!isInternalMediaRequestAuthorized(request)) {
+      return rejectUnauthorizedInternalMediaRequest(reply);
+    }
+
+      const parsed = MediaSfuConnectTransportCommandDataSchema.safeParse(
+        request.body,
+      );
     if (!parsed.success) {
       return validationError(reply);
     }
@@ -67,7 +99,8 @@ export function registerSfuRoutes(app: SfuRouteRegistrar, adapter: MediaAdapter)
     } catch (err) {
       return sfuError(reply, err);
     }
-  });
+    },
+  );
 
   app.post('/v1/internal/media/sfu/producers', async (request, reply) => {
     if (!isInternalMediaRequestAuthorized(request)) {
@@ -75,7 +108,8 @@ export function registerSfuRoutes(app: SfuRouteRegistrar, adapter: MediaAdapter)
     }
 
     const parsed = MediaSfuProduceCommandDataSchema.safeParse(request.body);
-    const userId = typeof (request.body as { userId?: unknown })?.userId === 'string'
+    const userId =
+      typeof (request.body as { userId?: unknown })?.userId === 'string'
       ? (request.body as { userId: string }).userId
       : '';
     if (!parsed.success) {
@@ -103,18 +137,26 @@ export function registerSfuRoutes(app: SfuRouteRegistrar, adapter: MediaAdapter)
     }
 
     try {
-      return reply.send(MediaSfuConsumeAckDataSchema.parse(await adapter.consumeSfu(parsed.data)));
+      return reply.send(
+        MediaSfuConsumeAckDataSchema.parse(
+          await adapter.consumeSfu(parsed.data),
+        ),
+      );
     } catch (err) {
       return sfuError(reply, err);
     }
   });
 
-  app.post('/v1/internal/media/sfu/consumers/resume', async (request, reply) => {
+  app.post(
+    '/v1/internal/media/sfu/consumers/resume',
+    async (request, reply) => {
     if (!isInternalMediaRequestAuthorized(request)) {
       return rejectUnauthorizedInternalMediaRequest(reply);
     }
 
-    const parsed = MediaSfuResumeConsumerCommandDataSchema.safeParse(request.body);
+      const parsed = MediaSfuResumeConsumerCommandDataSchema.safeParse(
+        request.body,
+      );
     if (!parsed.success) {
       return validationError(reply);
     }
@@ -125,7 +167,8 @@ export function registerSfuRoutes(app: SfuRouteRegistrar, adapter: MediaAdapter)
     } catch (err) {
       return sfuError(reply, err);
     }
-  });
+    },
+  );
 
   app.post('/v1/internal/media/sfu/close', async (request, reply) => {
     if (!isInternalMediaRequestAuthorized(request)) {

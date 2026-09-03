@@ -59,6 +59,34 @@ export interface SfuProduceTracksOptions {
   preferredVideoCodec?: VideoCodecPreference;
 }
 
+export function assertSelectedProducerCodec(
+  codecs: readonly { mimeType: string }[],
+  preferredCodec: Exclude<VideoCodecPreference, 'default'>,
+): void {
+  const actualCodec = codecs
+    .find((candidate) => {
+      const mimeType = candidate.mimeType.toLowerCase();
+      return (
+        mimeType.startsWith('video/') &&
+        ![
+          'video/rtx',
+          'video/red',
+          'video/ulpfec',
+          'video/flexfec-03',
+        ].includes(mimeType)
+      );
+    })
+    ?.mimeType.split('/')[1]
+    ?.toLowerCase();
+  if (actualCodec !== preferredCodec) {
+    throw new Error(
+      `Selected video codec ${preferredCodec.toUpperCase()} was not used by the SFU producer` +
+        `${actualCodec ? ` (actual: ${actualCodec.toUpperCase()})` : ''}; ` +
+        'the stream was not started and no fallback codec was used.',
+    );
+  }
+}
+
 export class SfuClientSession {
   private device: Device | null = null;
   private recvTransport: Transport | null = null;
@@ -91,38 +119,63 @@ export class SfuClientSession {
     for (const track of tracks) {
       const isVideo = track.kind === 'video';
       const preferredCodec = isVideo ? options.preferredVideoCodec : undefined;
-      const codec = preferredCodec && preferredCodec !== 'default'
+      const codec =
+        preferredCodec && preferredCodec !== 'default'
         ? this.requireDevice().rtpCapabilities.codecs?.find(
-          (candidate) => candidate.mimeType.toLowerCase() === `video/${preferredCodec}`,
+              (candidate) =>
+                candidate.mimeType.toLowerCase() === `video/${preferredCodec}`,
         )
         : undefined;
       if (preferredCodec && preferredCodec !== 'default' && !codec) {
-        throw new Error(`Selected video codec ${preferredCodec.toUpperCase()} is not supported by this SFU session.`);
+        throw new Error(
+          `Selected video codec ${preferredCodec.toUpperCase()} is not supported by this SFU session.`,
+        );
       }
       const producer = await transport.produce({
         track,
         ...(codec ? { codec } : {}),
-        ...(isVideo && (options.maxVideoBitrateKbps || options.maxVideoFramerate)
+        ...(isVideo &&
+        (options.maxVideoBitrateKbps || options.maxVideoFramerate)
           ? {
-              encodings: [{
+              encodings: [
+                {
                 ...(options.maxVideoBitrateKbps
-                  ? { maxBitrate: Math.round(options.maxVideoBitrateKbps * 1000) }
+                    ? {
+                        maxBitrate: Math.round(
+                          options.maxVideoBitrateKbps * 1000,
+                        ),
+                      }
                   : {}),
                 ...(options.maxVideoFramerate
                   ? { maxFramerate: Math.round(options.maxVideoFramerate) }
                   : {}),
-              }],
+                },
+              ],
             }
           : {}),
         ...(isVideo && options.maxVideoBitrateKbps
           ? {
               codecOptions: {
                 videoGoogleMaxBitrate: options.maxVideoBitrateKbps,
-                videoGoogleStartBitrate: Math.min(options.maxVideoBitrateKbps, 4_000),
+                videoGoogleStartBitrate: Math.min(
+                  options.maxVideoBitrateKbps,
+                  4_000,
+                ),
               },
             }
           : {}),
       });
+      if (isVideo && preferredCodec && preferredCodec !== 'default') {
+        try {
+          assertSelectedProducerCodec(
+            producer.rtpParameters.codecs,
+            preferredCodec,
+          );
+        } catch (error) {
+          producer.close();
+          throw error;
+        }
+      }
       if (isVideo && options.degradationPreference && producer.rtpSender) {
         try {
           const parameters = producer.rtpSender.getParameters();
@@ -205,6 +258,18 @@ export class SfuClientSession {
     }
 
     const device = this.requireDevice();
+    if (
+      producer.kind === 'video' &&
+      producer.codec &&
+      !device.rtpCapabilities.codecs?.some(
+        (candidate) =>
+          candidate.mimeType.toLowerCase() === `video/${producer.codec}`,
+      )
+    ) {
+      throw new Error(
+        `This browser cannot watch the stream because it does not support the selected ${producer.codec.toUpperCase()} codec.`,
+      );
+    }
     const transport = await this.ensureRecvTransport();
     const raw = await this.sendCommandAwaitAck('media.sfu.consume', {
       ...this.descriptor,
@@ -282,10 +347,14 @@ export class SfuClientSession {
     return MediaSfuCreateTransportAckDataSchema.parse(raw);
   }
 
-  private createTransport(data: MediaSfuCreateTransportAckData, direction: 'recv' | 'send'): Transport {
+  private createTransport(
+    data: MediaSfuCreateTransportAckData,
+    direction: 'recv' | 'send',
+  ): Transport {
     const device = this.requireDevice();
     const options = data.transportOptions as TransportOptions;
-    const transport = direction === 'send'
+    const transport =
+      direction === 'send'
       ? device.createSendTransport(options)
       : device.createRecvTransport(options);
 
@@ -298,22 +367,33 @@ export class SfuClientSession {
         ...this.descriptor,
         dtlsParameters,
         transportId: transport.id,
-      }).then(() => callback()).catch((err) => errback(err instanceof Error ? err : new Error(String(err))));
+      })
+        .then(() => callback())
+        .catch((err) =>
+          errback(err instanceof Error ? err : new Error(String(err))),
+        );
     });
 
     if (direction === 'send') {
-      transport.on('produce', ({ kind, rtpParameters, appData }, callback, errback) => {
+      transport.on(
+        'produce',
+        ({ kind, rtpParameters, appData }, callback, errback) => {
         this.sendCommandAwaitAck('media.sfu.produce', {
           ...this.descriptor,
           appData,
           kind,
           rtpParameters,
           transportId: transport.id,
-        }).then((raw) => {
+          })
+            .then((raw) => {
           const result = MediaSfuProduceAckDataSchema.parse(raw);
           callback({ id: result.producerId });
-        }).catch((err) => errback(err instanceof Error ? err : new Error(String(err))));
-      });
+            })
+            .catch((err) =>
+              errback(err instanceof Error ? err : new Error(String(err))),
+            );
+        },
+      );
     }
 
     return transport;

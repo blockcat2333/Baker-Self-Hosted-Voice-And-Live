@@ -1,5 +1,10 @@
 import { createEventEnvelope } from '@baker/protocol';
-import type { StreamPublication, StreamSourceType, StreamViewer } from '@baker/protocol';
+import type {
+  StreamPublication,
+  StreamPublisherDiagnostics,
+  StreamSourceType,
+  StreamViewer,
+} from '@baker/protocol';
 
 import { createLogger } from '@baker/shared';
 
@@ -24,6 +29,10 @@ export interface StreamPublicationRecord {
   channelId: string;
   host: StreamHostRecord;
   streamId: string;
+  publisherDiagnostics: {
+    publisher: StreamPublisherDiagnostics;
+    sampledAt: number;
+  } | null;
   viewers: Map<string, StreamViewerRecord>;
 }
 
@@ -179,6 +188,7 @@ export class StreamRoomManager {
     const publication: StreamPublicationRecord = {
       channelId,
       host: { connectionId, sessionId, sourceType, userId },
+      publisherDiagnostics: null,
       streamId,
       viewers: new Map(),
     };
@@ -302,6 +312,26 @@ export class StreamRoomManager {
 
   getPublication(channelId: string, streamId: string): StreamPublicationRecord | null {
     return this.getRoom(channelId)?.get(streamId) ?? null;
+  }
+
+  setPublisherDiagnostics(
+    channelId: string,
+    streamId: string,
+    sessionId: string,
+    connectionId: string,
+    publisher: StreamPublisherDiagnostics,
+    sampledAt: number,
+  ): boolean {
+    const publication = this.getPublication(channelId, streamId);
+    if (
+      !publication ||
+      publication.host.sessionId !== sessionId ||
+      publication.host.connectionId !== connectionId
+    ) {
+      return false;
+    }
+    publication.publisherDiagnostics = { publisher, sampledAt };
+    return true;
   }
 
   getPublications(channelId: string): StreamPublicationRecord[] {

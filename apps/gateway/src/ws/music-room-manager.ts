@@ -288,11 +288,12 @@ export class MusicRoomManager {
     channelId: string,
     room: Map<string, MusicPublicationRecord>,
     userId: string,
+    connectionId?: string,
   ): MusicDisconnectResult[] {
     const results: MusicDisconnectResult[] = [];
 
     for (const [musicId, publication] of room) {
-      if (publication.host.userId === userId) {
+      if (publication.host.userId === userId && (!connectionId || publication.host.connectionId === connectionId)) {
         room.delete(musicId);
         results.push({
           channelId,
@@ -305,7 +306,7 @@ export class MusicRoomManager {
       }
 
       const listener = publication.listeners.get(userId);
-      if (listener) {
+      if (listener && (!connectionId || listener.connectionId === connectionId)) {
         publication.listeners.delete(userId);
         results.push({
           channelId,
@@ -329,11 +330,11 @@ export class MusicRoomManager {
     return this.leaveRoomForUser(channelId, room, userId);
   }
 
-  leaveAllForUser(userId: string): MusicDisconnectResult[] {
+  leaveAllForUser(userId: string, connectionId?: string): MusicDisconnectResult[] {
     const results: MusicDisconnectResult[] = [];
 
     for (const [channelId, room] of this.rooms) {
-      results.push(...this.leaveRoomForUser(channelId, room, userId));
+      results.push(...this.leaveRoomForUser(channelId, room, userId, connectionId));
     }
 
     return results;

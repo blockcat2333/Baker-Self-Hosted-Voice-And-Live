@@ -1,5 +1,28 @@
 # Project History
 
+## 2026-09-03
+
+### Baker 1.1.5 stale-connection recovery
+
+What changed:
+
+- allowed a replacement WebSocket to take ownership of a stale same-user voice membership in the target channel
+- scoped voice, livestream, and music socket-close cleanup to records still owned by the closing connection
+- retained the existing same-socket duplicate-join rejection and authenticated media-session ownership checks
+- added English and Chinese guidance for validating external health monitors after an HTTP-to-HTTPS entrypoint migration
+
+Why:
+
+- a relay restart or transient overseas path failure could reconnect the client before the old Gateway socket was cleaned up
+- the stale room record then caused `VOICE_ALREADY_JOINED`, and a later old-socket close could remove state already restored by the replacement connection
+- an obsolete HTTP watchdog probe against an HTTPS-only FRP endpoint can produce a destructive restart loop even while the service itself is healthy
+
+Validation:
+
+- targeted Gateway takeover and room-manager ownership regression tests
+- repository type checking, lint, tests, build, formatting, and release consistency checks
+- repeated HTTPS health sampling plus multiple watchdog intervals without an FRP restart
+
 ## 2026-08-30
 
 ### Baker 1.1.4 realtime recovery and desktop multi-server management

@@ -1,1 +1,1 @@
-export const BAKER_VERSION = '1.1.4';
+export const BAKER_VERSION = '1.1.5';

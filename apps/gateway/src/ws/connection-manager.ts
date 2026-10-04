@@ -152,7 +152,7 @@ export class ConnectionManager {
     const state = this.connectionQuality.get(connectionId);
     if (!state) return false;
     const clamped = Math.max(0, Math.min(100, mediaSelfLossPct));
-    state.mediaSelfLossPct = Math.round(clamped);
+    state.mediaSelfLossPct = Math.round(clamped * 100) / 100;
     state.mediaUpdatedAtMs = updatedAtMs;
     return true;
   }
@@ -174,7 +174,7 @@ export class ConnectionManager {
     return {
       gatewayLossPct: state.gatewayLossPct,
       gatewayRttMs: state.gatewayRttMs,
-      mediaSelfLossPct: state.mediaSelfLossPct,
+      mediaSelfLossPct: state.mediaUpdatedAtMs !== null && nowMs - state.mediaUpdatedAtMs <= staleAfterMs ? state.mediaSelfLossPct : null,
       stale: latestMs > 0 ? nowMs - latestMs > staleAfterMs : true,
       updatedAt: new Date(updatedAtMs).toISOString(),
     };

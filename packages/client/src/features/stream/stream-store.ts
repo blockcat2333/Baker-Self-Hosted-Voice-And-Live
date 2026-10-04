@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { normalizeStreamHdr } from './stream-hdr';
 
 import type {
   GatewayCommandName,
@@ -1448,7 +1449,7 @@ async function captureStream(
       );
 
   await applyCaptureTrackPreferences(sourceType, stream, quality);
-  return stream;
+  return normalizeStreamHdr(stream);
 }
 
 function reconcileOwnedPublication(

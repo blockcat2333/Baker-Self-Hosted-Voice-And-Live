@@ -10,6 +10,7 @@
  */
 
 import type { IceServer } from '@baker/protocol';
+import { configureAudioReceiver, summarizeAudioReceiveStats, updateAudioPlayout, type AudioPlayoutHealth } from './audio-playout';
 
 export interface WebRtcManagerCallbacks {
   /**
@@ -50,6 +51,7 @@ export type PeerNetworkSample = {
 export type LocalOutboundNetworkSample = {
   packetsLost: number | null;
   packetsSent: number | null;
+  feedbackTimestampMs?: number | null;
 };
 
 export type PeerVideoReceiveSample = {
@@ -535,6 +537,8 @@ export function summarizeLocalOutboundAudioNetworkStats(
   let totalPacketsLost = 0;
   let hasPacketsSent = false;
   let hasPacketsLost = false;
+  let feedbackTimestampMs: number | null = null;
+  let missingFeedback = false;
 
   for (const report of reports) {
     const stats: RTCStats[] = [];
@@ -543,6 +547,7 @@ export function summarizeLocalOutboundAudioNetworkStats(
     });
 
     const outboundAudioIds = new Set<string>();
+    const feedbackAudioIds = new Set<string>();
     for (const stat of stats) {
       if (stat.type !== 'outbound-rtp') continue;
       const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
@@ -558,9 +563,6 @@ export function summarizeLocalOutboundAudioNetworkStats(
 
     for (const stat of stats) {
       if (stat.type !== 'remote-inbound-rtp') continue;
-      const kind = readStringField(stat, 'kind') ?? readStringField(stat, 'mediaType');
-      if (kind !== 'audio') continue;
-
       const localId = readStringField(stat, 'localId');
       if (!localId || !outboundAudioIds.has(localId)) {
         continue;
@@ -570,8 +572,11 @@ export function summarizeLocalOutboundAudioNetworkStats(
       if (lost !== null) {
         totalPacketsLost += lost;
         hasPacketsLost = true;
+        feedbackAudioIds.add(localId);
+        if (Number.isFinite(stat.timestamp)) feedbackTimestampMs = Math.max(feedbackTimestampMs ?? 0, stat.timestamp);
       }
     }
+    if ([...outboundAudioIds].some((id) => !feedbackAudioIds.has(id))) missingFeedback = true;
   }
 
   if (!hasPacketsSent && !hasPacketsLost) {
@@ -579,8 +584,9 @@ export function summarizeLocalOutboundAudioNetworkStats(
   }
 
   return {
-    packetsLost: hasPacketsLost ? totalPacketsLost : null,
+    packetsLost: hasPacketsLost && !missingFeedback ? totalPacketsLost : null,
     packetsSent: hasPacketsSent ? totalPacketsSent : null,
+    feedbackTimestampMs,
   };
 }
 
@@ -669,12 +675,14 @@ export class WebRtcManager {
     };
 
     pc.ontrack = (event) => {
+      if (event.receiver) configureAudioReceiver(event.receiver);
       this.callbacks.onRemoteTrack(userId, event.track, event.streams);
     };
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'connected') {
         for (const receiver of pc.getReceivers()) {
+          configureAudioReceiver(receiver);
           const track = receiver.track;
           if (!track) continue;
           this.callbacks.onRemoteTrack(userId, track, []);
@@ -1046,6 +1054,19 @@ export class WebRtcManager {
     }
 
     return { rttMs, packetsLost, packetsReceived };
+  }
+
+  async getPeerAudioPlayoutHealth(userId: string): Promise<AudioPlayoutHealth | null> {
+    const pc = this.peers.get(userId);
+    if (!pc) return null;
+    const receiver = pc.getReceivers().find((entry) => entry.track?.kind === 'audio');
+    if (!receiver || typeof receiver.getStats !== 'function') return null;
+    try {
+      const sample = summarizeAudioReceiveStats(await receiver.getStats());
+      return sample ? updateAudioPlayout(receiver, sample) : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

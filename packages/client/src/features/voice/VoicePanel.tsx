@@ -263,6 +263,10 @@ export interface VoiceChannelViewProps {
   showConnectionHealth?: boolean;
 }
 
+function audioMetricValue(value: number | null | undefined, suffix = '', digits = 0) {
+  return value == null ? '--' : `${value.toFixed(digits)}${suffix}`;
+}
+
 function ScreenShareIcon({ className = 'voice-bottom-icon' }: SidebarIconProps) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -495,6 +499,7 @@ export function VoiceChannelView({ channelId, channelName, onOpenStreamShareDial
   const localMediaSelfUpdatedAt = useVoiceStore((s) => s.localMediaSelfUpdatedAt);
   const participants = useVoiceStore((s) => s.participants);
   const participantPlaybackVolume = useVoiceStore((s) => s.participantPlaybackVolume);
+  const peerNetwork = useVoiceStore((s) => s.peerNetwork);
   const speakingUserIds = useVoiceStore((s) => s.speakingUserIds);
   const setParticipantPlaybackVolume = useVoiceStore((s) => s.setParticipantPlaybackVolume);
   const clearParticipantPlaybackVolume = useVoiceStore((s) => s.clearParticipantPlaybackVolume);
@@ -579,7 +584,7 @@ export function VoiceChannelView({ channelId, channelName, onOpenStreamShareDial
   const watchedStreamIds = useMemo(() => new Set(Object.keys(watchedStreamsById)), [watchedStreamsById]);
   const latencyValue = gatewayRttMs === null ? '--' : `${Math.max(0, Math.round(gatewayRttMs))}ms`;
   const gatewayLossValue = gatewayLossPct === null ? '--' : `${Math.max(0, Math.round(gatewayLossPct))}%`;
-  const mediaLossValue = mediaLossPct === null ? '--' : `${Math.max(0, Math.round(mediaLossPct))}%`;
+  const mediaLossValue = mediaLossPct === null ? '--' : `${Math.max(0, (Math.round(mediaLossPct * 100) / 100))}%`;
   const voiceNetworkSummary = `${connectionHealth.label} · ${latencyValue} · ${t('voice.network_loss_short', {
     loss: mediaLossValue,
   })}`;
@@ -790,6 +795,14 @@ export function VoiceChannelView({ channelId, channelName, onOpenStreamShareDial
           hasCustomVolume={participantPlaybackVolume[participantMenu.userId] !== undefined}
           menu={participantMenu}
           networkMetrics={[
+            ...(!participantMenu.isMe && isViewingConnectedVoiceChannel ? [
+              { label: t('voice.audio_receive_loss'), value: audioMetricValue(peerNetwork[participantMenu.userId]?.lossPct, '%', 2) },
+              { label: t('voice.audio_jitter'), value: audioMetricValue(peerNetwork[participantMenu.userId]?.playout?.jitterMs, 'ms', 1) },
+              { label: t('voice.audio_buffer'), value: audioMetricValue(peerNetwork[participantMenu.userId]?.playout?.bufferMs, 'ms') },
+              { label: t('voice.audio_concealment'), value: audioMetricValue(peerNetwork[participantMenu.userId]?.playout?.audibleConcealedPct, '%', 2) },
+              { label: t('voice.audio_late_packets'), value: audioMetricValue(peerNetwork[participantMenu.userId]?.playout?.discardedPackets) },
+              { label: t('voice.audio_buffer_target'), value: audioMetricValue(peerNetwork[participantMenu.userId]?.playout?.targetBufferMs, 'ms') },
+            ] : []),
             {
               label: t('stream.voice_health_gateway_rtt'),
               value: selectedParticipantNetwork?.gatewayRttMs === null || selectedParticipantNetwork?.gatewayRttMs === undefined
@@ -806,7 +819,7 @@ export function VoiceChannelView({ channelId, channelName, onOpenStreamShareDial
               label: t('stream.voice_health_media_loss'),
               value: selectedParticipantNetwork?.mediaSelfLossPct === null || selectedParticipantNetwork?.mediaSelfLossPct === undefined
                 ? '--'
-                : `${Math.max(0, Math.round(selectedParticipantNetwork.mediaSelfLossPct))}%`,
+                : `${Math.max(0, (Math.round(selectedParticipantNetwork.mediaSelfLossPct * 100) / 100))}%`,
             },
             {
               label: t('stream.voice_health_freshness'),

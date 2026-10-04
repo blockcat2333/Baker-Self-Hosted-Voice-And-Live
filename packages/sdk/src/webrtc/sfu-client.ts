@@ -7,6 +7,7 @@ import type {
   TransportOptions,
 } from 'mediasoup-client/types';
 import { Device as MediasoupDevice } from 'mediasoup-client';
+import { configureAudioReceiver, summarizeAudioReceiveStats, updateAudioPlayout, type AudioPlayoutHealth, type AudioReceiveSample } from './audio-playout';
 
 import type {
   GatewayCommandName,
@@ -93,6 +94,7 @@ export class SfuClientSession {
   private sendTransport: Transport | null = null;
   private readonly producers = new Map<string, Producer>();
   private readonly consumers = new Map<string, Consumer>();
+  private readonly consumerUserIds = new Map<string, string>();
   private readonly consumedProducerIds = new Set<string>();
 
   constructor(
@@ -133,6 +135,9 @@ export class SfuClientSession {
       }
       const producer = await transport.produce({
         track,
+        ...(!isVideo && this.descriptor.mode === 'voice'
+          ? { codecOptions: { opusFec: true, opusDtx: false, opusStereo: false, opusMaxAverageBitrate: 48000 } }
+          : {}),
         ...(codec ? { codec } : {}),
         ...(isVideo &&
         (options.maxVideoBitrateKbps || options.maxVideoFramerate)
@@ -252,6 +257,19 @@ export class SfuClientSession {
     return summarizeVideoReceiveStats(reports);
   }
 
+  async getAudioPlayoutHealth(): Promise<Array<{ userId: string; sample: AudioReceiveSample; health: AudioPlayoutHealth }>> {
+    const results: Array<{ userId: string; sample: AudioReceiveSample; health: AudioPlayoutHealth }> = [];
+    for (const consumer of this.consumers.values()) {
+      const userId = this.consumerUserIds.get(consumer.id);
+      if (consumer.kind !== 'audio' || consumer.closed || !consumer.rtpReceiver || !userId) continue;
+      try {
+        const sample = summarizeAudioReceiveStats(await consumer.getStats());
+        if (sample) results.push({ userId, sample, health: updateAudioPlayout(consumer.rtpReceiver, sample) });
+      } catch { /* A closing consumer must not stop other participants' stats. */ }
+    }
+    return results;
+  }
+
   async consumeProducer(producer: SfuProducer): Promise<SfuRemoteTrack | null> {
     if (this.consumedProducerIds.has(producer.id)) {
       return null;
@@ -286,8 +304,11 @@ export class SfuClientSession {
     });
     this.consumedProducerIds.add(producer.id);
     this.consumers.set(consumer.id, consumer);
+    this.consumerUserIds.set(consumer.id, producer.userId);
+    if (consumer.rtpReceiver && this.descriptor.mode === 'voice') configureAudioReceiver(consumer.rtpReceiver);
     consumer.on('transportclose', () => {
       this.consumers.delete(consumer.id);
+      this.consumerUserIds.delete(consumer.id);
       this.consumedProducerIds.delete(producer.id);
     });
     await this.sendCommandAwaitAck('media.sfu.resume_consumer', {
@@ -310,6 +331,7 @@ export class SfuClientSession {
       consumer.close();
     }
     this.consumers.clear();
+    this.consumerUserIds.clear();
     this.consumedProducerIds.clear();
     this.recvTransport?.close();
     this.sendTransport?.close();

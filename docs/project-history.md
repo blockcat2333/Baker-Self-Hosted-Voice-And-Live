@@ -1572,3 +1572,9 @@ Why:
   implementation/acceleration reporting, and a 60-second in-memory trend
 - kept selected codecs strict while documenting that the browser chooses the
   hardware/software implementation
+# 2026-10-05 Baker 1.1.8 / Desktop 1.1.8a
+
+- Added shared HDR capture tone mapping and status reporting for web and Electron.
+- Added adaptive voice buffering and clipping protection, and corrected unavailable/fractional/stale packet-loss reporting.
+- Validation passed: 278 tests, workspace type checks, lint, builds, synthetic HDR checks in Edge/Electron and offline audio clipping checks.
+- Live cross-border listening verification remains a follow-up.

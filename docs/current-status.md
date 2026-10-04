@@ -973,6 +973,14 @@ Recommended next work:
 - added actual hardware/software codec acceleration reporting when Chromium
   exposes the corresponding WebRTC statistics
 
+## 2026-10-05 Baker 1.1.8 HDR And Voice Resilience
+
+- Shared web/Electron capture converts identified PQ/HLG HDR frames to SDR and reports correction status; unsupported inputs retain the original stream.
+- Adaptive voice buffering, Opus FEC, smooth gain changes and amplification limiting improve resilience to delayed packets and clipping.
+- Participant statistics retain fractional loss, distinguish missing feedback from zero, and expose jitter, concealment and discarded packets.
+- 278 tests, type checks, lint, production builds, Edge/Electron HDR checks and offline audio checks passed. Live cross-border listening validation remains outstanding.
+- Release notes: `docs/releases/1.1.8.md` and `docs/releases/1.1.8a.md`.
+
 ## 2026-09-04 Baker 1.1.7 Livestream Entry And SFU Observability
 
 - removed the remaining voice-state gate from the single `ChatShell` share-dialog

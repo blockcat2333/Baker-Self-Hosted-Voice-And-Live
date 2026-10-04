@@ -92,6 +92,7 @@ jobs:
 
       - name: Build and push
         if: steps.release_tag.outputs.is_server_tag == 'true'
+        id: image
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -103,3 +104,29 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Smoke test published image
+        if: steps.release_tag.outputs.is_server_tag == 'true'
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/baker@${IMAGE_DIGEST}"
+          trap 'docker rm -fv baker-release-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name baker-release-smoke -e SFU_ANNOUNCED_IP=127.0.0.1 "$image" >/dev/null
+          ready=false
+          for attempt in $(seq 1 60); do
+            if docker exec baker-release-smoke /opt/baker-allinone/healthcheck.sh; then
+              ready=true
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" != true ]; then
+            docker exec baker-release-smoke supervisorctl -c /etc/baker/supervisord.conf status || true
+            exit 1
+          fi
+          docker exec baker-release-smoke curl -fsS http://127.0.0.1/health
+          docker exec baker-release-smoke curl -fsS -o /dev/null http://127.0.0.1/
+          docker exec baker-release-smoke curl -fsS -o /dev/null http://127.0.0.1:8080/

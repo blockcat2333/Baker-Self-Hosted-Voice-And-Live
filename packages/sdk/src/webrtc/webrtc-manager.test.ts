@@ -1,11 +1,30 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { summarizeVideoReceiveStats, WebRtcManager } from './webrtc-manager';
+import { summarizeLocalOutboundAudioNetworkStats, summarizeVideoReceiveStats, WebRtcManager } from './webrtc-manager';
 
 function statsReport(records: Array<Record<string, unknown>>): RTCStatsReport {
   const map = new Map(records.map((record) => [String(record.id), record]));
   return map as unknown as RTCStatsReport;
 }
+
+describe('outbound audio feedback', () => {
+  it('uses localId even when remote feedback omits kind, and exposes feedback freshness', () => {
+    const result = summarizeLocalOutboundAudioNetworkStats([statsReport([
+      { id: 'out', type: 'outbound-rtp', kind: 'audio', packetsSent: 1000 },
+      { id: 'rr', type: 'remote-inbound-rtp', localId: 'out', packetsLost: 2, timestamp: 5000 },
+    ])]);
+    expect(result).toEqual({ packetsSent: 1000, packetsLost: 2, feedbackTimestampMs: 5000 });
+  });
+
+  it('reports unknown when feedback is missing for an active audio sender', () => {
+    const result = summarizeLocalOutboundAudioNetworkStats([statsReport([
+      { id: 'out1', type: 'outbound-rtp', kind: 'audio', packetsSent: 1000 },
+      { id: 'out2', type: 'outbound-rtp', kind: 'audio', packetsSent: 1000 },
+      { id: 'rr', type: 'remote-inbound-rtp', localId: 'out1', packetsLost: 0, timestamp: 5000 },
+    ])]);
+    expect(result?.packetsLost).toBeNull();
+  });
+});
 
 describe('video receive stats', () => {
   afterEach(() => vi.unstubAllGlobals());

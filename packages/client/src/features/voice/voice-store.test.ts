@@ -794,6 +794,31 @@ describe('voice join cues', () => {
 });
 
 describe('voice media network stats', () => {
+  it('preserves small loss and does not publish zero from unchanged RTCP feedback', async () => {
+    Object.defineProperty(globalThis, 'RTCPeerConnection', {
+      configurable: true,
+      value: function MockRTCPeerConnection() {},
+    });
+    const sendRawCommand = vi.fn();
+    const ack = vi.fn().mockResolvedValue({ channelId, iceServers: [], mediaMode: 'sfu',
+      participants: [{ isMuted: false, sessionId, userId }], sessionId,
+      sfu: { producers: [], routerRtpCapabilities: {} } });
+    sfuGetLocalOutboundNetworkSample
+      .mockResolvedValueOnce({ packetsLost: 0, packetsSent: 100, feedbackTimestampMs: 1000 })
+      .mockResolvedValueOnce({ packetsLost: 1, packetsSent: 1100, feedbackTimestampMs: 2000 })
+      .mockResolvedValue({ packetsLost: 1, packetsSent: 1300, feedbackTimestampMs: 2000 });
+    await useVoiceStore.getState().joinVoiceChannel(channelId, ack, sendRawCommand);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(useVoiceStore.getState().localMediaSelfLossPct).toBe(0.1);
+    expect(sendRawCommand).toHaveBeenCalledWith('voice.network.self_report', { channelId, mediaSelfLossPct: 0.1 });
+    sendRawCommand.mockClear();
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(sendRawCommand).not.toHaveBeenCalledWith('voice.network.self_report', expect.anything());
+    expect(useVoiceStore.getState().localMediaSelfLossPct).toBe(0.1);
+    await vi.advanceTimersByTimeAsync(13_000);
+    expect(useVoiceStore.getState().localMediaSelfLossPct).toBeNull();
+  });
+
   it('self-reports SFU local media loss from outbound producer stats', async () => {
     Object.defineProperty(globalThis, 'RTCPeerConnection', {
       configurable: true,
@@ -833,10 +858,10 @@ describe('voice media network stats', () => {
 
     await vi.advanceTimersByTimeAsync(1000);
 
-    expect(useVoiceStore.getState().localMediaSelfLossPct).toBe(2);
+    expect(useVoiceStore.getState().localMediaSelfLossPct).toBe(2.04);
     expect(sendRawCommand).toHaveBeenCalledWith('voice.network.self_report', {
       channelId,
-      mediaSelfLossPct: 2,
+      mediaSelfLossPct: 2.04,
     });
   });
 });

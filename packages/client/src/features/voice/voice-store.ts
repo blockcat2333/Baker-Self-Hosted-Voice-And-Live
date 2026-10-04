@@ -28,6 +28,7 @@ import type {
 } from '@baker/protocol';
 import { MediaSessionReconnectAckDataSchema, VoiceJoinAckDataSchema } from '@baker/protocol';
 import { SfuClientSession, WebRtcManager } from '@baker/sdk';
+import type { AudioPlayoutHealth } from '@baker/sdk';
 
 import { useAuthStore } from '../auth/auth-store';
 import { useGatewayStore } from '../gateway/gateway-store';
@@ -51,6 +52,8 @@ import {
   clampVoiceParticipantPlaybackVolume,
   clampVoicePlaybackVolume,
   computeEffectiveParticipantPlaybackVolume,
+  connectVoiceLimiter,
+  setVoiceGain,
   DEFAULT_VOICE_INPUT_VOLUME,
   DEFAULT_VOICE_PARTICIPANT_VOLUME,
   DEFAULT_VOICE_PLAYBACK_VOLUME,
@@ -131,7 +134,7 @@ type SfuVoiceTransportDirection = 'recv' | 'send';
 let sfuRecvTransportConnectionState: RTCPeerConnectionState | null = null;
 let sfuSendTransportConnectionState: RTCPeerConnectionState | null = null;
 let lastLocalMediaReportAtMs = 0;
-let lastLocalOutboundTotals: { packetsLost: number; packetsSent: number } | null = null;
+let lastLocalOutboundTotals: { packetsLost: number; packetsSent: number; feedbackTimestampMs?: number | null } | null = null;
 const SELF_REPORT_INTERVAL_MS = 2_000;
 const VOICE_CONNECTING_ISSUE_DELAY_MS = 10_000;
 const VOICE_DISCONNECTED_ISSUE_DELAY_MS = 5_000;
@@ -165,7 +168,7 @@ export interface VoiceState {
   participantPlaybackVolume: Record<string, number>;
   localMediaSelfLossPct: number | null;
   localMediaSelfUpdatedAt: number | null;
-  peerNetwork: Record<string, { lossPct: number | null; rttMs: number | null; updatedAt: number; connectionState?: RTCPeerConnectionState }>;
+  peerNetwork: Record<string, { lossPct: number | null; rttMs: number | null; updatedAt: number; connectionState?: RTCPeerConnectionState; playout?: AudioPlayoutHealth | null }>;
 
   joinVoiceChannel(
     channelId: string,
@@ -250,11 +253,11 @@ function ensureRemoteAudioGain(userId: string, audio: HTMLAudioElement) {
   if (existing) return existing;
   if (typeof AudioContext === 'undefined') return null;
 
-  const context = new AudioContext();
+  const context = new AudioContext({ sampleRate: 48000, latencyHint: 'balanced' });
   const source = context.createMediaElementSource(audio);
   const gainNode = context.createGain();
   source.connect(gainNode);
-  gainNode.connect(context.destination);
+  connectVoiceLimiter(context, gainNode, context.destination);
   const next = { context, gainNode };
   remoteAudioGainNodes.set(userId, next);
   void context.resume().catch(() => {
@@ -271,7 +274,7 @@ function applyRemoteAudioElementVolumeForUser(userId: string) {
 
   const gain = effectiveVolume > 1 ? ensureRemoteAudioGain(userId, audio) : remoteAudioGainNodes.get(userId);
   if (gain) {
-    gain.gainNode.gain.value = effectiveVolume > 1 ? effectiveVolume : 1;
+    setVoiceGain(gain.gainNode.gain, effectiveVolume > 1 ? effectiveVolume : 1, gain.context);
   }
 }
 
@@ -641,13 +644,13 @@ function handleSfuVoiceTransportConnectionStateChange(
 function createLocalSendStream(captureStream: MediaStream, inputVolume: number): MediaStream {
   const clampedInputVolume = clampVoiceInputVolume(inputVolume);
   try {
-    micProcessingCtx = new AudioContext();
+    micProcessingCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'balanced' });
     const source = micProcessingCtx.createMediaStreamSource(captureStream);
     micGainNode = micProcessingCtx.createGain();
     micGainNode.gain.value = clampedInputVolume;
     const destination = micProcessingCtx.createMediaStreamDestination();
     source.connect(micGainNode);
-    micGainNode.connect(destination);
+    connectVoiceLimiter(micProcessingCtx, micGainNode, destination);
     void micProcessingCtx.resume().catch(() => {
       // Some browsers keep this suspended until user gesture. Join flow is already user-triggered.
     });
@@ -1049,18 +1052,25 @@ async function pollPeerNetworkStats() {
       ? await Promise.all(
           peerIds.map(async (userId) => {
             const sample = await manager?.getPeerNetworkSample(userId) ?? null;
-            return { userId, sample };
+            const playout = await manager?.getPeerAudioPlayoutHealth?.(userId) ?? null;
+            return { userId, sample, playout };
           }),
         )
       : [];
 
+    const sfuAudio = await session?.getAudioPlayoutHealth?.() ?? [];
+    for (const entry of sfuAudio) {
+      samples.push({ userId: entry.userId, sample: { packetsReceived: entry.sample.packetsReceived, packetsLost: entry.sample.packetsLost, rttMs: null }, playout: entry.health });
+    }
+
     const localOutboundSample = manager
       ? await manager.getLocalOutboundNetworkSample()
       : await (session?.getLocalOutboundNetworkSample() ?? null);
+    if (manager !== webrtcManager || session !== sfuSession) return;
     const now = Date.now();
-    const next: Record<string, { lossPct: number | null; rttMs: number | null; updatedAt: number }> = {};
+    const next: VoiceState['peerNetwork'] = {};
 
-    for (const { userId, sample } of samples) {
+    for (const { userId, sample, playout } of samples) {
       if (!sample) continue;
       const prevTotals = lastInboundTotals.get(userId);
       const received = sample.packetsReceived;
@@ -1083,6 +1093,7 @@ async function pollPeerNetworkStats() {
         lossPct,
         rttMs: sample.rttMs,
         updatedAt: now,
+        playout,
       };
     }
 
@@ -1095,21 +1106,25 @@ async function pollPeerNetworkStats() {
       const current = {
         packetsLost: localOutboundSample.packetsLost,
         packetsSent: localOutboundSample.packetsSent,
+        feedbackTimestampMs: localOutboundSample.feedbackTimestampMs,
       };
-      if (lastLocalOutboundTotals) {
-        const deltaSent = Math.max(0, current.packetsSent - lastLocalOutboundTotals.packetsSent);
-        const deltaLost = Math.max(0, current.packetsLost - lastLocalOutboundTotals.packetsLost);
-        const denom = deltaSent + deltaLost;
-        if (denom > 0) {
-          localMediaSelfLossPct = (deltaLost / denom) * 100;
+      const freshFeedback = current.feedbackTimestampMs == null || lastLocalOutboundTotals?.feedbackTimestampMs == null || current.feedbackTimestampMs > lastLocalOutboundTotals.feedbackTimestampMs;
+      if (lastLocalOutboundTotals && freshFeedback) {
+        const deltaSent = current.packetsSent - lastLocalOutboundTotals.packetsSent;
+        const deltaLost = current.packetsLost - lastLocalOutboundTotals.packetsLost;
+        // Sent already includes packets lost in transit. Do not add lost again.
+        if (deltaSent > 0 && deltaLost >= 0) {
+          localMediaSelfLossPct = Math.min(100, (deltaLost / deltaSent) * 100);
         }
       }
-      lastLocalOutboundTotals = current;
+      if (freshFeedback) lastLocalOutboundTotals = current;
     }
 
     useVoiceStore.setState((state) => ({
       localMediaSelfLossPct:
-        localMediaSelfLossPct === null ? state.localMediaSelfLossPct : Math.round(localMediaSelfLossPct),
+        localMediaSelfLossPct === null
+          ? state.localMediaSelfUpdatedAt !== null && now - state.localMediaSelfUpdatedAt <= 15_000 ? state.localMediaSelfLossPct : null
+          : Math.round(localMediaSelfLossPct * 100) / 100,
       localMediaSelfUpdatedAt:
         localMediaSelfLossPct === null ? state.localMediaSelfUpdatedAt : now,
       peerNetwork: {
@@ -1127,7 +1142,7 @@ async function pollPeerNetworkStats() {
       lastLocalMediaReportAtMs = now;
       savedSendRawCommand('voice.network.self_report', {
         channelId: savedChannelId,
-        mediaSelfLossPct: Math.round(localMediaSelfLossPct),
+        mediaSelfLossPct: Math.round(localMediaSelfLossPct * 100) / 100,
       });
     }
   } finally {
@@ -1464,7 +1479,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     set({ inputVolume: clampedVolume });
     saveNumberPreference('voiceInputVolume', clampedVolume);
     if (micGainNode) {
-      micGainNode.gain.value = clampedVolume;
+      if (micProcessingCtx) setVoiceGain(micGainNode.gain, clampedVolume, micProcessingCtx);
     }
   },
 

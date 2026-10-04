@@ -5,11 +5,20 @@ import {
   clampVoiceInputVolume,
   clampVoicePlaybackVolume,
   computeEffectiveParticipantPlaybackVolume,
+  limitVoiceSample,
   toVoiceParticipantVolumePercent,
   toVoiceVolumePercent,
 } from './voice-audio';
 
 describe('voice-audio', () => {
+  test('limits amplified peaks smoothly without changing ordinary speech levels', () => {
+    for (const sample of [-0.8, -0.2, 0, 0.2, 0.8])
+      expect(limitVoiceSample(sample)).toBe(sample);
+    expect(limitVoiceSample(2)).toBeLessThan(1);
+    expect(limitVoiceSample(-2)).toBeGreaterThan(-1);
+    expect(limitVoiceSample(-2)).toBe(-limitVoiceSample(2));
+    expect(limitVoiceSample(1.5)).toBeGreaterThan(limitVoiceSample(1));
+  });
   test('clampVoiceInputVolume constrains to [0, 2]', () => {
     expect(clampVoiceInputVolume(Number.NaN)).toBe(1);
     expect(clampVoiceInputVolume(-1)).toBe(0);
@@ -26,7 +35,9 @@ describe('voice-audio', () => {
   });
 
   test('clampVoiceParticipantPlaybackVolume constrains to [0, 2]', () => {
-    expect(clampVoiceParticipantPlaybackVolume(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(clampVoiceParticipantPlaybackVolume(Number.POSITIVE_INFINITY)).toBe(
+      1,
+    );
     expect(clampVoiceParticipantPlaybackVolume(Number.NaN)).toBe(1);
     expect(clampVoiceParticipantPlaybackVolume(-0.1)).toBe(0);
     expect(clampVoiceParticipantPlaybackVolume(0.25)).toBe(0.25);

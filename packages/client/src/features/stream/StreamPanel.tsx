@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { getStreamHdrStatus } from './stream-hdr';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 
@@ -45,7 +46,7 @@ function formatPercent(value: number | null | undefined) {
     return '--';
   }
 
-  return `${Math.max(0, Math.round(value))}%`;
+  return `${Math.max(0, Math.round(value * 100) / 100)}%`;
 }
 
 function formatLatency(value: number | null | undefined) {
@@ -678,6 +679,10 @@ function LiveDetailPanel() {
           </div>
         {activeOwnedStream ? (
           <>
+            <div className={'stream-live-detail-row'}>
+              <dt>{t('stream.hdr_correction')}</dt>
+              <dd>{t(`stream.hdr_${getStreamHdrStatus(activeOwnedStream.localPreviewStream)}`)}</dd>
+            </div>
             <div className={'stream-live-detail-row'}>
               <dt>{t('stream.live_detail_target_quality')}</dt>
               <dd>{`${activeOwnedStream.quality.resolution} / ${activeOwnedStream.quality.frameRate} fps / ${activeOwnedStream.quality.bitrateKbps} kbps`}</dd>

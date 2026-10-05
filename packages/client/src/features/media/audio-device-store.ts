@@ -71,12 +71,12 @@ function keepSelectionIfAvailable(deviceId: string | null, devices: readonly Aud
   return devices.some((device) => device.deviceId === deviceId) ? deviceId : null;
 }
 
-export function buildPreferredAudioInputConstraints(): MediaTrackConstraints {
+export function buildPreferredAudioInputConstraints(noiseSuppression = true): MediaTrackConstraints {
   const deviceId = useAudioDeviceStore.getState().selectedAudioInputId;
   return {
-    autoGainControl: true,
-    echoCancellation: true,
-    noiseSuppression: true,
+    autoGainControl: noiseSuppression ? true : { exact: true },
+    echoCancellation: noiseSuppression ? true : { exact: true },
+    noiseSuppression: noiseSuppression ? true : { exact: false },
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
   };
 }

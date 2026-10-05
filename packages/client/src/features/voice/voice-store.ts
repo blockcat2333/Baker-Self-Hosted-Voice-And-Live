@@ -44,6 +44,8 @@ import {
 import {
   loadNumberPreference,
   loadNumberRecordPreference,
+  loadStringOptionPreference,
+  saveClientPreferencesPatch,
   saveNumberPreference,
   saveNumberRecordPreference,
 } from '../preferences/client-preferences';
@@ -59,6 +61,8 @@ import {
   DEFAULT_VOICE_PLAYBACK_VOLUME,
 } from './voice-audio';
 import { playVoiceSfx } from './voice-sfx';
+import { createVoiceInputProcessor, VOICE_NOISE_SUPPRESSION_MODES } from './voice-input-processor';
+import type { VoiceInputProcessor, VoiceNoiseSuppressionMode } from './voice-input-processor';
 
 const SPEAKING_POLL_MS = 50;
 const SPEAKING_ATTACK_TICKS = 1;
@@ -78,8 +82,10 @@ let speakingTimer: ReturnType<typeof setInterval> | null = null;
 let speakingTicks = 0;
 let isSpeakingLocal = false;
 
-let micProcessingCtx: AudioContext | null = null;
-let micGainNode: GainNode | null = null;
+let micProcessor: VoiceInputProcessor | null = null;
+let audioInputBusy = false;
+let captureGeneration = 0;
+let pendingNoiseFallback: VoiceInputProcessor | null = null;
 
 let savedChannelId: string | null = null;
 let savedMySessionId: string | null = null;
@@ -164,6 +170,9 @@ export interface VoiceState {
   error: string | null;
   connectionIssue: string | null;
   inputVolume: number;
+  noiseSuppressionMode: VoiceNoiseSuppressionMode;
+  noiseSuppressionError: boolean;
+  isAudioInputChanging: boolean;
   playbackVolume: number;
   participantPlaybackVolume: Record<string, number>;
   localMediaSelfLossPct: number | null;
@@ -182,6 +191,7 @@ export interface VoiceState {
 
   toggleMute(sendRawCommand: (command: GatewayCommandName, data: unknown) => void): void;
   switchAudioInputDevice(): Promise<void>;
+  setNoiseSuppressionMode(mode: VoiceNoiseSuppressionMode): Promise<void>;
   setInputVolume(volume: number): void;
   setPlaybackVolume(volume: number): void;
   setParticipantPlaybackVolume(userId: string, volume: number): void;
@@ -641,27 +651,38 @@ function handleSfuVoiceTransportConnectionStateChange(
   );
 }
 
-function createLocalSendStream(captureStream: MediaStream, inputVolume: number): MediaStream {
-  const clampedInputVolume = clampVoiceInputVolume(inputVolume);
+function createMicProcessor(captureStream: MediaStream, inputVolume: number): VoiceInputProcessor {
+  const processor = createVoiceInputProcessor(captureStream, inputVolume, () => {
+    if (micProcessor !== processor) return;
+    useVoiceStore.setState({ noiseSuppressionMode: 'browser', noiseSuppressionError: true });
+    saveClientPreferencesPatch({ voiceNoiseSuppressionMode: 'browser' });
+    // Chromium may accept applyConstraints without changing the active DSP.
+    // Acquire a native-suppressed capture while retaining the outgoing track.
+    pendingNoiseFallback = processor;
+    flushNoiseFallback();
+  });
+  return processor;
+}
+
+function flushNoiseFallback() {
+  if (audioInputBusy || !pendingNoiseFallback) return;
+  const processor = pendingNoiseFallback;
+  if (micProcessor !== processor) { pendingNoiseFallback = null; return; }
+  const status = useVoiceStore.getState().status;
+  if (status !== 'active' && status !== 'reconnecting') return;
+  pendingNoiseFallback = null;
+  void useVoiceStore.getState().setNoiseSuppressionMode('browser').finally(() => {
+    if (micProcessor === processor) useVoiceStore.setState({ noiseSuppressionError: true });
+  });
+}
+
+async function initializeMicNoiseMode(processor: VoiceInputProcessor): Promise<boolean> {
+  if (useVoiceStore.getState().noiseSuppressionMode !== 'rnnoise') return true;
   try {
-    micProcessingCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'balanced' });
-    const source = micProcessingCtx.createMediaStreamSource(captureStream);
-    micGainNode = micProcessingCtx.createGain();
-    micGainNode.gain.value = clampedInputVolume;
-    const destination = micProcessingCtx.createMediaStreamDestination();
-    source.connect(micGainNode);
-    connectVoiceLimiter(micProcessingCtx, micGainNode, destination);
-    void micProcessingCtx.resume().catch(() => {
-      // Some browsers keep this suspended until user gesture. Join flow is already user-triggered.
-    });
-    return new MediaStream(destination.stream.getAudioTracks());
+    await processor.setMode('rnnoise');
+    return true;
   } catch {
-    if (micProcessingCtx) {
-      void micProcessingCtx.close();
-    }
-    micProcessingCtx = null;
-    micGainNode = null;
-    return captureStream;
+    return false;
   }
 }
 
@@ -908,14 +929,15 @@ function startSpeakingDetection() {
 }
 
 function teardown() {
+  captureGeneration++;
+  audioInputBusy = false;
+  pendingNoiseFallback = null;
+  useVoiceStore.setState({ isAudioInputChanging: false });
   stopNetworkStatsPolling();
   stopSpeakingDetection();
 
-  if (micProcessingCtx) {
-    void micProcessingCtx.close();
-    micProcessingCtx = null;
-  }
-  micGainNode = null;
+  micProcessor?.dispose();
+  micProcessor = null;
 
   if (webrtcManager) {
     webrtcManager.closeAll();
@@ -1176,6 +1198,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   error: null,
   connectionIssue: null,
   inputVolume: loadNumberPreference('voiceInputVolume', DEFAULT_VOICE_INPUT_VOLUME, clampVoiceInputVolume),
+  noiseSuppressionMode: loadStringOptionPreference('voiceNoiseSuppressionMode', 'browser', VOICE_NOISE_SUPPRESSION_MODES),
+  noiseSuppressionError: false,
+  isAudioInputChanging: false,
   playbackVolume: loadNumberPreference('voicePlaybackVolume', DEFAULT_VOICE_PLAYBACK_VOLUME, clampVoicePlaybackVolume),
   participantPlaybackVolume: loadNumberRecordPreference(
     'voiceParticipantPlaybackVolume',
@@ -1230,7 +1255,8 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       }
     }
 
-    set({ status: 'requesting_mic', channelId, connectionIssue: null, error: null });
+    set({ status: 'requesting_mic', channelId, connectionIssue: null, error: null, noiseSuppressionError: false });
+    const generation = ++captureGeneration;
 
     // Guard: navigator.mediaDevices is undefined in non-secure remote HTTP contexts.
     const unavailableReason = getMicUnavailableReason();
@@ -1246,11 +1272,20 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: buildPreferredAudioInputConstraints(),
-        video: false,
-      });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: buildPreferredAudioInputConstraints(get().noiseSuppressionMode === 'browser'),
+          video: false,
+        });
+      } catch (err) {
+        if (generation !== captureGeneration) return;
+        if (get().noiseSuppressionMode !== 'rnnoise' || !(err instanceof DOMException) || err.name !== 'OverconstrainedError') throw err;
+        set({ noiseSuppressionMode: 'browser', noiseSuppressionError: true });
+        saveClientPreferencesPatch({ voiceNoiseSuppressionMode: 'browser' });
+        stream = await navigator.mediaDevices.getUserMedia({ audio: buildPreferredAudioInputConstraints(), video: false });
+      }
     } catch (err) {
+      if (generation !== captureGeneration) return;
       const isPermissionDenied =
         err instanceof DOMException &&
         (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError');
@@ -1262,9 +1297,39 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       });
       return;
     }
+    if (generation !== captureGeneration) {
+      stopUniqueStreamTracks(stream);
+      return;
+    }
     localCaptureStream = stream;
-    localSendStream = createLocalSendStream(stream, get().inputVolume);
+    const processor = createMicProcessor(stream, get().inputVolume);
+    micProcessor = processor;
+    localSendStream = processor.stream;
+    const initialized = await initializeMicNoiseMode(processor);
+    if (generation !== captureGeneration) return;
+    if (!initialized) {
+      set({ noiseSuppressionMode: 'browser', noiseSuppressionError: true });
+      saveClientPreferencesPatch({ voiceNoiseSuppressionMode: 'browser' });
+      // Model failure must also restore actual native microphone processing.
+      stopUniqueStreamTracks(stream);
+      try {
+        const fallbackCapture = await navigator.mediaDevices.getUserMedia({ audio: buildPreferredAudioInputConstraints(), video: false });
+        if (generation !== captureGeneration) {
+          stopUniqueStreamTracks(fallbackCapture);
+          return;
+        }
+        localCaptureStream = fallbackCapture;
+        await processor.setMode('browser', fallbackCapture);
+        if (generation !== captureGeneration) return;
+      } catch {
+        if (generation !== captureGeneration) return;
+        teardown();
+        set({ status: 'error', channelId: null, error: 'mic_denied' });
+        return;
+      }
+    }
 
+    localSendStream = processor.stream;
     set({ status: 'joining', connectionIssue: null });
 
     let ackData: ReturnType<typeof VoiceJoinAckDataSchema.parse>;
@@ -1349,6 +1414,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       }
     }
     playVoiceSfx('self_join');
+    flushNoiseFallback();
   },
 
   async leaveVoiceChannel(sendCommandAwaitAck) {
@@ -1423,6 +1489,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     if (status !== 'active' || !localCaptureStream || !localSendStream) {
       return;
     }
+    if (audioInputBusy) return;
 
     const unavailableReason = getMicUnavailableReason();
     if (unavailableReason) {
@@ -1431,56 +1498,165 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
 
     const previousCaptureStream = localCaptureStream;
     const previousSendStream = localSendStream;
-    const previousMicProcessingCtx = micProcessingCtx;
-    const previousMicGainNode = micGainNode;
-
-    const nextCaptureStream = await navigator.mediaDevices.getUserMedia({
-      audio: buildPreferredAudioInputConstraints(),
-      video: false,
-    });
-    const nextSendStream = createLocalSendStream(nextCaptureStream, inputVolume);
-    const nextAudioTrack = nextSendStream.getAudioTracks()[0] ?? null;
-
-    if (!nextAudioTrack) {
-      stopUniqueStreamTracks(nextCaptureStream, nextSendStream);
-      throw new Error('Selected microphone did not provide an audio track.');
-    }
-
-    nextAudioTrack.enabled = !isMuted;
-
+    const previousProcessor = micProcessor;
+    const generation = captureGeneration;
+    audioInputBusy = true;
+    set({ isAudioInputChanging: true });
+    let nextCaptureStream: MediaStream | null = null;
+    let nextProcessor: VoiceInputProcessor | null = null;
     try {
+      nextCaptureStream = await navigator.mediaDevices.getUserMedia({
+        audio: buildPreferredAudioInputConstraints(get().noiseSuppressionMode === 'browser'),
+        video: false,
+      });
+      if (generation !== captureGeneration) {
+        stopUniqueStreamTracks(nextCaptureStream);
+        return;
+      }
+      nextProcessor = createMicProcessor(nextCaptureStream, inputVolume);
+      const initialized = await initializeMicNoiseMode(nextProcessor);
+      if (!initialized) {
+        set({ noiseSuppressionError: true });
+        throw new Error('RNNoise could not initialize for the selected microphone.');
+      }
+      if (generation !== captureGeneration) {
+        nextProcessor.dispose();
+        stopUniqueStreamTracks(nextCaptureStream, nextProcessor.stream);
+        return;
+      }
+      const nextSendStream = nextProcessor.stream;
+      const nextAudioTrack = nextSendStream.getAudioTracks()[0] ?? null;
+      if (!nextAudioTrack) throw new Error('Selected microphone did not provide an audio track.');
+      nextAudioTrack.enabled = !isMuted;
       await webrtcManager?.replaceOutgoingAudioTrack(nextAudioTrack);
       await sfuSession?.replaceProducedTrack('audio', nextAudioTrack);
-    } catch (err) {
-      const createdMicProcessingCtx = micProcessingCtx;
-      stopUniqueStreamTracks(nextCaptureStream, nextSendStream);
-      if (createdMicProcessingCtx && createdMicProcessingCtx !== previousMicProcessingCtx) {
-        void createdMicProcessingCtx.close();
+      if (generation !== captureGeneration) {
+        nextProcessor.dispose();
+        stopUniqueStreamTracks(nextCaptureStream, nextSendStream);
+        return;
       }
-      micProcessingCtx = previousMicProcessingCtx;
-      micGainNode = previousMicGainNode;
+      stopSpeakingDetection();
+      localCaptureStream = nextCaptureStream;
+      localSendStream = nextSendStream;
+      micProcessor = nextProcessor;
+      micProcessor.setVolume(get().inputVolume);
+      applyLocalMuteToTracks(get().isMuted);
+      previousProcessor?.dispose();
+      stopUniqueStreamTracks(previousCaptureStream, previousSendStream);
+      startSpeakingDetection();
+    } catch (err) {
+      if (generation === captureGeneration) {
+        const previousTrack = previousSendStream.getAudioTracks()[0] ?? null;
+        await webrtcManager?.replaceOutgoingAudioTrack(previousTrack).catch(() => {});
+        await sfuSession?.replaceProducedTrack('audio', previousTrack).catch(() => {});
+      }
+      nextProcessor?.dispose();
+      stopUniqueStreamTracks(nextCaptureStream, nextProcessor?.stream ?? null);
       throw err;
+    } finally {
+      if (generation === captureGeneration) {
+        audioInputBusy = false;
+        set({ isAudioInputChanging: false });
+        flushNoiseFallback();
+      }
     }
+  },
 
-    stopSpeakingDetection();
-    localCaptureStream = nextCaptureStream;
-    localSendStream = nextSendStream;
-    applyLocalMuteToTracks(isMuted);
-
-    if (previousMicProcessingCtx && previousMicProcessingCtx !== micProcessingCtx) {
-      void previousMicProcessingCtx.close();
+  async setNoiseSuppressionMode(mode) {
+    if (!VOICE_NOISE_SUPPRESSION_MODES.includes(mode) || audioInputBusy) return;
+    const { status } = get();
+    if (status === 'requesting_mic' || status === 'joining' || status === 'leaving') return;
+    if (!micProcessor) {
+      set({ noiseSuppressionMode: mode, noiseSuppressionError: false });
+      saveClientPreferencesPatch({ voiceNoiseSuppressionMode: mode });
+      return;
     }
-    stopUniqueStreamTracks(previousCaptureStream, previousSendStream);
-    startSpeakingDetection();
+    const processor = micProcessor;
+    const generation = captureGeneration;
+    const previousCaptureStream = localCaptureStream;
+    const previousMode = processor.mode;
+    const previousDeviceId = previousCaptureStream?.getAudioTracks()[0]?.getSettings?.().deviceId;
+    let nextCaptureStream: MediaStream | null = null;
+    let captureStopped = false;
+    audioInputBusy = true;
+    set({ isAudioInputChanging: true, noiseSuppressionError: false });
+    try {
+      // Preload while the existing microphone remains audible. Chromium can
+      // share the old source's fixed DSP with a concurrent getUserMedia call,
+      // so release that capture before acquiring the new processing flags.
+      await processor.prepareMode(mode);
+      if (generation !== captureGeneration) return;
+      stopUniqueStreamTracks(previousCaptureStream);
+      captureStopped = true;
+      nextCaptureStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...buildPreferredAudioInputConstraints(mode === 'browser'),
+          ...(previousDeviceId ? { deviceId: { exact: previousDeviceId } } : {}),
+        },
+        video: false,
+      });
+      if (generation !== captureGeneration) {
+        stopUniqueStreamTracks(nextCaptureStream);
+        return;
+      }
+      await processor.setMode(mode, nextCaptureStream);
+      if (generation !== captureGeneration) {
+        stopUniqueStreamTracks(nextCaptureStream);
+        return;
+      }
+      localCaptureStream = nextCaptureStream;
+      stopUniqueStreamTracks(previousCaptureStream);
+      set({ noiseSuppressionMode: processor.mode });
+      saveClientPreferencesPatch({ voiceNoiseSuppressionMode: processor.mode });
+    } catch {
+      stopUniqueStreamTracks(nextCaptureStream);
+      if (generation !== captureGeneration) return;
+      if (captureStopped) {
+        let restoredCapture: MediaStream | null = null;
+        try {
+          restoredCapture = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              ...buildPreferredAudioInputConstraints(previousMode === 'browser'),
+              ...(previousDeviceId ? { deviceId: { exact: previousDeviceId } } : {}),
+            },
+            video: false,
+          });
+          if (generation !== captureGeneration) {
+            stopUniqueStreamTracks(restoredCapture);
+            return;
+          }
+          await processor.setMode(previousMode, restoredCapture);
+          if (generation !== captureGeneration) {
+            stopUniqueStreamTracks(restoredCapture);
+            return;
+          }
+          localCaptureStream = restoredCapture;
+        } catch {
+          stopUniqueStreamTracks(restoredCapture);
+          if (generation !== captureGeneration) return;
+          const channelId = get().channelId;
+          if (channelId) void savedSendCommandAwaitAck?.('voice.leave', { channelId }).catch(() => {});
+          teardown();
+          set({ status: 'error', channelId: null, error: 'mic_denied', noiseSuppressionError: true });
+          return;
+        }
+      }
+      set({ noiseSuppressionMode: processor.mode, noiseSuppressionError: true });
+      saveClientPreferencesPatch({ voiceNoiseSuppressionMode: processor.mode });
+    } finally {
+      if (generation === captureGeneration) {
+        audioInputBusy = false;
+        set({ isAudioInputChanging: false });
+        flushNoiseFallback();
+      }
+    }
   },
 
   setInputVolume(volume) {
     const clampedVolume = clampVoiceInputVolume(volume);
     set({ inputVolume: clampedVolume });
     saveNumberPreference('voiceInputVolume', clampedVolume);
-    if (micGainNode) {
-      if (micProcessingCtx) setVoiceGain(micGainNode.gain, clampedVolume, micProcessingCtx);
-    }
+    micProcessor?.setVolume(clampedVolume);
   },
 
   setPlaybackVolume(volume) {
@@ -1841,7 +2017,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
         });
         startMediaRecovery({
           abandon: () => get().handleGatewayDisconnected(),
-          attempt: () => get().handleGatewayReconnected(),
+          // voice.join already registered this connection. Repeating it after
+          // transport negotiation fails is rejected as VOICE_ALREADY_JOINED.
+          attempt: attemptVoiceMediaRecovery,
           id: voiceRecoveryId(channelId),
           kind: 'voice',
           reason: recoveryError.message,

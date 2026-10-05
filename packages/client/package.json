@@ -1,12 +1,12 @@
 {
   "name": "@baker/client",
-  "version": "1.1.8",
+  "version": "1.1.9",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup",
     "lint": "eslint src",
     "test": "vitest run src --passWithNoTests",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -14,6 +14,7 @@
   "dependencies": {
     "@baker/protocol": "workspace:*",
     "@baker/sdk": "workspace:*",
+    "@jitsi/rnnoise-wasm": "0.2.1",
     "i18next": "^26.0.4",
     "i18next-browser-languagedetector": "^8.2.1",
     "react": "^18.3.1",
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "esbuild": "0.27.7",
     "tsup": "^8.3.5"
   }
 }

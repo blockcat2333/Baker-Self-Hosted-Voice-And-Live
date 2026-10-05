@@ -77,6 +77,7 @@ beforeEach(() => {
     }]),
     id: `transport-${++transportSequence}`,
     on: vi.fn(),
+    observer: { on: vi.fn() },
     produce: vi.fn(async ({ kind }) => ({
       close: vi.fn(),
       getStats: mocks.producerGetStats,
@@ -105,6 +106,25 @@ beforeEach(() => {
 });
 
 describe('MediasoupMediaAdapter shared WebRTC servers', () => {
+  it('keeps temporarily disconnected transports owned and closes them during session cleanup', async () => {
+    const adapter = new MediasoupMediaAdapter(parseAppEnv({
+      NODE_ENV: 'test', SFU_ANNOUNCED_IP: '127.0.0.1', SFU_RTC_MIN_PORT: '23335', SFU_RTC_MAX_PORT: '23340',
+    }));
+    const session = {
+      channelId: '00000000-0000-4000-8000-000000000021', mode: 'voice' as const,
+      sessionId: '00000000-0000-4000-8000-000000000022', transportMode: 'sfu' as const,
+      userId: '00000000-0000-4000-8000-000000000023',
+    };
+    await adapter.createSession(session);
+    const result = await adapter.createSfuTransport({ ...session, direction: 'send' });
+    const transport = await mocks.createWebRtcTransport.mock.results[0]!.value;
+    const listener = transport.on.mock.calls.find(([event]: [string]) => event === 'icestatechange')[1];
+    listener('disconnected');
+    await adapter.connectSfuTransport({ ...session, transportId: result.transportOptions.id, dtlsParameters: {} });
+    expect(transport.connect).toHaveBeenCalledOnce();
+    await adapter.closeSfu(session);
+    expect(transport.close).toHaveBeenCalledOnce();
+  });
   it('offers H.264 before the optional browser codecs', async () => {
     const adapter = new MediasoupMediaAdapter(
       parseAppEnv({

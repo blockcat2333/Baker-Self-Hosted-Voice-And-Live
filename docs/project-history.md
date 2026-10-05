@@ -1578,3 +1578,8 @@ Why:
 - Added adaptive voice buffering and clipping protection, and corrected unavailable/fractional/stale packet-loss reporting.
 - Validation passed: 278 tests, workspace type checks, lint, builds, synthetic HDR checks in Edge/Electron and offline audio clipping checks.
 - Live cross-border listening verification remains a follow-up.
+
+
+## 2026-10-05 Baker 1.1.9 / Desktop 1.1.9a
+
+Optional RNNoise microphone suppression (ordinary suppression remains the default), voice/live recovery fixes, shared music controls and manual web update notices. Release artifacts and validation are documented in `docs/releases/1.1.9.md` and `docs/releases/1.1.9a.md`. Real-network and human-microphone field validation remains pending.

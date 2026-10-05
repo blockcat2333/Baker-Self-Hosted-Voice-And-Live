@@ -4,14 +4,18 @@ import react from '@vitejs/plugin-react-swc';
 import { defineConfig, type PluginOption } from 'vite';
 import electron from 'vite-plugin-electron/simple';
 import tsconfigPaths from 'vite-tsconfig-paths';
+import { rnnoiseNoticesPlugin } from '../../packages/client/build/rnnoise-assets';
 
 export default defineConfig({
+  worker: { format: 'es' },
+  optimizeDeps: { exclude: ['@jitsi/rnnoise-wasm'] },
   build: {
     outDir: 'dist/renderer',
   },
   plugins: [
     react(),
     tsconfigPaths(),
+    rnnoiseNoticesPlugin(),
     electron({
       main: {
         entry: 'electron/main.ts',

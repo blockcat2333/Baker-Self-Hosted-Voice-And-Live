@@ -170,6 +170,12 @@ export function VoiceAudioDeviceControls() {
   const setSelectedAudioInputId = useAudioDeviceStore((s) => s.setSelectedAudioInputId);
   const setSelectedAudioOutputId = useAudioDeviceStore((s) => s.setSelectedAudioOutputId);
   const switchAudioInputDevice = useVoiceStore((s) => s.switchAudioInputDevice);
+  const noiseSuppressionMode = useVoiceStore((s) => s.noiseSuppressionMode);
+  const setNoiseSuppressionMode = useVoiceStore((s) => s.setNoiseSuppressionMode);
+  const noiseSuppressionError = useVoiceStore((s) => s.noiseSuppressionError);
+  const isAudioInputChanging = useVoiceStore((s) => s.isAudioInputChanging);
+  const voiceStatus = useVoiceStore((s) => s.status);
+  const inputDisabled = isAudioInputChanging || voiceStatus === 'requesting_mic' || voiceStatus === 'joining' || voiceStatus === 'leaving';
   const [switchError, setSwitchError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -218,7 +224,7 @@ export function VoiceAudioDeviceControls() {
         <select
           className="voice-device-select"
           value={selectedAudioInputId ?? ''}
-          disabled={isRefreshing}
+          disabled={isRefreshing || inputDisabled}
           onChange={(event) => {
             void handleAudioInputChange(event.target.value);
           }}
@@ -248,6 +254,28 @@ export function VoiceAudioDeviceControls() {
           ))}
         </select>
       </label>
+
+      <label className="voice-device-field voice-device-field--noise">
+        <span className="voice-device-label">{t('voice.noise_suppression')}</span>
+        <select
+          aria-label={t('voice.noise_suppression')}
+          className="voice-device-select"
+          value={noiseSuppressionMode}
+          disabled={inputDisabled}
+          onChange={(event) => {
+            void setNoiseSuppressionMode(event.target.value === 'rnnoise' ? 'rnnoise' : 'browser');
+          }}
+        >
+          <option value="browser">{t('voice.noise_browser')}</option>
+          <option value="rnnoise">{t('voice.noise_rnnoise')}</option>
+        </select>
+      </label>
+      {isAudioInputChanging ? <p className="voice-device-status" role="status">{t('voice.audio_input_changing')}</p> : null}
+      {noiseSuppressionError ? (
+        <p className="voice-device-error" role="alert">
+          {t('voice.noise_error', { mode: t(noiseSuppressionMode === 'rnnoise' ? 'voice.noise_rnnoise' : 'voice.noise_browser') })}
+        </p>
+      ) : null}
 
       {deviceError || switchError ? (
         <p className="voice-device-error">{switchError ?? deviceError}</p>
@@ -854,14 +882,10 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
   const setInputVolume = useVoiceStore((s) => s.setInputVolume);
   const musicPlaybackVolume = useMusicStore((s) => s.playbackVolume);
   const setMusicPlaybackVolume = useMusicStore((s) => s.setPlaybackVolume);
-  const listeningById = useMusicStore((s) => s.listeningById);
   const controls = useVoiceControls();
   const lastAudiblePlaybackVolumeRef = useRef(1);
   const lastAudibleMusicVolumeRef = useRef(1);
   const [openVolumeControl, setOpenVolumeControl] = useState<'input' | 'music' | 'output' | null>(null);
-  const hasRemoteMusic = Object.values(listeningById).some(
-    (entry) => entry.status === 'starting' || entry.status === 'listening',
-  );
 
   useEffect(() => {
     if (controls.playbackVolume > 0) {
@@ -874,12 +898,6 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
       lastAudibleMusicVolumeRef.current = musicPlaybackVolume;
     }
   }, [musicPlaybackVolume]);
-
-  useEffect(() => {
-    if (!hasRemoteMusic && openVolumeControl === 'music') {
-      setOpenVolumeControl(null);
-    }
-  }, [hasRemoteMusic, openVolumeControl]);
 
   useEffect(() => {
     if (!openVolumeControl) return;
@@ -921,7 +939,6 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
   }
 
   function handleMusicPlaybackToggle() {
-    if (controls.isConnecting) return;
     if (isMusicMuted) {
       setMusicPlaybackVolume(lastAudibleMusicVolumeRef.current || 1);
       return;
@@ -1075,7 +1092,6 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
             </div>
           ) : null}
         </div>
-        {hasRemoteMusic ? (
           <div className="voice-bottom-split voice-bottom-split--music">
             <Tooltip
               label={isMusicMuted ? t('voice.shared_music_unmute') : t('voice.shared_music_mute')}
@@ -1084,7 +1100,6 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
                 type="button"
                 className={`voice-bottom-btn voice-bottom-btn--split-main${isMusicMuted ? ' voice-bottom-btn--danger' : ''}`}
                 onClick={handleMusicPlaybackToggle}
-                disabled={controls.isConnecting}
                 aria-label={isMusicMuted ? t('voice.shared_music_unmute') : t('voice.shared_music_mute')}
                 aria-pressed={isMusicMuted}
               >
@@ -1131,7 +1146,6 @@ export function VoiceBottomControlBar({ onOpenStreamShareDialog }: VoiceBottomCo
               </div>
             ) : null}
           </div>
-        ) : null}
         <Tooltip
           label={
             controls.isDesktop

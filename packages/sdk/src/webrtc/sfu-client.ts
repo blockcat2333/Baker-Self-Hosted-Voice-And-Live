@@ -136,7 +136,10 @@ export class SfuClientSession {
       const producer = await transport.produce({
         track,
         ...(!isVideo && this.descriptor.mode === 'voice'
-          ? { codecOptions: { opusFec: true, opusDtx: false, opusStereo: false, opusMaxAverageBitrate: 48000 } }
+          ? {
+              codecOptions: { opusFec: true, opusDtx: false, opusStereo: false, opusMaxAverageBitrate: 48000 },
+              encodings: [{ priority: 'high', networkPriority: 'high' }],
+            }
           : {}),
         ...(codec ? { codec } : {}),
         ...(isVideo &&
@@ -144,6 +147,8 @@ export class SfuClientSession {
           ? {
               encodings: [
                 {
+                  priority: 'low',
+                  networkPriority: 'low',
                 ...(options.maxVideoBitrateKbps
                     ? {
                         maxBitrate: Math.round(
@@ -311,10 +316,18 @@ export class SfuClientSession {
       this.consumerUserIds.delete(consumer.id);
       this.consumedProducerIds.delete(producer.id);
     });
-    await this.sendCommandAwaitAck('media.sfu.resume_consumer', {
-      ...this.descriptor,
-      consumerId: data.consumerId,
-    });
+    try {
+      await this.sendCommandAwaitAck('media.sfu.resume_consumer', {
+        ...this.descriptor,
+        consumerId: data.consumerId,
+      });
+    } catch (error) {
+      consumer.close();
+      this.consumers.delete(consumer.id);
+      this.consumerUserIds.delete(consumer.id);
+      this.consumedProducerIds.delete(producer.id);
+      throw error;
+    }
     return {
       consumerId: data.consumerId,
       producer,

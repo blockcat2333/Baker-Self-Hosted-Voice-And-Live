@@ -538,6 +538,7 @@ async function consumeSfuStreamProducers(streamId: string, producers: SfuProduce
       }));
     } catch (err) {
       console.warn('[stream] SFU consume failed for', producer.id, err);
+      throw err;
     }
   }
 }
@@ -994,13 +995,13 @@ async function attemptOwnedMediaRecovery() {
       { onTransportConnectionStateChange: (_direction, state) => handleOwnedSfuTransportState(state) },
     );
     await session.load(reconnect.sfu);
+    runtime.sfuSession = session;
     await session.produceTracks(runtime.localStream.getTracks(), {
       degradationPreference: 'balanced',
       maxVideoBitrateKbps: runtime.quality.bitrateKbps,
       maxVideoFramerate: runtime.quality.frameRate,
       preferredVideoCodec: runtime.codecPreference,
     });
-    runtime.sfuSession = session;
   } else {
     runtime.manager = createOwnedManager();
     for (const viewer of useStreamStore.getState().ownedStream?.viewers ?? []) {
@@ -2669,7 +2670,10 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     lastWatchedVideoStatsSamples.delete(producer.streamId);
     watchedVideoStatsCache.delete(producer.streamId);
     watchedPresentationSamples.delete(producer.streamId);
-    void consumeSfuStreamProducers(producer.streamId, [producer]);
+    const streamId = producer.streamId;
+    void consumeSfuStreamProducers(streamId, [producer]).catch((error) => {
+      beginWatchedMediaRecovery(streamId, error instanceof Error ? error.message : 'Failed to receive live media.');
+    });
   },
 
   handleSfuProducerRemoved(data) {
@@ -2765,6 +2769,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
   async handleMediaModeUpdated(sendCommandAwaitAck, sendRawCommand) {
     const watchedEntries = Object.values(get().watchedStreamsById).filter((watched) => watched.status !== 'ended');
+    // A previous restore may have registered a publication before negotiation
+    // failed. Rebuild that session rather than issuing a duplicate stream.start.
+    const reuseRegisteredPublication = Boolean(
+      ownedRuntime && get().ownedStream?.sessionId === ownedRuntime.sessionId &&
+      get().ownedStream?.status === 'reconnecting',
+    );
     const owned = ownedRuntime
       ? {
           channelId: ownedRuntime.channelId,
@@ -2801,7 +2811,9 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       return {
         error: null,
         ownedStream:
-          canReuseOwned && owned
+          reuseRegisteredPublication
+          ? state.ownedStream
+          : canReuseOwned && owned
           ? {
               channelId: owned.channelId,
               codecPreference: owned.codecPreference,
@@ -2818,7 +2830,9 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       };
     });
 
-    if (canReuseOwned && owned) {
+    if (canReuseOwned && owned && reuseRegisteredPublication) {
+      await attemptOwnedMediaRecovery();
+    } else if (canReuseOwned && owned) {
       let ackData: ReturnType<typeof StreamStartAckDataSchema.parse>;
       try {
         const raw = await sendCommandAwaitAck('stream.start', {
@@ -2862,6 +2876,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         userId,
       };
 
+      set((state) => ({
+        ownedStream: state.ownedStream
+          ? { ...state.ownedStream, sessionId: ackData.sessionId, streamId }
+          : null,
+      }));
+
       if (ackData.mediaMode === 'sfu') {
         try {
           if (!ackData.sfu) throw new Error('SFU stream session is missing setup data.');
@@ -2876,6 +2896,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
             { onTransportConnectionStateChange: (_direction, state) => handleOwnedSfuTransportState(state) },
           );
           await sfuSession.load(ackData.sfu);
+          if (ownedRuntime) ownedRuntime.sfuSession = sfuSession;
           await sfuSession.produceTracks(owned.localStream.getTracks(), {
             degradationPreference: 'balanced',
             maxVideoBitrateKbps: owned.quality.bitrateKbps,
@@ -2936,8 +2957,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       return;
     }
 
+    if (ownedRuntime) resolveMediaRecovery(ownedRecoveryId(ownedRuntime.streamId));
     suspendOwnedTransport();
-    for (const streamId of watchedRuntimes.keys()) suspendWatchedTransport(streamId);
+    for (const streamId of watchedRuntimes.keys()) {
+      resolveMediaRecovery(watchedRecoveryId(streamId));
+      suspendWatchedTransport(streamId);
+    }
 
     set((state) => {
       const nextWatched: Record<string, WatchedStreamState> = {};
@@ -2958,7 +2983,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
       return {
         ownedStream: state.ownedStream
-          ? { ...state.ownedStream, status: 'reconnecting', viewers: [] }
+          ? { ...state.ownedStream, sessionId: null, status: 'reconnecting', viewers: [] }
           : null,
         watchedStreamsById: nextWatched,
         error: null,

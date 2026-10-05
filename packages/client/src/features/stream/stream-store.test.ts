@@ -16,6 +16,7 @@ const sfuProduceTracks = vi.fn();
 const sfuGetVideoSendSample = vi.fn();
 const sfuGetVideoReceiveSample = vi.fn();
 const sfuClose = vi.fn();
+const sfuConsumeProducer = vi.fn();
 const getDisplayMedia = vi.fn();
 const getUserMedia = vi.fn();
 const enumerateDevices = vi.fn();
@@ -82,6 +83,7 @@ vi.mock('@baker/sdk', () => {
       getVideoSendSample = sfuGetVideoSendSample;
       getVideoReceiveSample = sfuGetVideoReceiveSample;
       close = sfuClose;
+      consumeProducer = sfuConsumeProducer;
     },
     WebRtcManager: MockWebRtcManager,
   };
@@ -89,6 +91,7 @@ vi.mock('@baker/sdk', () => {
 
 import { useAuthStore } from '../auth/auth-store';
 import { getOwnedStreamVideoStats, getWatchedStreamVideoStats, useStreamStore } from './stream-store';
+import { resetMediaRecoveryStore, useMediaRecoveryStore } from '../recovery/recovery-store';
 
 const channelId = '11111111-1111-4111-8111-111111111111';
 const hostUserId = '22222222-2222-4222-8222-222222222222';
@@ -153,6 +156,9 @@ beforeEach(() => {
   sfuGetVideoReceiveSample.mockReset();
   sfuGetVideoReceiveSample.mockResolvedValue(null);
   sfuClose.mockReset();
+  sfuConsumeProducer.mockReset();
+  sfuConsumeProducer.mockResolvedValue(null);
+  resetMediaRecoveryStore();
   getDisplayMedia.mockReset();
   getUserMedia.mockReset();
   enumerateDevices.mockReset();
@@ -191,6 +197,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetMediaRecoveryStore();
   vi.unstubAllGlobals();
   globalThis.MediaStream = OriginalMediaStream;
   Object.defineProperty(globalThis, 'navigator', {
@@ -208,6 +215,48 @@ afterEach(() => {
 });
 
 describe('stream store watch startup', () => {
+  it('rebuilds a registered publication after gateway restore negotiation fails without starting twice', async () => {
+    const sfu = { producers: [], routerRtpCapabilities: {} };
+    const sendCommandAwaitAck = vi.fn((command: string) => {
+      if (command === 'stream.start') return Promise.resolve({
+        channelId, iceServers: [], mediaMode: 'sfu', sessionId: hostSessionId, sfu, streamId,
+      });
+      if (command === 'media.session.reconnect') return Promise.resolve({
+        iceServers: [], mediaMode: 'sfu',
+        session: { channelId, mode: 'stream_publish', sessionId: hostSessionId, streamId }, sfu,
+      });
+      return Promise.resolve({ channelId, streamId });
+    });
+    await useStreamStore.getState().startSharing(channelId,
+      { bitrateKbps: 4000, frameRate: 30, resolution: '720p' }, 'screen', sendCommandAwaitAck, vi.fn());
+    useStreamStore.getState().handleGatewayWillReconnect();
+    // Restoring the gateway registers the stream, but two transport attempts time out.
+    sfuProduceTracks.mockRejectedValueOnce(new Error('negotiation timed out'));
+    sfuProduceTracks.mockRejectedValueOnce(new Error('negotiation timed out again'));
+    await expect(useStreamStore.getState().handleGatewayReconnected(sendCommandAwaitAck, vi.fn())).rejects.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useStreamStore.getState().ownedStream?.status).toBe('reconnecting');
+    expect(useMediaRecoveryStore.getState().incidents[`stream_publish:${streamId}`]).toBeDefined();
+    await useStreamStore.getState().handleGatewayReconnected(sendCommandAwaitAck, vi.fn());
+    expect(useStreamStore.getState().ownedStream?.status).toBe('live');
+    expect(sendCommandAwaitAck.mock.calls.filter(([command]) => command === 'stream.start')).toHaveLength(2);
+    expect(sendCommandAwaitAck.mock.calls.filter(([command]) => command === 'media.session.reconnect')).toHaveLength(2);
+    expect(localPreviewTrack.stop).not.toHaveBeenCalled();
+  });
+
+  it('does not report SFU watching success when consumer negotiation times out', async () => {
+    sfuConsumeProducer.mockRejectedValueOnce(new Error('consumer negotiation timed out'));
+    const sendCommandAwaitAck = vi.fn().mockResolvedValue({
+      channelId, hostSessionId, hostUserId, iceServers: [], mediaMode: 'sfu', sessionId: viewerSessionId, streamId,
+      sfu: { routerRtpCapabilities: {}, producers: [{
+        id: 'producer-video', channelId, userId: hostUserId, sessionId: hostSessionId,
+        streamId, source: 'stream', kind: 'video',
+      }] },
+    });
+    await expect(useStreamStore.getState().watchStream(channelId, streamId, sendCommandAwaitAck, vi.fn()))
+      .rejects.toThrow('consumer negotiation timed out');
+    expect(useStreamStore.getState().watchedStreamsById[streamId]).toBeUndefined();
+  });
   it('sends the selected livestream quality through capture and stream.start', async () => {
     const sendCommandAwaitAck = vi.fn().mockResolvedValue({
       channelId,

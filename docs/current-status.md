@@ -998,3 +998,8 @@ Recommended next work:
 - clarified that the selected bitrate is a ceiling and that standard WebRTC does
   not provide a reliable hardware/software force switch
 - no migration or persistent telemetry was introduced
+
+
+## 2026-10-05 Baker 1.1.9 / Desktop 1.1.9a
+
+Optional RNNoise microphone suppression (ordinary suppression remains the default), voice/live recovery fixes, shared music controls and manual web update notices. Release artifacts and validation are documented in `docs/releases/1.1.9.md` and `docs/releases/1.1.9a.md`. Real-network and human-microphone field validation remains pending.

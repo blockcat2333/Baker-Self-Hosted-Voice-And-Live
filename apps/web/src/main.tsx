@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 
 import '@baker/client/app/app.css';
 import { AppRoot, createBrowserPlatformApi } from '@baker/client';
+import { WebUpdateNotice } from './WebUpdateNotice';
 
 const rootElement = document.getElementById('root');
 
@@ -12,6 +13,7 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
+    <WebUpdateNotice />
     <AppRoot
       apiBaseUrl={import.meta.env.VITE_API_BASE_URL}
       gatewayUrl={import.meta.env.VITE_GATEWAY_URL}

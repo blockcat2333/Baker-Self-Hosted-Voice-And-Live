@@ -29,6 +29,8 @@ let analyserAmplitude = 0;
 const OriginalAudio = globalThis.Audio;
 const OriginalMediaStream = globalThis.MediaStream;
 const OriginalAudioContext = globalThis.AudioContext;
+const OriginalAudioWorkletNode = globalThis.AudioWorkletNode;
+const workletAddModule = vi.fn();
 const OriginalNavigator = globalThis.navigator;
 const OriginalRTCPeerConnection = globalThis.RTCPeerConnection;
 const OriginalWindow = globalThis.window;
@@ -42,6 +44,7 @@ class MockTrack {
   muted = false;
   readyState: MediaStreamTrackState = 'live';
   stop = vi.fn();
+  applyConstraints = vi.fn().mockResolvedValue(undefined);
 
   constructor(id: string, kind: 'audio' | 'video') {
     this.id = id;
@@ -91,6 +94,8 @@ class MockAudio {
 }
 
 class MockAudioContext {
+  sampleRate = 48000;
+  audioWorklet = { addModule: workletAddModule };
   createAnalyser() {
     return {
       fftSize: 0,
@@ -125,6 +130,7 @@ class MockAudioContext {
   createMediaStreamSource(_stream: MediaStream) {
     return {
       connect() {},
+      disconnect() {},
     };
   }
 
@@ -251,6 +257,20 @@ beforeEach(() => {
   latestSfuCallbacks = null;
   audioElements.length = 0;
   mockGainNodes.length = 0;
+  workletAddModule.mockReset();
+  workletAddModule.mockResolvedValue(undefined);
+  globalThis.AudioWorkletNode = class {
+    onprocessorerror: (() => void) | null = null;
+    port = { onmessage: null as ((event: { data: string }) => void) | null, postMessage() {} };
+    connect() {}
+    disconnect() {}
+    addEventListener(_event: string, callback: () => void) { this.onprocessorerror = callback; }
+    removeEventListener() { this.onprocessorerror = null; }
+    constructor() {
+      // Promise scheduling also works under the suite's fake timers.
+      void Promise.resolve().then(() => this.port.onmessage?.({ data: 'ready' }));
+    }
+  } as unknown as typeof AudioWorkletNode;
 
   globalThis.Audio = MockAudio as unknown as typeof Audio;
   globalThis.MediaStream = MockMediaStream as unknown as typeof MediaStream;
@@ -298,6 +318,9 @@ beforeEach(() => {
     connectionIssue: null,
     error: null,
     inputVolume: 1,
+    noiseSuppressionMode: 'browser',
+    noiseSuppressionError: false,
+    isAudioInputChanging: false,
     isMuted: false,
     localMediaSelfLossPct: null,
     localMediaSelfUpdatedAt: null,
@@ -344,6 +367,7 @@ afterEach(async () => {
   globalThis.Audio = OriginalAudio;
   globalThis.MediaStream = OriginalMediaStream;
   globalThis.AudioContext = OriginalAudioContext;
+  globalThis.AudioWorkletNode = OriginalAudioWorkletNode;
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
     value: OriginalNavigator,
@@ -689,6 +713,96 @@ describe('voice mute behavior', () => {
 });
 
 describe('voice audio device selection', () => {
+  async function join(mode: 'p2p' | 'sfu' = 'p2p') {
+    await useVoiceStore.getState().joinVoiceChannel(channelId, async () => ({
+      channelId, iceServers: [], mediaMode: mode,
+      participants: [{ isMuted: false, sessionId, userId }], sessionId,
+      ...(mode === 'sfu' ? { sfu: { producers: [], routerRtpCapabilities: {} } } : {}),
+    }), vi.fn());
+  }
+
+  it('does not load RNNoise by default and saves a manually selected mode before joining', async () => {
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('browser');
+    await useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    expect(workletAddModule).not.toHaveBeenCalled();
+    expect(JSON.parse(window.localStorage.getItem(CLIENT_PREFERENCES_STORAGE_KEY)!)).toMatchObject({ voiceNoiseSuppressionMode: 'rnnoise' });
+    await join();
+    expect(workletAddModule).toHaveBeenCalledOnce();
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('rnnoise');
+  });
+
+  it.each(['p2p', 'sfu'] as const)('toggles RNNoise in %s without replacing the output track or clearing mute', async (mode) => {
+    await join(mode);
+    const captureCount = getUserMedia.mock.calls.length;
+    useVoiceStore.getState().toggleMute(vi.fn());
+    await useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('rnnoise');
+    expect(useVoiceStore.getState().isMuted).toBe(true);
+    await useVoiceStore.getState().setNoiseSuppressionMode('browser');
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('browser');
+    expect(useVoiceStore.getState().isMuted).toBe(true);
+    expect(replaceOutgoingAudioTrack).not.toHaveBeenCalled();
+    expect(sfuReplaceProducedTrack).not.toHaveBeenCalled();
+    expect(getUserMedia).toHaveBeenCalledTimes(captureCount + 2);
+  });
+
+  it('falls back to ordinary suppression without failing the voice join', async () => {
+    await useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    workletAddModule.mockRejectedValueOnce(new Error('asset missing'));
+    await join();
+    expect(useVoiceStore.getState().status).toBe('active');
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('browser');
+    expect(useVoiceStore.getState().noiseSuppressionError).toBe(true);
+    expect(useVoiceStore.getState().isAudioInputChanging).toBe(false);
+  });
+
+  it('joins with ordinary suppression if the microphone cannot satisfy RNNoise capture constraints', async () => {
+    await useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    getUserMedia.mockRejectedValueOnce(new DOMException('Unsupported processing flags', 'OverconstrainedError'));
+    await join();
+    expect(useVoiceStore.getState().status).toBe('active');
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('browser');
+    expect(useVoiceStore.getState().noiseSuppressionError).toBe(true);
+    expect(getUserMedia).toHaveBeenLastCalledWith({ audio: { autoGainControl: true, echoCancellation: true, noiseSuppression: true }, video: false });
+  });
+
+  it('reopens ordinary capture if a mode switch cannot acquire the requested microphone processing', async () => {
+    await join();
+    getUserMedia.mockRejectedValueOnce(new DOMException('Unsupported flags', 'OverconstrainedError'));
+    await useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    expect(useVoiceStore.getState().status).toBe('active');
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('browser');
+    expect(useVoiceStore.getState().noiseSuppressionError).toBe(true);
+    expect(getUserMedia).toHaveBeenLastCalledWith({ audio: { autoGainControl: true, echoCancellation: true, noiseSuppression: true }, video: false });
+    expect(replaceOutgoingAudioTrack).not.toHaveBeenCalled();
+  });
+
+  it('preserves RNNoise across microphone changes and gateway reconnection', async () => {
+    await join('sfu');
+    await useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    await useVoiceStore.getState().switchAudioInputDevice();
+    expect(workletAddModule).toHaveBeenCalledTimes(2);
+    const captureCount = getUserMedia.mock.calls.length;
+    useVoiceStore.getState().handleGatewayWillReconnect();
+    await useVoiceStore.getState().handleGatewayReconnected();
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('rnnoise');
+    expect(getUserMedia).toHaveBeenCalledTimes(captureCount);
+  });
+
+  it('does not commit a pending RNNoise selection after leaving the channel', async () => {
+    await join();
+    let finishLoad!: () => void;
+    workletAddModule.mockImplementationOnce(() => new Promise<void>((resolve) => { finishLoad = resolve; }));
+    const switching = useVoiceStore.getState().setNoiseSuppressionMode('rnnoise');
+    await Promise.resolve();
+    await useVoiceStore.getState().leaveVoiceChannel(async () => ({}));
+    finishLoad();
+    await switching;
+    expect(useVoiceStore.getState().status).toBe('idle');
+    expect(useVoiceStore.getState().noiseSuppressionMode).toBe('browser');
+    expect(useVoiceStore.getState().isAudioInputChanging).toBe(false);
+  });
+
   it('uses the selected microphone when joining a voice channel', async () => {
     useAudioDeviceStore.getState().setSelectedAudioInputId('desk-mic');
 
@@ -817,6 +931,32 @@ describe('voice media network stats', () => {
     expect(useVoiceStore.getState().localMediaSelfLossPct).toBe(0.1);
     await vi.advanceTimersByTimeAsync(13_000);
     expect(useVoiceStore.getState().localMediaSelfLossPct).toBeNull();
+  });
+
+  it('rebuilds an already joined SFU voice session after gateway restore negotiation times out', async () => {
+    const sfu = { producers: [], routerRtpCapabilities: {} };
+    const sendCommandAwaitAck = vi.fn(async (command: string) => {
+      if (command === 'voice.join') return {
+        channelId, iceServers: [], mediaMode: 'sfu',
+        participants: [{ isMuted: false, sessionId, userId }], sessionId, sfu,
+      };
+      if (command === 'media.session.reconnect') return {
+        iceServers: [], mediaMode: 'sfu', session: { channelId, mode: 'voice', sessionId }, sfu,
+      };
+      return {};
+    });
+    await useVoiceStore.getState().joinVoiceChannel(channelId, sendCommandAwaitAck, vi.fn());
+    const captureCalls = getUserMedia.mock.calls.length;
+    useVoiceStore.getState().toggleMute(vi.fn());
+    useVoiceStore.getState().handleGatewayWillReconnect();
+    sfuProduceTracks.mockRejectedValueOnce(new Error('voice transport timed out'));
+    await expect(useVoiceStore.getState().handleGatewayReconnected()).rejects.toThrow('voice transport timed out');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useVoiceStore.getState().status).toBe('active');
+    expect(useVoiceStore.getState().isMuted).toBe(true);
+    expect(sendCommandAwaitAck.mock.calls.filter(([command]) => command === 'voice.join')).toHaveLength(2);
+    expect(sendCommandAwaitAck).toHaveBeenCalledWith('media.session.reconnect', { channelId, mode: 'voice', sessionId });
+    expect(getUserMedia).toHaveBeenCalledTimes(captureCalls);
   });
 
   it('self-reports SFU local media loss from outbound producer stats', async () => {

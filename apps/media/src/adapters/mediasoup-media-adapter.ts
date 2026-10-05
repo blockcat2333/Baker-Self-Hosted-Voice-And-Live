@@ -307,10 +307,13 @@ export class MediasoupMediaAdapter implements MediaAdapter {
     });
 
     transport.on('icestatechange', (state) => {
-      if (state === 'closed' || state === 'disconnected') {
+      // ICE disconnection is recoverable; keep ownership so a recovered
+      // transport remains usable and session teardown can still close it.
+      if (state === 'closed') {
         session.transports.delete(transport.id);
       }
     });
+    transport.observer.on('close', () => session.transports.delete(transport.id));
 
     return {
       direction: input.direction,

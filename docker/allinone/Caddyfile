@@ -18,8 +18,14 @@
 			reverse_proxy 127.0.0.1:3002
 		}
 
+		handle /assets/* {
+			root * /srv/web
+			file_server
+		}
+
 		handle {
 			root * /srv/web
+			header Cache-Control "no-store, no-cache, must-revalidate"
 			try_files {path} /index.html
 			file_server
 		}
@@ -44,8 +50,14 @@ import /var/lib/baker/runtime/caddy/https.caddy
 			reverse_proxy 127.0.0.1:3001
 		}
 
+		handle /assets/* {
+			root * /srv/admin
+			file_server
+		}
+
 		handle {
 			root * /srv/admin
+			header Cache-Control "no-store, no-cache, must-revalidate"
 			try_files {path} /index.html
 			file_server
 		}

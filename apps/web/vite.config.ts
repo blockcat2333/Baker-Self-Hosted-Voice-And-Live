@@ -1,8 +1,10 @@
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 
 import react from '@vitejs/plugin-react-swc';
 import { defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
+import { rnnoiseNoticesPlugin } from '../../packages/client/build/rnnoise-assets';
 
 const apiHost = process.env.API_HOST ?? '127.0.0.1';
 const apiPort = process.env.API_PORT ?? '3001';
@@ -27,9 +29,21 @@ function parseAllowedHosts(value: string | undefined): string[] | true | undefin
 // (DNS rebinding). For tighter safety, set VITE_ALLOWED_HOSTS to a comma-separated
 // list (or a single `.example.com` wildcard).
 const allowedHosts = parseAllowedHosts(process.env.VITE_ALLOWED_HOSTS ?? process.env.ALLOWED_HOSTS) ?? true;
+const webBuildId = randomUUID();
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  // AudioWorklet has no DedicatedWorkerGlobalScope (`self.location`).
+  // Preserve import.meta.url in the embedded RNNoise runtime using ESM.
+  worker: { format: 'es' },
+  optimizeDeps: { exclude: ['@jitsi/rnnoise-wasm'] },
+  plugins: [react(), tsconfigPaths(), rnnoiseNoticesPlugin(), {
+    name: 'baker-web-build-id',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'web-build.json', source: JSON.stringify({ buildId: webBuildId }) });
+    },
+  }],
+  define: { 'import.meta.env.BAKER_WEB_BUILD_ID': JSON.stringify(webBuildId) },
   resolve: {
     alias: {
       '@baker/client': fileURLToPath(new URL('../../packages/client/src', import.meta.url)),

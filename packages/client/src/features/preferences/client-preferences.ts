@@ -9,6 +9,7 @@ export interface ClientPreferences {
   streamCodecPreference?: string;
   streamQuality?: Partial<StreamQualitySettings>;
   voiceInputVolume?: number;
+  voiceNoiseSuppressionMode?: string;
   voiceParticipantPlaybackVolume?: Record<string, number>;
   voicePlaybackVolume?: number;
 }

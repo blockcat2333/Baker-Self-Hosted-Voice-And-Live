@@ -4659,6 +4659,13 @@ body {
   justify-items: flex-end;
 }
 
+.voice-device-status {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+}
+
 .stream-popup-start-stream-btn {
   justify-content: center;
   white-space: nowrap;
@@ -6820,7 +6827,9 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.settings-control-surface--audio .voice-device-error {
+.settings-control-surface--audio .voice-device-error,
+.settings-control-surface--audio .voice-device-status,
+.settings-control-surface--audio .voice-device-field--noise {
   grid-column: 1 / -1;
 }
 
